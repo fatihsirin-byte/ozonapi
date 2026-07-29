@@ -7,6 +7,7 @@ export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -18,7 +19,7 @@ export function LoginForm() {
     const res = await fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ password: password.trim() }),
     });
 
     setSubmitting(false);
@@ -37,7 +38,24 @@ export function LoginForm() {
       <form onSubmit={handleSubmit}>
         <div className="field">
           <label>Şifre</label>
-          <input type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} />
+          <div style={{ position: "relative" }}>
+            <input
+              type={showPassword ? "text" : "password"}
+              autoFocus
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={{ paddingRight: 60, fontFamily: "monospace", letterSpacing: showPassword ? 0 : 2 }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              className="btn-secondary"
+              style={{ position: "absolute", right: 4, top: 4, bottom: 4, padding: "0 10px", fontSize: 12 }}
+            >
+              {showPassword ? "Gizle" : "Göster"}
+            </button>
+          </div>
         </div>
         {error && <div className="status-banner failed">{error}</div>}
         <button className="btn-primary" type="submit" disabled={submitting} style={{ width: "100%" }}>

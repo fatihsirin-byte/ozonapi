@@ -1,20 +1,20 @@
-// GEÇİCİ fiyat formülü: satış = alış × 1.5. Gerçek formül (kargo+komisyon bazlı) sonradan güncellenecek.
+// GEÇİCİ marj: satış = (alış + tahmini kargo) × 1.5. Marj yüzdesi kullanıcıdan gelince güncellenecek.
 export const TEMP_MARKUP = 1.5;
 
-export function computeSalePrice(costPrice: string | number): string {
-  const cost = Number(costPrice);
-  if (!cost || Number.isNaN(cost)) return "";
-  return (cost * TEMP_MARKUP).toFixed(2);
-}
-
-// Ozon'un resmi Türkiye "Direct Flow" tarife tablosundan (Excel, Ozon BD manager önerisi) en
-// ucuz taşıyıcı satırları — sadece BİLGİLENDİRME amaçlı tahmini kargo maliyeti, henüz satış
-// fiyatı formülüne dahil edilmiyor (gerçek formül kullanıcıdan bekleniyor).
+// ASE & GBS tarifesi (Ozon Direct Flow, Excel'den) — kullanıcı bu taşıyıcıyı esas almamızı istedi.
+// ASE&GBS'nin Economy tier'i yok: 500g altı Extra Small, üstü direkt Express fiyatından gidiyor.
 export function estimateShippingCostUsd(weightGrams: number): number {
   if (weightGrams <= 500) {
-    // TT Economy Extra Small: $0.69 + $0.004/1g
-    return 0.69 + 0.004 * weightGrams;
+    // ASE & GBS Extra Small Express TR: $0.80 + $0.0055/1g
+    return 0.8 + 0.0055 * weightGrams;
   }
-  // TT/SPEGAT Economy: $2.60 + $0.2/100g
-  return 2.6 + 0.2 * (weightGrams / 100);
+  // ASE & GBS Express TR: $3.00 + $0.5/100g
+  return 3.0 + 0.5 * (weightGrams / 100);
+}
+
+export function computeSalePrice(costPrice: string | number, weightGrams?: number | null): string {
+  const cost = Number(costPrice);
+  if (!cost || Number.isNaN(cost)) return "";
+  const shipping = weightGrams ? estimateShippingCostUsd(weightGrams) : 0;
+  return ((cost + shipping) * TEMP_MARKUP).toFixed(2);
 }

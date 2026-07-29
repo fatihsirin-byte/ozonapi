@@ -254,8 +254,8 @@ function VariantCard({
           />
         </div>
         <div className="field">
-          <label>Satış Fiyatı (otomatik, geçici formül: alış × {TEMP_MARKUP})</label>
-          <input type="text" value={computeSalePrice(variant.costPrice) || "-"} disabled />
+          <label>Satış Fiyatı (otomatik, geçici formül: (alış + ASE&GBS kargo) × {TEMP_MARKUP})</label>
+          <input type="text" value={computeSalePrice(variant.costPrice, Number(variant.weightGrams)) || "-"} disabled />
         </div>
       </div>
       <div className="row-3">
@@ -583,7 +583,7 @@ export function ProductWizard() {
             {variants.map((v, i) => (
               <div key={v.key} className="hint">
                 {variantOfferId(i)}
-                {v.label ? ` (${v.label})` : ""}: alış {v.costPrice} USD → satış {computeSalePrice(v.costPrice)} USD ·{" "}
+                {v.label ? ` (${v.label})` : ""}: alış {v.costPrice} USD → satış {computeSalePrice(v.costPrice, Number(v.weightGrams))} USD ·{" "}
                 {v.weightGrams}g · {v.widthCm}×{v.heightCm}×{v.depthCm}cm · {v.images.length} görsel
               </div>
             ))}

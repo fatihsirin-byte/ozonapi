@@ -30,7 +30,7 @@ export interface CreateProductInput {
 }
 
 export async function createProduct(input: CreateProductInput) {
-  const price = computeSalePrice(input.costPrice);
+  const price = computeSalePrice(input.costPrice, input.weightGrams);
 
   await prisma.product.upsert({
     where: { offerId: input.offerId },
@@ -153,7 +153,8 @@ export async function getProduct(offerId: string) {
 }
 
 export async function updateProductPrice(offerId: string, costPrice: string) {
-  const price = computeSalePrice(costPrice);
+  const existing = await prisma.product.findUnique({ where: { offerId } });
+  const price = computeSalePrice(costPrice, existing?.weightGrams);
 
   const { result } = await updatePrices([{ offerId, price }]);
   const entry = result.find((r) => r.offer_id === offerId);

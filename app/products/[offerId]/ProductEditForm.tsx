@@ -152,14 +152,14 @@ export function ProductEditForm({ product }: { product: ProductData }) {
               <input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} />
             </div>
             <div className="field">
-              <label>Satış Fiyatı (otomatik, geçici formül: alış × {TEMP_MARKUP})</label>
-              <input type="text" value={computeSalePrice(costPrice) || product.price} disabled />
+              <label>Satış Fiyatı (otomatik, geçici formül: (alış + kargo) × {TEMP_MARKUP})</label>
+              <input type="text" value={computeSalePrice(costPrice, product.weightGrams) || product.price} disabled />
             </div>
           </div>
           {product.weightGrams && (
             <div className="hint" style={{ marginBottom: 12 }}>
-              Tahmini kargo maliyeti (Ozon Direct Flow tarifesi, {product.weightGrams}g için en ucuz taşıyıcı): ~$
-              {estimateShippingCostUsd(product.weightGrams).toFixed(2)} — henüz satış fiyatına dahil edilmiyor, sadece bilgi amaçlı.
+              Kargo maliyeti ASE&GBS tarifesine göre hesaplanıp fiyata dahil edildi ({product.weightGrams}g için ~$
+              {estimateShippingCostUsd(product.weightGrams).toFixed(2)}).
             </div>
           )}
           <button className="btn-primary" disabled={saving || !costPrice} onClick={savePrice}>

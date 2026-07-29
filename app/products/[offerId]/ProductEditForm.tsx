@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ImageDropzone } from "../new/ImageDropzone";
-import { TEMP_MARKUP, computeSalePrice, estimateShippingCostUsd } from "@/pricing/formula";
+import { computeSalePrice, estimateShippingCostUsd } from "@/pricing/formula";
 
 interface ProductData {
   offerId: string;
@@ -152,7 +152,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
               <input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} />
             </div>
             <div className="field">
-              <label>Satış Fiyatı (otomatik, geçici formül: (alış + kargo) × {TEMP_MARKUP})</label>
+              <label>Satış Fiyatı (otomatik hesaplanır: alış + %40 marj + kargo + komisyon/kesintiler, gerekirse gümrük yuvarlaması)</label>
               <input type="text" value={computeSalePrice(costPrice, product.weightGrams) || product.price} disabled />
             </div>
           </div>

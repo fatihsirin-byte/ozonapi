@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ImageDropzone } from "./ImageDropzone";
-import { TEMP_MARKUP, computeSalePrice } from "@/pricing/formula";
+import { computeSalePrice } from "@/pricing/formula";
 
 interface CategoryOption {
   descriptionCategoryId: number;
@@ -254,7 +254,7 @@ function VariantCard({
           />
         </div>
         <div className="field">
-          <label>Satış Fiyatı (otomatik, geçici formül: (alış + ASE&GBS kargo) × {TEMP_MARKUP})</label>
+          <label>Satış Fiyatı (otomatik hesaplanır: alış + %40 marj + kargo + komisyon/kesintiler, gerekirse gümrük yuvarlaması)</label>
           <input type="text" value={computeSalePrice(variant.costPrice, Number(variant.weightGrams)) || "-"} disabled />
         </div>
       </div>

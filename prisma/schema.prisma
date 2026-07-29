@@ -21,6 +21,7 @@ model Product {
   typeId                Int?
   images                Json?
   status                String    @default("draft") // draft | pending | imported | failed
+  importTaskId          BigInt?
   lastError             String?
   lastSyncedAt          DateTime?
   createdAt             DateTime  @default(now())

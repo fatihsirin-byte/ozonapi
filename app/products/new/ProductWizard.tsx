@@ -25,6 +25,9 @@ interface AttributeAnswer {
 
 const STEPS = ["Temel Bilgiler", "Kategori", "Ürün Özellikleri", "Boyut & Ağırlık", "Özet"];
 
+// Ozon'un varyant gruplama alanı — kullanıcıya göstermeden SKU ile otomatik dolduruyoruz.
+const MODEL_NAME_ATTRIBUTE_ID = 9048;
+
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -71,7 +74,7 @@ function CategoryPicker({
       <div className="field">
         <label>Kategori</label>
         <div className="selected-pill">
-          {selected.path}
+          <strong>{selected.typeName}</strong>&nbsp;({selected.path})
           <button className="btn-secondary" onClick={() => onSelect(null)} type="button">
             Değiştir
           </button>
@@ -99,7 +102,10 @@ function CategoryPicker({
               className="search-result-item"
               onClick={() => onSelect(r)}
             >
-              {r.path}
+              <strong>{r.typeName}</strong>
+              <div className="hint" style={{ margin: 0 }}>
+                {r.path}
+              </div>
             </div>
           ))}
         </div>
@@ -183,9 +189,9 @@ export function ProductWizard() {
   const [attributeAnswers, setAttributeAnswers] = useState<Record<number, AttributeAnswer>>({});
 
   const [weightGrams, setWeightGrams] = useState("100");
-  const [widthMm, setWidthMm] = useState("100");
-  const [heightMm, setHeightMm] = useState("100");
-  const [depthMm, setDepthMm] = useState("100");
+  const [widthCm, setWidthCm] = useState("10");
+  const [heightCm, setHeightCm] = useState("10");
+  const [depthCm, setDepthCm] = useState("10");
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -202,8 +208,14 @@ export function ProductWizard() {
     setAttributesLoading(true);
     fetch(`/api/categories/${category.descriptionCategoryId}/attributes?typeId=${category.typeId}`)
       .then((r) => r.json())
-      .then((data) => setRequiredAttributes(data.attributes ?? []))
+      .then((data: { attributes: RequiredAttribute[] }) => {
+        setRequiredAttributes(data.attributes ?? []);
+        if (data.attributes?.some((a) => a.id === MODEL_NAME_ATTRIBUTE_ID)) {
+          setAttributeAnswers((prev) => ({ ...prev, [MODEL_NAME_ATTRIBUTE_ID]: { value: offerId } }));
+        }
+      })
       .finally(() => setAttributesLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category]);
 
   useEffect(() => {
@@ -225,9 +237,9 @@ export function ProductWizard() {
     if (step === 0) return offerId.trim() && name.trim() && price.trim() && images.length > 0;
     if (step === 1) return !!category;
     if (step === 2) return requiredAttributes.every((attr) => Boolean(attributeAnswers[attr.id]?.value || attributeAnswers[attr.id]?.dictionaryValueId));
-    if (step === 3) return weightGrams && widthMm && heightMm && depthMm;
+    if (step === 3) return weightGrams && widthCm && heightCm && depthCm;
     return true;
-  }, [step, offerId, name, price, images, category, requiredAttributes, attributeAnswers, weightGrams, widthMm, heightMm, depthMm]);
+  }, [step, offerId, name, price, images, category, requiredAttributes, attributeAnswers, weightGrams, widthCm, heightCm, depthCm]);
 
   function startPolling() {
     pollRef.current = setInterval(async () => {
@@ -260,9 +272,9 @@ export function ProductWizard() {
           descriptionCategoryId: category.descriptionCategoryId,
           typeId: category.typeId,
           weightGrams: Number(weightGrams),
-          widthMm: Number(widthMm),
-          heightMm: Number(heightMm),
-          depthMm: Number(depthMm),
+          widthCm: Number(widthCm),
+          heightCm: Number(heightCm),
+          depthCm: Number(depthCm),
           attributes: requiredAttributes.map((attr) => ({
             id: attr.id,
             value: attributeAnswers[attr.id]?.value,
@@ -351,7 +363,9 @@ export function ProductWizard() {
             <div className="hint">Bu kategori için zorunlu ek özellik yok.</div>
           )}
           {category &&
-            requiredAttributes.map((attr) =>
+            requiredAttributes
+              .filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID)
+              .map((attr) =>
               attr.dictionary_id > 0 ? (
                 <AttributeValuePicker
                   key={attr.id}
@@ -383,16 +397,16 @@ export function ProductWizard() {
             <input type="number" value={weightGrams} onChange={(e) => setWeightGrams(e.target.value)} />
           </div>
           <div className="field">
-            <label>Genişlik (mm)</label>
-            <input type="number" value={widthMm} onChange={(e) => setWidthMm(e.target.value)} />
+            <label>Genişlik (cm)</label>
+            <input type="number" value={widthCm} onChange={(e) => setWidthCm(e.target.value)} />
           </div>
           <div className="field">
-            <label>Yükseklik (mm)</label>
-            <input type="number" value={heightMm} onChange={(e) => setHeightMm(e.target.value)} />
+            <label>Yükseklik (cm)</label>
+            <input type="number" value={heightCm} onChange={(e) => setHeightCm(e.target.value)} />
           </div>
           <div className="field">
-            <label>Derinlik (mm)</label>
-            <input type="number" value={depthMm} onChange={(e) => setDepthMm(e.target.value)} />
+            <label>Derinlik (cm)</label>
+            <input type="number" value={depthCm} onChange={(e) => setDepthCm(e.target.value)} />
           </div>
         </div>
       )}
@@ -417,7 +431,7 @@ export function ProductWizard() {
           </div>
           <div className="field">
             <label>Boyut/Ağırlık</label>
-            {weightGrams}g · {widthMm}×{heightMm}×{depthMm}mm
+            {weightGrams}g · {widthCm}×{heightCm}×{depthCm}cm
           </div>
         </div>
       )}

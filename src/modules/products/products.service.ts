@@ -1,6 +1,5 @@
 import { prisma } from "../../db/prisma";
 import { importProducts, getImportStatus } from "../../ozon/products";
-import { setImportTask, getImportTask, clearImportTask } from "./import-tasks";
 
 // Ozon hesabının sözleşme para birimi USD — RUB gönderilirse ürün sessizce "pending" kalıp
 // sonunda currency_differs_from_contract hatasıyla düşüyor (Faz 1'de keşfedildi).
@@ -20,9 +19,9 @@ export interface CreateProductInput {
   descriptionCategoryId: number;
   typeId: number;
   weightGrams: number;
-  widthMm: number;
-  heightMm: number;
-  depthMm: number;
+  widthCm: number;
+  heightCm: number;
+  depthCm: number;
   attributes: ProductAttributeInput[];
 }
 
@@ -65,10 +64,10 @@ export async function createProduct(input: CreateProductInput) {
       type_id: input.typeId,
       weight: input.weightGrams,
       weight_unit: "g",
-      width: input.widthMm,
-      height: input.heightMm,
-      depth: input.depthMm,
-      dimension_unit: "mm",
+      width: input.widthCm,
+      height: input.heightCm,
+      depth: input.depthCm,
+      dimension_unit: "cm",
       vat: "0",
       images: input.images,
       attributes: input.attributes.map((attr) => ({
@@ -83,30 +82,33 @@ export async function createProduct(input: CreateProductInput) {
     },
   ]);
 
-  setImportTask(input.offerId, result.task_id);
+  // task_id'yi DB'ye kalıcı yazıyoruz — sadece bellekte tutsaydık deploy/restart'ta kaybolurdu.
+  await prisma.product.update({
+    where: { offerId: input.offerId },
+    data: { importTaskId: result.task_id },
+  });
+
   return { taskId: result.task_id };
 }
 
 export type ProductImportStatus = "pending" | "imported" | "failed";
 
 export async function checkImportStatus(offerId: string) {
-  const taskId = getImportTask(offerId);
-  if (!taskId) {
-    const existing = await prisma.product.findUnique({ where: { offerId } });
-    if (!existing) {
-      throw new Error(`Unknown offerId: ${offerId}`);
-    }
+  const existing = await prisma.product.findUnique({ where: { offerId } });
+  if (!existing) {
+    throw new Error(`Unknown offerId: ${offerId}`);
+  }
+
+  if (!existing.importTaskId) {
     return { status: existing.status as ProductImportStatus, ozonProductId: existing.ozonProductId, error: existing.lastError };
   }
 
-  const { result } = await getImportStatus(taskId);
+  const { result } = await getImportStatus(Number(existing.importTaskId));
   const item = result.items.find((i) => i.offer_id === offerId) ?? result.items[0];
 
   if (item.status === "pending") {
     return { status: "pending" as const, ozonProductId: null, error: null };
   }
-
-  clearImportTask(offerId);
 
   const failed = item.errors.length > 0;
   const status: ProductImportStatus = failed ? "failed" : "imported";
@@ -118,6 +120,7 @@ export async function checkImportStatus(offerId: string) {
       status,
       lastError: errorMessage,
       ozonProductId: failed ? null : String(item.product_id),
+      importTaskId: null,
       lastSyncedAt: new Date(),
     },
   });

@@ -1,14 +1,16 @@
 // Fiyat formülü (2026-07-29, kullanıcıdan alınan gerçek parametreler).
 
-// ASE & GBS tarifesi (Ozon Direct Flow, Excel'den). Economy tier'i yok: 500g altı Extra
-// Small, üstü direkt Express fiyatından gidiyor.
+// ASE & GBS tarifesi — ASE'nin kendi PDF tarife tablolarından (gram bazlı lookup) birebir
+// türetilmiş doğrusal formüller. Economy tier'i yok: 500g altı Extra Small, üstü Express DG
+// (batarya/sıvıya da izin veren hat — ürün tipine bakılmaksızın her zaman kabul edilir, standart
+// Express'ten biraz daha pahalı ama garanti çalışır).
 export function estimateShippingCostUsd(weightGrams: number): number {
   if (weightGrams <= 500) {
-    // ASE & GBS Extra Small Express TR: $0.80 + $0.0055/1g
+    // ASE & GBS Extra Small Express TR (PDF ile doğrulandı): $0.80 + $0.0055/1g
     return 0.8 + 0.0055 * weightGrams;
   }
-  // ASE & GBS Express TR: $3.00 + $0.5/100g
-  return 3.0 + 0.5 * (weightGrams / 100);
+  // ASE & GBS Express DG TR (PDF ile doğrulandı, batarya/sıvı dahil): $3.00 + $0.7/100g, maks 25kg
+  return 3.0 + 0.7 * (weightGrams / 100);
 }
 
 const MARGIN_RATE = 0.4; // alış fiyatı üzerine %40 marj

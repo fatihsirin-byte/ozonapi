@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
 
   await writeFile(path.join(UPLOAD_DIR, filename), outputBuffer);
 
-  const url = new URL(`/uploads/${filename}`, request.nextUrl.origin).toString();
+  const baseUrl = process.env.PUBLIC_BASE_URL ?? request.nextUrl.origin;
+  const url = new URL(`/uploads/${filename}`, baseUrl).toString();
   return NextResponse.json({ url });
 }

@@ -4,7 +4,9 @@ import { OzonApiError } from "@/ozon/client";
 
 export async function GET() {
   const products = await listAllProducts();
-  return NextResponse.json({ products });
+  // importTaskId BigInt — JSON.stringify edilemiyor, string'e çevirip dönüyoruz.
+  const serialized = products.map((p) => ({ ...p, importTaskId: p.importTaskId?.toString() ?? null }));
+  return NextResponse.json({ products: serialized });
 }
 
 export async function POST(request: NextRequest) {

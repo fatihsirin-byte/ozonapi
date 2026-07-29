@@ -6,7 +6,13 @@ const PUBLIC_PATHS = ["/login", "/api/auth/login"];
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (PUBLIC_PATHS.includes(pathname) || pathname.startsWith("/_next") || pathname.startsWith("/favicon")) {
+  // /uploads herkese açık olmalı — Ozon'un görseli çekebilmesi için login gerektirmiyoruz.
+  if (
+    PUBLIC_PATHS.includes(pathname) ||
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/favicon") ||
+    pathname.startsWith("/uploads/")
+  ) {
     return NextResponse.next();
   }
 

@@ -8,3 +8,5 @@ next-env.d.ts
 *.tsbuildinfo
 .claude/
 *.xlsx
+public/uploads/*
+!public/uploads/.gitkeep

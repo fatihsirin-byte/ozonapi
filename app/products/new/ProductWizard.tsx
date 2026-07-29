@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ImageDropzone } from "./ImageDropzone";
 
 interface CategoryOption {
   descriptionCategoryId: number;
@@ -23,10 +24,50 @@ interface AttributeAnswer {
   displayValue?: string;
 }
 
-const STEPS = ["Temel Bilgiler", "Kategori", "Ürün Özellikleri", "Boyut & Ağırlık", "Özet"];
+interface Variant {
+  key: string;
+  label: string;
+  costPrice: string;
+  weightGrams: string;
+  widthCm: string;
+  heightCm: string;
+  depthCm: string;
+  images: string[];
+}
+
+interface VariantResult {
+  offerId: string;
+  status: "pending" | "imported" | "failed";
+  ozonProductId: string | null;
+  error: string | null;
+}
+
+const STEPS = ["Temel Bilgiler", "Kategori", "Ürün Özellikleri", "Varyantlar", "Özet"];
 
 // Ozon'un varyant gruplama alanı — kullanıcıya göstermeden SKU ile otomatik dolduruyoruz.
 const MODEL_NAME_ATTRIBUTE_ID = 9048;
+
+// GEÇİCİ fiyat formülü: satış = alış × 1.5. Gerçek formül (kargo+komisyon bazlı) sonradan güncellenecek.
+const TEMP_MARKUP = 1.5;
+
+function computeSalePrice(costPrice: string): string {
+  const cost = Number(costPrice);
+  if (!cost || Number.isNaN(cost)) return "";
+  return (cost * TEMP_MARKUP).toFixed(2);
+}
+
+function emptyVariant(): Variant {
+  return {
+    key: crypto.randomUUID(),
+    label: "",
+    costPrice: "",
+    weightGrams: "100",
+    widthCm: "10",
+    heightCm: "10",
+    depthCm: "10",
+    images: [],
+  };
+}
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -173,14 +214,95 @@ function AttributeValuePicker({
   );
 }
 
+function VariantCard({
+  variant,
+  index,
+  removable,
+  onChange,
+  onRemove,
+}: {
+  variant: Variant;
+  index: number;
+  removable: boolean;
+  onChange(variant: Variant): void;
+  onRemove(): void;
+}) {
+  return (
+    <div className="card" style={{ marginBottom: 16, background: "#0f1216" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <strong>Varyant {index + 1}</strong>
+        {removable && (
+          <button type="button" className="btn-secondary" onClick={onRemove}>
+            Kaldır
+          </button>
+        )}
+      </div>
+      <div className="field">
+        <label>Varyant etiketi (opsiyonel — örn. "Kırmızı - M")</label>
+        <input type="text" value={variant.label} onChange={(e) => onChange({ ...variant, label: e.target.value })} />
+      </div>
+      <div className="row">
+        <div className="field">
+          <label>Alış Fiyatı (USD)</label>
+          <input
+            type="number"
+            value={variant.costPrice}
+            onChange={(e) => onChange({ ...variant, costPrice: e.target.value })}
+          />
+        </div>
+        <div className="field">
+          <label>Satış Fiyatı (otomatik, geçici formül: alış × {TEMP_MARKUP})</label>
+          <input type="text" value={computeSalePrice(variant.costPrice) || "-"} disabled />
+        </div>
+      </div>
+      <div className="row-3">
+        <div className="field">
+          <label>Ağırlık (gram)</label>
+          <input
+            type="number"
+            value={variant.weightGrams}
+            onChange={(e) => onChange({ ...variant, weightGrams: e.target.value })}
+          />
+        </div>
+        <div className="field">
+          <label>Genişlik (cm)</label>
+          <input
+            type="number"
+            value={variant.widthCm}
+            onChange={(e) => onChange({ ...variant, widthCm: e.target.value })}
+          />
+        </div>
+        <div className="field">
+          <label>Yükseklik (cm)</label>
+          <input
+            type="number"
+            value={variant.heightCm}
+            onChange={(e) => onChange({ ...variant, heightCm: e.target.value })}
+          />
+        </div>
+      </div>
+      <div className="field">
+        <label>Derinlik (cm)</label>
+        <input
+          type="number"
+          value={variant.depthCm}
+          onChange={(e) => onChange({ ...variant, depthCm: e.target.value })}
+        />
+      </div>
+      <div className="field">
+        <label>Görseller</label>
+        <ImageDropzone images={variant.images} onChange={(images) => onChange({ ...variant, images })} />
+      </div>
+    </div>
+  );
+}
+
 export function ProductWizard() {
   const router = useRouter();
   const [step, setStep] = useState(0);
 
   const [offerId, setOfferId] = useState("");
   const [name, setName] = useState("");
-  const [price, setPrice] = useState("");
-  const [imagesText, setImagesText] = useState("");
 
   const [category, setCategory] = useState<CategoryOption | null>(null);
 
@@ -188,17 +310,10 @@ export function ProductWizard() {
   const [attributesLoading, setAttributesLoading] = useState(false);
   const [attributeAnswers, setAttributeAnswers] = useState<Record<number, AttributeAnswer>>({});
 
-  const [weightGrams, setWeightGrams] = useState("100");
-  const [widthCm, setWidthCm] = useState("10");
-  const [heightCm, setHeightCm] = useState("10");
-  const [depthCm, setDepthCm] = useState("10");
+  const [variants, setVariants] = useState<Variant[]>([emptyVariant()]);
 
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [importStatus, setImportStatus] = useState<"idle" | "pending" | "imported" | "failed">("idle");
-  const [importError, setImportError] = useState<string | null>(null);
-  const [ozonProductId, setOzonProductId] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [results, setResults] = useState<VariantResult[] | null>(null);
 
   useEffect(() => {
     if (!category) {
@@ -218,38 +333,35 @@ export function ProductWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category]);
 
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, []);
-
-  const images = useMemo(
-    () =>
-      imagesText
-        .split(/\n|,/)
-        .map((s) => s.trim())
-        .filter(Boolean),
-    [imagesText],
-  );
-
   const canGoNext = useMemo(() => {
-    if (step === 0) return offerId.trim() && name.trim() && price.trim() && images.length > 0;
+    if (step === 0) return Boolean(offerId.trim() && name.trim());
     if (step === 1) return !!category;
-    if (step === 2) return requiredAttributes.every((attr) => Boolean(attributeAnswers[attr.id]?.value || attributeAnswers[attr.id]?.dictionaryValueId));
-    if (step === 3) return weightGrams && widthCm && heightCm && depthCm;
+    if (step === 2)
+      return requiredAttributes.every((attr) => Boolean(attributeAnswers[attr.id]?.value || attributeAnswers[attr.id]?.dictionaryValueId));
+    if (step === 3)
+      return variants.every((v) => v.costPrice && v.weightGrams && v.widthCm && v.heightCm && v.depthCm && v.images.length > 0);
     return true;
-  }, [step, offerId, name, price, images, category, requiredAttributes, attributeAnswers, weightGrams, widthCm, heightCm, depthCm]);
+  }, [step, offerId, name, category, requiredAttributes, attributeAnswers, variants]);
 
-  function startPolling() {
-    pollRef.current = setInterval(async () => {
-      const res = await fetch(`/api/products/${offerId}/status`);
+  function updateVariant(index: number, next: Variant) {
+    setVariants((prev) => prev.map((v, i) => (i === index ? next : v)));
+  }
+
+  function variantOfferId(index: number): string {
+    return variants.length === 1 ? offerId : `${offerId}-${index + 1}`;
+  }
+
+  async function pollVariant(offerIdForVariant: string, index: number) {
+    const interval = setInterval(async () => {
+      const res = await fetch(`/api/products/${offerIdForVariant}/status`);
       const data = await res.json();
       if (data.status !== "pending") {
-        setImportStatus(data.status);
-        setImportError(data.error);
-        setOzonProductId(data.ozonProductId);
-        if (pollRef.current) clearInterval(pollRef.current);
+        clearInterval(interval);
+        setResults((prev) =>
+          prev
+            ? prev.map((r, i) => (i === index ? { ...r, status: data.status, ozonProductId: data.ozonProductId, error: data.error } : r))
+            : prev,
+        );
       }
     }, 3000);
   }
@@ -257,65 +369,74 @@ export function ProductWizard() {
   async function handleSubmit() {
     if (!category) return;
     setSubmitting(true);
-    setSubmitError(null);
-    setImportStatus("pending");
 
-    try {
-      const res = await fetch("/api/products", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          offerId,
-          name,
-          price,
-          images,
-          descriptionCategoryId: category.descriptionCategoryId,
-          typeId: category.typeId,
-          weightGrams: Number(weightGrams),
-          widthCm: Number(widthCm),
-          heightCm: Number(heightCm),
-          depthCm: Number(depthCm),
-          attributes: requiredAttributes.map((attr) => ({
-            id: attr.id,
-            value: attributeAnswers[attr.id]?.value,
-            dictionaryValueId: attributeAnswers[attr.id]?.dictionaryValueId,
-          })),
-        }),
-      });
+    const initialResults: VariantResult[] = variants.map((_, i) => ({
+      offerId: variantOfferId(i),
+      status: "pending",
+      ozonProductId: null,
+      error: null,
+    }));
+    setResults(initialResults);
 
-      if (!res.ok) {
-        const data = await res.json();
-        setSubmitError(data.error ?? "Bilinmeyen hata");
-        setImportStatus("failed");
-        return;
+    for (let i = 0; i < variants.length; i += 1) {
+      const variant = variants[i];
+      const variantName = variant.label ? `${name} - ${variant.label}` : name;
+      try {
+        const res = await fetch("/api/products", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            offerId: variantOfferId(i),
+            name: variantName,
+            price: computeSalePrice(variant.costPrice),
+            images: variant.images,
+            descriptionCategoryId: category.descriptionCategoryId,
+            typeId: category.typeId,
+            weightGrams: Number(variant.weightGrams),
+            widthCm: Number(variant.widthCm),
+            heightCm: Number(variant.heightCm),
+            depthCm: Number(variant.depthCm),
+            attributes: requiredAttributes.map((attr) => ({
+              id: attr.id,
+              value: attr.id === MODEL_NAME_ATTRIBUTE_ID ? offerId : attributeAnswers[attr.id]?.value,
+              dictionaryValueId: attributeAnswers[attr.id]?.dictionaryValueId,
+            })),
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          setResults((prev) =>
+            prev ? prev.map((r, idx) => (idx === i ? { ...r, status: "failed", error: data.error ?? "Bilinmeyen hata" } : r)) : prev,
+          );
+          continue;
+        }
+
+        pollVariant(variantOfferId(i), i);
+      } catch (err) {
+        setResults((prev) =>
+          prev
+            ? prev.map((r, idx) => (idx === i ? { ...r, status: "failed", error: err instanceof Error ? err.message : "Bilinmeyen hata" } : r))
+            : prev,
+        );
       }
-
-      startPolling();
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Bilinmeyen hata");
-      setImportStatus("failed");
-    } finally {
-      setSubmitting(false);
     }
+
+    setSubmitting(false);
   }
 
-  if (importStatus !== "idle") {
+  if (results) {
     return (
       <div className="card">
-        {importStatus === "pending" && (
-          <div className="status-banner pending">Ozon'a gönderiliyor, işleniyor... (birkaç dakika sürebilir)</div>
-        )}
-        {importStatus === "imported" && (
-          <div className="status-banner imported">
-            Ürün başarıyla oluşturuldu! Ozon product_id: {ozonProductId}
+        {results.map((r) => (
+          <div key={r.offerId} className={`status-banner ${r.status}`}>
+            <strong>{r.offerId}</strong> —{" "}
+            {r.status === "pending" && "Ozon'a gönderiliyor, işleniyor... (birkaç dakika sürebilir)"}
+            {r.status === "imported" && `Başarıyla oluşturuldu! product_id: ${r.ozonProductId}`}
+            {r.status === "failed" && `Hata: ${r.error ?? "Bilinmeyen hata"}`}
           </div>
-        )}
-        {importStatus === "failed" && (
-          <div className="status-banner failed">
-            Ürün oluşturulamadı: {importError ?? submitError ?? "Bilinmeyen hata"}
-          </div>
-        )}
-        {importStatus !== "pending" && (
+        ))}
+        {results.every((r) => r.status !== "pending") && (
           <button className="btn-primary" onClick={() => router.push("/products")}>
             Ürün listesine dön
           </button>
@@ -335,21 +456,12 @@ export function ProductWizard() {
       {step === 0 && (
         <>
           <div className="field">
-            <label>SKU (offer_id)</label>
+            <label>SKU (offer_id) — birden fazla varyant varsa bu ortak ön ek olacak</label>
             <input type="text" value={offerId} onChange={(e) => setOfferId(e.target.value)} placeholder="örn. URUN-001" />
           </div>
           <div className="field">
-            <label>Ürün adı</label>
+            <label>Ürün adı (genel)</label>
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Fiyat (USD)</label>
-            <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Görsel URL'leri (her satıra bir tane)</label>
-            <textarea rows={3} value={imagesText} onChange={(e) => setImagesText(e.target.value)} />
-            <div className="hint">Şimdilik sadece herkese açık bir görsel linki gerekiyor.</div>
           </div>
         </>
       )}
@@ -366,72 +478,69 @@ export function ProductWizard() {
             requiredAttributes
               .filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID)
               .map((attr) =>
-              attr.dictionary_id > 0 ? (
-                <AttributeValuePicker
-                  key={attr.id}
-                  attribute={attr}
-                  category={category}
-                  answer={attributeAnswers[attr.id]}
-                  onChange={(answer) => setAttributeAnswers((prev) => ({ ...prev, [attr.id]: answer }))}
-                />
-              ) : (
-                <div className="field" key={attr.id}>
-                  <label>{attr.name}</label>
-                  <input
-                    type="text"
-                    value={attributeAnswers[attr.id]?.value ?? ""}
-                    onChange={(e) =>
-                      setAttributeAnswers((prev) => ({ ...prev, [attr.id]: { value: e.target.value } }))
-                    }
+                attr.dictionary_id > 0 ? (
+                  <AttributeValuePicker
+                    key={attr.id}
+                    attribute={attr}
+                    category={category}
+                    answer={attributeAnswers[attr.id]}
+                    onChange={(answer) => setAttributeAnswers((prev) => ({ ...prev, [attr.id]: answer }))}
                   />
-                </div>
-              ),
-            )}
+                ) : (
+                  <div className="field" key={attr.id}>
+                    <label>{attr.name}</label>
+                    <input
+                      type="text"
+                      value={attributeAnswers[attr.id]?.value ?? ""}
+                      onChange={(e) => setAttributeAnswers((prev) => ({ ...prev, [attr.id]: { value: e.target.value } }))}
+                    />
+                  </div>
+                ),
+              )}
         </>
       )}
 
       {step === 3 && (
-        <div className="row">
-          <div className="field">
-            <label>Ağırlık (gram)</label>
-            <input type="number" value={weightGrams} onChange={(e) => setWeightGrams(e.target.value)} />
+        <>
+          <div className="hint" style={{ marginBottom: 16 }}>
+            Ürünün renk/ağırlık gibi farklı seçenekleri varsa her biri için bir varyant ekleyin — hepsi Ozon'da aynı ürün
+            kartında gruplanır.
           </div>
-          <div className="field">
-            <label>Genişlik (cm)</label>
-            <input type="number" value={widthCm} onChange={(e) => setWidthCm(e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Yükseklik (cm)</label>
-            <input type="number" value={heightCm} onChange={(e) => setHeightCm(e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Derinlik (cm)</label>
-            <input type="number" value={depthCm} onChange={(e) => setDepthCm(e.target.value)} />
-          </div>
-        </div>
+          {variants.map((variant, i) => (
+            <VariantCard
+              key={variant.key}
+              variant={variant}
+              index={i}
+              removable={variants.length > 1}
+              onChange={(next) => updateVariant(i, next)}
+              onRemove={() => setVariants((prev) => prev.filter((_, idx) => idx !== i))}
+            />
+          ))}
+          <button type="button" className="btn-secondary" onClick={() => setVariants((prev) => [...prev, emptyVariant()])}>
+            + Varyant Ekle
+          </button>
+        </>
       )}
 
       {step === 4 && (
         <div>
           <div className="field">
-            <label>SKU</label>
-            {offerId}
-          </div>
-          <div className="field">
-            <label>Ad</label>
-            {name}
-          </div>
-          <div className="field">
-            <label>Fiyat</label>
-            {price} USD
+            <label>SKU / Ürün adı</label>
+            {offerId} — {name}
           </div>
           <div className="field">
             <label>Kategori</label>
             {category?.path}
           </div>
           <div className="field">
-            <label>Boyut/Ağırlık</label>
-            {weightGrams}g · {widthCm}×{heightCm}×{depthCm}cm
+            <label>Varyantlar ({variants.length})</label>
+            {variants.map((v, i) => (
+              <div key={v.key} className="hint">
+                {variantOfferId(i)}
+                {v.label ? ` (${v.label})` : ""}: alış {v.costPrice} USD → satış {computeSalePrice(v.costPrice)} USD ·{" "}
+                {v.weightGrams}g · {v.widthCm}×{v.heightCm}×{v.depthCm}cm · {v.images.length} görsel
+              </div>
+            ))}
           </div>
         </div>
       )}

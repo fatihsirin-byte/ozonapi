@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ImageDropzone } from "../new/ImageDropzone";
-import { TEMP_MARKUP, computeSalePrice } from "@/pricing/formula";
+import { TEMP_MARKUP, computeSalePrice, estimateShippingCostUsd } from "@/pricing/formula";
 
 interface ProductData {
   offerId: string;
@@ -15,6 +15,9 @@ interface ProductData {
   lastError: string | null;
   images: unknown;
   weightGrams: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+  depthCm: number | null;
 }
 
 const TABS = ["Genel", "Fiyat", "Görseller"] as const;
@@ -122,11 +125,23 @@ export function ProductEditForm({ product }: { product: ProductData }) {
       </div>
 
       {tab === "Genel" && (
-        <div className="field">
-          <label>Ürün adı</label>
-          {product.name}
+        <>
+          <div className="field">
+            <label>Ürün adı</label>
+            {product.name}
+          </div>
+          <div className="field">
+            <label>Ağırlık / Koli Ölçüleri</label>
+            {product.weightGrams ? (
+              <>
+                {product.weightGrams}g · {product.widthCm}×{product.heightCm}×{product.depthCm}cm
+              </>
+            ) : (
+              <span className="hint">Bilinmiyor</span>
+            )}
+          </div>
           <div className="hint">Kategori/özellik bilgileri şu an düzenlenemiyor — bunlar sadece ürün oluşturulurken belirlenir.</div>
-        </div>
+        </>
       )}
 
       {tab === "Fiyat" && (
@@ -141,6 +156,12 @@ export function ProductEditForm({ product }: { product: ProductData }) {
               <input type="text" value={computeSalePrice(costPrice) || product.price} disabled />
             </div>
           </div>
+          {product.weightGrams && (
+            <div className="hint" style={{ marginBottom: 12 }}>
+              Tahmini kargo maliyeti (Ozon Direct Flow tarifesi, {product.weightGrams}g için en ucuz taşıyıcı): ~$
+              {estimateShippingCostUsd(product.weightGrams).toFixed(2)} — henüz satış fiyatına dahil edilmiyor, sadece bilgi amaçlı.
+            </div>
+          )}
           <button className="btn-primary" disabled={saving || !costPrice} onClick={savePrice}>
             Fiyatı Kaydet
           </button>

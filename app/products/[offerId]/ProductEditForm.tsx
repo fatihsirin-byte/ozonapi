@@ -17,7 +17,11 @@ interface ProductData {
   weightGrams: number | null;
 }
 
+const TABS = ["Genel", "Fiyat", "Görseller"] as const;
+type Tab = (typeof TABS)[number];
+
 export function ProductEditForm({ product }: { product: ProductData }) {
+  const [tab, setTab] = useState<Tab>("Genel");
   const [costPrice, setCostPrice] = useState(product.costPrice ?? "");
   const [images, setImages] = useState<string[]>(Array.isArray(product.images) ? (product.images as string[]) : []);
   const [saving, setSaving] = useState(false);
@@ -103,27 +107,56 @@ export function ProductEditForm({ product }: { product: ProductData }) {
         {lastError && <div className="hint" style={{ color: "var(--danger)" }}>{lastError}</div>}
       </div>
 
-      <div className="row">
-        <div className="field">
-          <label>Alış Fiyatı (USD)</label>
-          <input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Satış Fiyatı (otomatik, geçici formül: alış × {TEMP_MARKUP})</label>
-          <input type="text" value={computeSalePrice(costPrice) || product.price} disabled />
-        </div>
+      <div style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--border)", marginBottom: 20 }}>
+        {TABS.map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={tab === t ? "btn-primary" : "btn-secondary"}
+            style={{ borderRadius: "8px 8px 0 0", borderBottom: "none" }}
+          >
+            {t}
+          </button>
+        ))}
       </div>
-      <button className="btn-primary" disabled={saving || !costPrice} onClick={savePrice}>
-        Fiyatı Kaydet
-      </button>
 
-      <div className="field" style={{ marginTop: 24 }}>
-        <label>Görseller</label>
-        <ImageDropzone images={images} onChange={setImages} />
-      </div>
-      <button className="btn-primary" disabled={saving || images.length === 0} onClick={saveImages}>
-        Görselleri Kaydet
-      </button>
+      {tab === "Genel" && (
+        <div className="field">
+          <label>Ürün adı</label>
+          {product.name}
+          <div className="hint">Kategori/özellik bilgileri şu an düzenlenemiyor — bunlar sadece ürün oluşturulurken belirlenir.</div>
+        </div>
+      )}
+
+      {tab === "Fiyat" && (
+        <>
+          <div className="row">
+            <div className="field">
+              <label>Alış Fiyatı (USD)</label>
+              <input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Satış Fiyatı (otomatik, geçici formül: alış × {TEMP_MARKUP})</label>
+              <input type="text" value={computeSalePrice(costPrice) || product.price} disabled />
+            </div>
+          </div>
+          <button className="btn-primary" disabled={saving || !costPrice} onClick={savePrice}>
+            Fiyatı Kaydet
+          </button>
+        </>
+      )}
+
+      {tab === "Görseller" && (
+        <>
+          <div className="field">
+            <ImageDropzone images={images} onChange={setImages} />
+          </div>
+          <button className="btn-primary" disabled={saving || images.length === 0} onClick={saveImages}>
+            Görselleri Kaydet
+          </button>
+        </>
+      )}
 
       {message && (
         <div className={`status-banner ${message.type === "success" ? "imported" : "failed"}`} style={{ marginTop: 16 }}>

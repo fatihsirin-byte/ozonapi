@@ -124,22 +124,24 @@ export async function checkImportStatus(offerId: string) {
     return { status: "pending" as const, ozonProductId: null, error: null };
   }
 
-  const failed = item.errors.length > 0;
-  const status: ProductImportStatus = failed ? "failed" : "imported";
-  const errorMessage = failed ? item.errors.map((e) => e.description).join("; ") : null;
+  // Ozon "imported" olsa bile uyarı seviyesinde error döndürebiliyor (örn. görsel indirilemedi ama
+  // ürün gene de oluştu). Gerçek başarısızlık ölçütü product_id'nin dolu olup olmadığı, errors.length değil.
+  const created = item.product_id > 0;
+  const status: ProductImportStatus = created ? "imported" : "failed";
+  const errorMessage = item.errors.length > 0 ? item.errors.map((e) => e.description).join("; ") : null;
 
   await prisma.product.update({
     where: { offerId },
     data: {
       status,
       lastError: errorMessage,
-      ozonProductId: failed ? null : String(item.product_id),
+      ozonProductId: created ? String(item.product_id) : null,
       importTaskId: null,
       lastSyncedAt: new Date(),
     },
   });
 
-  return { status, ozonProductId: failed ? null : String(item.product_id), error: errorMessage };
+  return { status, ozonProductId: created ? String(item.product_id) : null, error: errorMessage };
 }
 
 export async function listAllProducts() {

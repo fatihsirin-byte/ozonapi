@@ -1,21 +1,26 @@
 // Fiyat formülü (2026-07-29, kullanıcıdan alınan gerçek parametreler).
 
+// Ürün özelliklerindeki ağırlık paketleme/kutu ağırlığını içermiyor — kargo hesabında
+// gerçek gönderi ağırlığını hafife almamak için %20 pay ekliyoruz.
+const PACKAGING_WEIGHT_BUFFER = 1.2;
+
 // ASE'nin PDF tarifesinde: kenarların toplamı ≤90cm ise fiziksel ağırlık, >90cm ise fiziksel
 // veya hacimsel ağırlıktan HANGİSİ BÜYÜKSE o kullanılır. Hacimsel ağırlık formülü: en×boy×
-// yükseklik (cm) ÷ 5000 = kg.
+// yükseklik (cm) ÷ 5000 = kg. Fiziksel ağırlığa önce %20 paketleme payı ekleniyor.
 export function computeBillingWeightGrams(
   weightGrams: number,
   widthCm?: number | null,
   heightCm?: number | null,
   depthCm?: number | null,
 ): number {
-  if (!widthCm || !heightCm || !depthCm) return weightGrams;
+  const bufferedWeight = weightGrams * PACKAGING_WEIGHT_BUFFER;
+  if (!widthCm || !heightCm || !depthCm) return bufferedWeight;
 
   const sumOfSides = widthCm + heightCm + depthCm;
-  if (sumOfSides <= 90) return weightGrams;
+  if (sumOfSides <= 90) return bufferedWeight;
 
   const volumetricGrams = ((widthCm * heightCm * depthCm) / 5000) * 1000;
-  return Math.max(weightGrams, volumetricGrams);
+  return Math.max(bufferedWeight, volumetricGrams);
 }
 
 // ASE & GBS tarifesi — ASE'nin kendi PDF tarife tablolarından (gram bazlı lookup) birebir

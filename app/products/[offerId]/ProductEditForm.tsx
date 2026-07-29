@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ImageDropzone } from "../new/ImageDropzone";
-import { computeSalePrice, estimateShippingCostUsd } from "@/pricing/formula";
+import { computeSalePrice, estimateShippingCostUsd, computeBillingWeightGrams } from "@/pricing/formula";
 
 interface ProductData {
   offerId: string;
@@ -135,6 +135,13 @@ export function ProductEditForm({ product }: { product: ProductData }) {
             {product.weightGrams ? (
               <>
                 {product.weightGrams}g · {product.widthCm}×{product.heightCm}×{product.depthCm}cm
+                <div className="hint">
+                  Kargoda kullanılan ağırlık (+%20 paketleme payı, gerekirse hacimsel):{" "}
+                  {Math.round(
+                    computeBillingWeightGrams(product.weightGrams, product.widthCm, product.heightCm, product.depthCm),
+                  )}
+                  g
+                </div>
               </>
             ) : (
               <span className="hint">Bilinmiyor</span>
@@ -168,8 +175,15 @@ export function ProductEditForm({ product }: { product: ProductData }) {
           </div>
           {product.weightGrams && (
             <div className="hint" style={{ marginBottom: 12 }}>
-              Kargo maliyeti ASE&GBS tarifesine göre hesaplanıp fiyata dahil edildi ({product.weightGrams}g için ~$
-              {estimateShippingCostUsd(product.weightGrams).toFixed(2)}).
+              Kargo maliyeti ASE&GBS tarifesine göre hesaplanıp fiyata dahil edildi (
+              {Math.round(
+                computeBillingWeightGrams(product.weightGrams, product.widthCm, product.heightCm, product.depthCm),
+              )}
+              g için ~$
+              {estimateShippingCostUsd(
+                computeBillingWeightGrams(product.weightGrams, product.widthCm, product.heightCm, product.depthCm),
+              ).toFixed(2)}
+              ).
             </div>
           )}
           <button className="btn-primary" disabled={saving || !costPrice} onClick={savePrice}>

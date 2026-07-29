@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ImageDropzone } from "./ImageDropzone";
+import { TEMP_MARKUP, computeSalePrice } from "@/pricing/formula";
 
 interface CategoryOption {
   descriptionCategoryId: number;
@@ -46,15 +47,6 @@ const STEPS = ["Temel Bilgiler", "Kategori", "Ürün Özellikleri", "Varyantlar"
 
 // Ozon'un varyant gruplama alanı — kullanıcıya göstermeden SKU ile otomatik dolduruyoruz.
 const MODEL_NAME_ATTRIBUTE_ID = 9048;
-
-// GEÇİCİ fiyat formülü: satış = alış × 1.5. Gerçek formül (kargo+komisyon bazlı) sonradan güncellenecek.
-const TEMP_MARKUP = 1.5;
-
-function computeSalePrice(costPrice: string): string {
-  const cost = Number(costPrice);
-  if (!cost || Number.isNaN(cost)) return "";
-  return (cost * TEMP_MARKUP).toFixed(2);
-}
 
 function emptyVariant(): Variant {
   return {
@@ -388,7 +380,7 @@ export function ProductWizard() {
           body: JSON.stringify({
             offerId: variantOfferId(i),
             name: variantName,
-            price: computeSalePrice(variant.costPrice),
+            costPrice: variant.costPrice,
             images: variant.images,
             descriptionCategoryId: category.descriptionCategoryId,
             typeId: category.typeId,

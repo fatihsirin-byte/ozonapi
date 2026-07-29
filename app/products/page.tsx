@@ -32,7 +32,9 @@ export default async function ProductsPage() {
             <tbody>
               {products.map((p) => (
                 <tr key={p.id}>
-                  <td>{p.offerId}</td>
+                  <td>
+                    <Link href={`/products/${p.offerId}`}>{p.offerId}</Link>
+                  </td>
                   <td>{p.name}</td>
                   <td>
                     {p.price} {p.currencyCode}

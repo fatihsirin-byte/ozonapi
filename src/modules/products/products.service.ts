@@ -1,5 +1,6 @@
 import { prisma } from "../../db/prisma";
-import { importProducts, getImportStatus } from "../../ozon/products";
+import { importProducts, getImportStatus, updatePrices, updateImages } from "../../ozon/products";
+import { computeSalePrice } from "../../pricing/formula";
 
 // Ozon hesabının sözleşme para birimi USD — RUB gönderilirse ürün sessizce "pending" kalıp
 // sonunda currency_differs_from_contract hatasıyla düşüyor (Faz 1'de keşfedildi).
@@ -14,7 +15,7 @@ export interface ProductAttributeInput {
 export interface CreateProductInput {
   offerId: string;
   name: string;
-  price: string;
+  costPrice: string;
   images: string[];
   descriptionCategoryId: number;
   typeId: number;
@@ -26,12 +27,15 @@ export interface CreateProductInput {
 }
 
 export async function createProduct(input: CreateProductInput) {
+  const price = computeSalePrice(input.costPrice);
+
   await prisma.product.upsert({
     where: { offerId: input.offerId },
     create: {
       offerId: input.offerId,
       name: input.name,
-      price: input.price,
+      price,
+      costPrice: input.costPrice,
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
       descriptionCategoryId: input.descriptionCategoryId,
@@ -42,7 +46,8 @@ export async function createProduct(input: CreateProductInput) {
     },
     update: {
       name: input.name,
-      price: input.price,
+      price,
+      costPrice: input.costPrice,
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
       descriptionCategoryId: input.descriptionCategoryId,
@@ -57,7 +62,7 @@ export async function createProduct(input: CreateProductInput) {
     {
       offer_id: input.offerId,
       name: input.name,
-      price: input.price,
+      price,
       currency_code: CURRENCY_CODE,
       category_id: input.descriptionCategoryId,
       description_category_id: input.descriptionCategoryId,
@@ -130,4 +135,32 @@ export async function checkImportStatus(offerId: string) {
 
 export async function listAllProducts() {
   return prisma.product.findMany({ orderBy: { createdAt: "desc" } });
+}
+
+export async function getProduct(offerId: string) {
+  return prisma.product.findUnique({ where: { offerId } });
+}
+
+export async function updateProductPrice(offerId: string, costPrice: string) {
+  const price = computeSalePrice(costPrice);
+
+  const { result } = await updatePrices([{ offerId, price }]);
+  const entry = result.find((r) => r.offer_id === offerId);
+  if (entry && !entry.updated) {
+    throw new Error(entry.errors.map((e) => e.message).join("; ") || "Fiyat güncellenemedi");
+  }
+
+  await prisma.product.update({ where: { offerId }, data: { costPrice, price } });
+  return { price };
+}
+
+export async function updateProductImages(offerId: string, images: string[]) {
+  const product = await prisma.product.findUnique({ where: { offerId } });
+  if (!product?.ozonProductId) {
+    throw new Error("Bu ürün henüz Ozon'da oluşmamış, görseller güncellenemez");
+  }
+
+  await updateImages({ productId: Number(product.ozonProductId), images });
+  await prisma.product.update({ where: { offerId }, data: { images } });
+  return { images };
 }

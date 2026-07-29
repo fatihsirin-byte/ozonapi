@@ -54,6 +54,34 @@ export function getProductInfoList(offerIds: string[]) {
   return ozonPost<OzonProductInfoListResponse>("/v3/product/info/list", { offer_id: offerIds });
 }
 
+export interface OzonPriceUpdateResponse {
+  result: Array<{ product_id: number; offer_id: string; updated: boolean; errors: Array<{ code: string; message: string }> }>;
+}
+
+// Sadece fiyat güncellemek için — tüm ürünü (kategori/attribute) yeniden göndermeye gerek kalmıyor.
+export function updatePrices(items: Array<{ offerId: string; price: string; oldPrice?: string }>) {
+  return ozonPost<OzonPriceUpdateResponse>("/v1/product/import/prices", {
+    prices: items.map((item) => ({
+      offer_id: item.offerId,
+      price: item.price,
+      old_price: item.oldPrice ?? "0",
+      price_strategy_enabled: "UNKNOWN",
+    })),
+  });
+}
+
+export interface OzonPicturesImportResponse {
+  result: { product_id: number; images: string[]; images360: string[]; color_image: string };
+}
+
+// Sadece görselleri güncellemek için — tüm ürünü yeniden göndermeye gerek kalmıyor.
+export function updateImages(params: { productId: number; images: string[] }) {
+  return ozonPost<OzonPicturesImportResponse>("/v1/product/pictures/import", {
+    product_id: params.productId,
+    images: params.images,
+  });
+}
+
 export interface OzonProductListResponse {
   result: {
     items: Array<{ product_id: number; offer_id: string }>;

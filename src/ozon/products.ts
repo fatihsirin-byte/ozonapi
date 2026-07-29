@@ -65,6 +65,7 @@ export function updatePrices(items: Array<{ offerId: string; price: string; oldP
       offer_id: item.offerId,
       price: item.price,
       old_price: item.oldPrice ?? "0",
+      currency_code: "USD",
       price_strategy_enabled: "UNKNOWN",
     })),
   });

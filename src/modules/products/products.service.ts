@@ -1,5 +1,5 @@
 import { prisma } from "../../db/prisma";
-import { importProducts, getImportStatus, updatePrices } from "../../ozon/products";
+import { importProducts, getImportStatus, updatePrices, getProductAttributes, getProductInfoList } from "../../ozon/products";
 import { computeSalePrice } from "../../pricing/formula";
 
 // Ozon hesabının sözleşme para birimi USD — RUB gönderilirse ürün sessizce "pending" kalıp
@@ -202,4 +202,62 @@ export async function updateProductImages(offerId: string, images: string[]) {
   });
 
   return { images, taskId: result.task_id };
+}
+
+function mmToCm(value: number, unit: string): number {
+  if (unit === "mm") return Math.round(value / 10);
+  if (unit === "m") return Math.round(value * 100);
+  return value;
+}
+
+// Ozon'da zaten var olan ama bizim panelden oluşturulmamış bir ürünü sisteme çeker —
+// sonra normal düzenleme sayfasından (fiyat/görsel) yönetilebilsin diye.
+export async function importFromOzon(offerId: string) {
+  const [attrResult, infoResult] = await Promise.all([
+    getProductAttributes([offerId]),
+    getProductInfoList([offerId]),
+  ]);
+
+  const attrItem = attrResult.result[0];
+  if (!attrItem) {
+    throw new Error("Bu offer_id Ozon'da bulunamadı");
+  }
+  const infoItem = infoResult.items[0] as
+    | { price?: string; currency_code?: string; id?: number }
+    | undefined;
+
+  const product = await prisma.product.upsert({
+    where: { offerId },
+    create: {
+      offerId,
+      name: attrItem.name,
+      price: infoItem?.price ?? "0",
+      currencyCode: infoItem?.currency_code ?? CURRENCY_CODE,
+      weightGrams: attrItem.weight,
+      widthCm: mmToCm(attrItem.width, attrItem.dimension_unit),
+      heightCm: mmToCm(attrItem.height, attrItem.dimension_unit),
+      depthCm: mmToCm(attrItem.depth, attrItem.dimension_unit),
+      descriptionCategoryId: attrItem.description_category_id,
+      typeId: attrItem.type_id,
+      images: attrItem.images,
+      ozonProductId: String(attrItem.id),
+      status: "imported",
+    },
+    update: {
+      name: attrItem.name,
+      price: infoItem?.price ?? "0",
+      currencyCode: infoItem?.currency_code ?? CURRENCY_CODE,
+      weightGrams: attrItem.weight,
+      widthCm: mmToCm(attrItem.width, attrItem.dimension_unit),
+      heightCm: mmToCm(attrItem.height, attrItem.dimension_unit),
+      depthCm: mmToCm(attrItem.depth, attrItem.dimension_unit),
+      descriptionCategoryId: attrItem.description_category_id,
+      typeId: attrItem.type_id,
+      images: attrItem.images,
+      ozonProductId: String(attrItem.id),
+      status: "imported",
+    },
+  });
+
+  return product;
 }

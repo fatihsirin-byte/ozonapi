@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listAllProducts } from "@/modules/products/products.service";
+import { ImportProductForm } from "./ImportProductForm";
 
 export const dynamic = "force-dynamic";
 
@@ -10,9 +11,12 @@ export default async function ProductsPage() {
     <div className="page">
       <div className="topbar">
         <h1>Ürünler</h1>
-        <Link href="/products/new">
-          <button className="btn-primary">+ Yeni Ürün</button>
-        </Link>
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+          <ImportProductForm />
+          <Link href="/products/new">
+            <button className="btn-primary">+ Yeni Ürün</button>
+          </Link>
+        </div>
       </div>
 
       <div className="card">

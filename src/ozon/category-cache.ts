@@ -55,6 +55,11 @@ export async function getFlatCategories(): Promise<FlatCategory[]> {
   return inflight;
 }
 
+export async function findCategory(descriptionCategoryId: number, typeId: number): Promise<FlatCategory | null> {
+  const categories = await getFlatCategories();
+  return categories.find((c) => c.descriptionCategoryId === descriptionCategoryId && c.typeId === typeId) ?? null;
+}
+
 export async function searchCategories(query: string, limit = 20): Promise<FlatCategory[]> {
   const categories = await getFlatCategories();
   const normalized = query.trim().toLowerCase();

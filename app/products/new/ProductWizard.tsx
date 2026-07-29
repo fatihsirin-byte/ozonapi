@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ImageDropzone } from "./ImageDropzone";
 import { TEMP_MARKUP, computeSalePrice } from "@/pricing/formula";
 
@@ -41,6 +41,17 @@ interface VariantResult {
   status: "pending" | "imported" | "failed";
   ozonProductId: string | null;
   error: string | null;
+}
+
+interface CloneData {
+  name: string;
+  images: string[];
+  weightGrams: number;
+  widthCm: number;
+  heightCm: number;
+  depthCm: number;
+  category: CategoryOption;
+  attributes: Array<{ id: number; dictionaryValueId?: number; value?: string }>;
 }
 
 const STEPS = ["Temel Bilgiler", "Kategori", "Ürün Özellikleri", "Varyantlar", "Özet"];
@@ -291,12 +302,16 @@ function VariantCard({
 
 export function ProductWizard() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const cloneFrom = searchParams.get("cloneFrom");
   const [step, setStep] = useState(0);
 
   const [offerId, setOfferId] = useState("");
   const [name, setName] = useState("");
 
   const [category, setCategory] = useState<CategoryOption | null>(null);
+  const [cloneData, setCloneData] = useState<CloneData | null>(null);
+  const [cloneLoading, setCloneLoading] = useState(Boolean(cloneFrom));
 
   const [requiredAttributes, setRequiredAttributes] = useState<RequiredAttribute[]>([]);
   const [attributesLoading, setAttributesLoading] = useState(false);
@@ -308,6 +323,29 @@ export function ProductWizard() {
   const [results, setResults] = useState<VariantResult[] | null>(null);
 
   useEffect(() => {
+    if (!cloneFrom) return;
+    fetch(`/api/products/${cloneFrom}/clone-data`)
+      .then((r) => r.json())
+      .then((data: CloneData) => {
+        setName(`${data.name} (kopya)`);
+        setCategory(data.category);
+        setCloneData(data);
+        setVariants([
+          {
+            ...emptyVariant(),
+            weightGrams: String(data.weightGrams),
+            widthCm: String(data.widthCm),
+            heightCm: String(data.heightCm),
+            depthCm: String(data.depthCm),
+            images: data.images,
+          },
+        ]);
+      })
+      .finally(() => setCloneLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloneFrom]);
+
+  useEffect(() => {
     if (!category) {
       setRequiredAttributes([]);
       return;
@@ -317,9 +355,20 @@ export function ProductWizard() {
       .then((r) => r.json())
       .then((data: { attributes: RequiredAttribute[] }) => {
         setRequiredAttributes(data.attributes ?? []);
-        if (data.attributes?.some((a) => a.id === MODEL_NAME_ATTRIBUTE_ID)) {
-          setAttributeAnswers((prev) => ({ ...prev, [MODEL_NAME_ATTRIBUTE_ID]: { value: offerId } }));
-        }
+        setAttributeAnswers((prev) => {
+          const next = { ...prev };
+          if (data.attributes?.some((a) => a.id === MODEL_NAME_ATTRIBUTE_ID)) {
+            next[MODEL_NAME_ATTRIBUTE_ID] = { value: offerId };
+          }
+          for (const cloned of cloneData?.attributes ?? []) {
+            next[cloned.id] = {
+              dictionaryValueId: cloned.dictionaryValueId,
+              value: cloned.value,
+              displayValue: cloned.dictionaryValueId ? "(kopyalanan değer — değiştirmek için yazın)" : undefined,
+            };
+          }
+          return next;
+        });
       })
       .finally(() => setAttributesLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -439,6 +488,11 @@ export function ProductWizard() {
 
   return (
     <div className="card">
+      {cloneFrom && (
+        <div className="status-banner pending">
+          {cloneLoading ? `${cloneFrom} kopyalanıyor...` : `${cloneFrom} ürününden kopyalandı — SKU, isim ve fiyatı değiştirmeyi unutmayın.`}
+        </div>
+      )}
       <div className="stepper">
         {STEPS.map((label, i) => (
           <div key={label} className={`step-dot ${i === step ? "active" : i < step ? "done" : ""}`} title={label} />

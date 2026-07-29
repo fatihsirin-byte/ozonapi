@@ -71,6 +71,32 @@ export function updatePrices(items: Array<{ offerId: string; price: string; oldP
   });
 }
 
+export interface OzonProductAttributesResponse {
+  result: Array<{
+    id: number;
+    offer_id: string;
+    name: string;
+    height: number;
+    depth: number;
+    width: number;
+    dimension_unit: string;
+    weight: number;
+    weight_unit: string;
+    description_category_id: number;
+    type_id: number;
+    images: string[];
+    attributes: Array<{ id: number; values: Array<{ dictionary_value_id: number; value: string }> }>;
+  }>;
+}
+
+// Bir ürünün TÜM attribute/boyut/görsel bilgisini Ozon'dan doğrudan çeker — "bu üründen kopyala" özelliği için.
+export function getProductAttributes(offerIds: string[]) {
+  return ozonPost<OzonProductAttributesResponse>("/v4/product/info/attributes", {
+    filter: { offer_id: offerIds },
+    limit: offerIds.length,
+  });
+}
+
 export interface OzonProductListResponse {
   result: {
     items: Array<{ product_id: number; offer_id: string }>;

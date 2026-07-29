@@ -20,9 +20,14 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
     <div className="page">
       <div className="topbar">
         <h1>{product.name}</h1>
-        <Link href="/products">
-          <button className="btn-secondary">← Listeye dön</button>
-        </Link>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link href={`/products/new?cloneFrom=${encodeURIComponent(offerId)}`}>
+            <button className="btn-secondary">Bu üründen kopyala</button>
+          </Link>
+          <Link href="/products">
+            <button className="btn-secondary">← Listeye dön</button>
+          </Link>
+        </div>
       </div>
       <ProductEditForm product={serializedProduct} />
     </div>

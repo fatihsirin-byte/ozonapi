@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { ProductWizard } from "./ProductWizard";
 
 export default function NewProductPage() {
@@ -6,7 +7,9 @@ export default function NewProductPage() {
       <div className="topbar">
         <h1>Yeni Ürün</h1>
       </div>
-      <ProductWizard />
+      <Suspense>
+        <ProductWizard />
+      </Suspense>
     </div>
   );
 }

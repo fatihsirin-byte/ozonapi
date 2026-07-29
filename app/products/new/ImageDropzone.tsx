@@ -7,7 +7,14 @@ export function ImageDropzone({ images, onChange }: { images: string[]; onChange
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [urlInput, setUrlInput] = useState("");
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  async function copyUrl(url: string) {
+    await navigator.clipboard.writeText(url);
+    setCopiedUrl(url);
+    setTimeout(() => setCopiedUrl((current) => (current === url ? null : current)), 1500);
+  }
 
   function addUrl() {
     const url = urlInput.trim();
@@ -97,7 +104,12 @@ export function ImageDropzone({ images, onChange }: { images: string[]; onChange
         <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
           {images.map((url) => (
             <div key={url} style={{ position: "relative" }}>
-              <img src={url} alt="" style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
+              <img
+                src={url}
+                alt=""
+                title="Sağ tık > Resmi Kopyala ile de kopyalayabilirsiniz"
+                style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }}
+              />
               <button
                 type="button"
                 onClick={() => onChange(images.filter((u) => u !== url))}
@@ -116,6 +128,26 @@ export function ImageDropzone({ images, onChange }: { images: string[]; onChange
                 }}
               >
                 ×
+              </button>
+              <button
+                type="button"
+                onClick={() => copyUrl(url)}
+                title="Görsel URL'ini kopyala"
+                style={{
+                  position: "absolute",
+                  bottom: -6,
+                  left: -6,
+                  right: -6,
+                  height: 18,
+                  borderRadius: 4,
+                  background: copiedUrl === url ? "var(--success)" : "rgba(0,0,0,0.7)",
+                  color: "white",
+                  fontSize: 10,
+                  padding: 0,
+                  lineHeight: 1,
+                }}
+              >
+                {copiedUrl === url ? "Kopyalandı ✓" : "URL kopyala"}
               </button>
             </div>
           ))}

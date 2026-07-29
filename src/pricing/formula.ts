@@ -1,5 +1,23 @@
 // Fiyat formülü (2026-07-29, kullanıcıdan alınan gerçek parametreler).
 
+// ASE'nin PDF tarifesinde: kenarların toplamı ≤90cm ise fiziksel ağırlık, >90cm ise fiziksel
+// veya hacimsel ağırlıktan HANGİSİ BÜYÜKSE o kullanılır. Hacimsel ağırlık formülü: en×boy×
+// yükseklik (cm) ÷ 5000 = kg.
+export function computeBillingWeightGrams(
+  weightGrams: number,
+  widthCm?: number | null,
+  heightCm?: number | null,
+  depthCm?: number | null,
+): number {
+  if (!widthCm || !heightCm || !depthCm) return weightGrams;
+
+  const sumOfSides = widthCm + heightCm + depthCm;
+  if (sumOfSides <= 90) return weightGrams;
+
+  const volumetricGrams = ((widthCm * heightCm * depthCm) / 5000) * 1000;
+  return Math.max(weightGrams, volumetricGrams);
+}
+
 // ASE & GBS tarifesi — ASE'nin kendi PDF tarife tablolarından (gram bazlı lookup) birebir
 // türetilmiş doğrusal formüller. Economy tier'i yok: 500g altı Extra Small, üstü Express DG
 // (batarya/sıvıya da izin veren hat — ürün tipine bakılmaksızın her zaman kabul edilir, standart
@@ -36,11 +54,18 @@ function totalFeeRate(price: number): number {
   return COMMISSION_RATE + logisticsFeeUsd / price + BANK_FEE_RATE;
 }
 
-export function computeSalePrice(costPrice: string | number, weightGrams?: number | null): string {
+export function computeSalePrice(
+  costPrice: string | number,
+  weightGrams?: number | null,
+  dimsCm?: { widthCm?: number | null; heightCm?: number | null; depthCm?: number | null },
+): string {
   const cost = Number(costPrice);
   if (!cost || Number.isNaN(cost)) return "";
 
-  const shipping = weightGrams ? estimateShippingCostUsd(weightGrams) : 0;
+  const billingWeight = weightGrams
+    ? computeBillingWeightGrams(weightGrams, dimsCm?.widthCm, dimsCm?.heightCm, dimsCm?.depthCm)
+    : 0;
+  const shipping = billingWeight ? estimateShippingCostUsd(billingWeight) : 0;
   const target = cost * (1 + MARGIN_RATE) + shipping;
 
   // Lojistik hizmet bedeli tavanlı olduğu için oran fiyata bağlı — bir kere kabaca hesaplayıp,

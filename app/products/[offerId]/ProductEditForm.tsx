@@ -153,7 +153,17 @@ export function ProductEditForm({ product }: { product: ProductData }) {
             </div>
             <div className="field">
               <label>Satış Fiyatı (otomatik hesaplanır: alış + %40 marj + kargo + komisyon/kesintiler, gerekirse gümrük yuvarlaması)</label>
-              <input type="text" value={computeSalePrice(costPrice, product.weightGrams) || product.price} disabled />
+              <input
+                type="text"
+                value={
+                  computeSalePrice(costPrice, product.weightGrams, {
+                    widthCm: product.widthCm,
+                    heightCm: product.heightCm,
+                    depthCm: product.depthCm,
+                  }) || product.price
+                }
+                disabled
+              />
             </div>
           </div>
           {product.weightGrams && (

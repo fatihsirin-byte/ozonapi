@@ -1,0 +1,71 @@
+import { ozonPost } from "./client";
+
+export interface OzonProductImportItem {
+  offer_id: string;
+  name: string;
+  price: string;
+  old_price?: string;
+  currency_code?: string;
+  category_id: number;
+  description_category_id: number;
+  type_id: number;
+  weight?: number;
+  weight_unit?: string;
+  width?: number;
+  height?: number;
+  depth?: number;
+  dimension_unit?: string;
+  vat?: string;
+  images?: string[];
+  attributes?: Array<{ id: number; values: Array<{ value: string; dictionary_value_id?: number }> }>;
+}
+
+export interface OzonProductImportResponse {
+  result: { task_id: number };
+}
+
+export interface OzonProductImportInfoResponse {
+  result: {
+    items: Array<{
+      offer_id: string;
+      product_id: number;
+      status: string;
+      errors: Array<{ code: string; state: string; level: string; description: string; field: string }>;
+    }>;
+    total: number;
+  };
+}
+
+// Ürün oluşturma/güncelleme. Aynı offer_id ile çağrılırsa mevcut ürünü günceller.
+export function importProducts(items: OzonProductImportItem[]) {
+  return ozonPost<OzonProductImportResponse>("/v3/product/import", { items });
+}
+
+// import sonucu asenkron işlenir, task_id ile sonucu sorgula.
+export function getImportStatus(taskId: number) {
+  return ozonPost<OzonProductImportInfoResponse>("/v1/product/import/info", { task_id: taskId });
+}
+
+export interface OzonProductInfoListResponse {
+  items: Array<Record<string, unknown>>;
+}
+
+export function getProductInfoList(offerIds: string[]) {
+  return ozonPost<OzonProductInfoListResponse>("/v3/product/info/list", { offer_id: offerIds });
+}
+
+export interface OzonProductListResponse {
+  result: {
+    items: Array<{ product_id: number; offer_id: string }>;
+    total: number;
+    last_id: string;
+  };
+}
+
+export function listProducts(lastId = "", limit = 100) {
+  return ozonPost<OzonProductListResponse>("/v3/product/list", {
+    filter: {},
+    last_id: lastId,
+    limit,
+  });
+}

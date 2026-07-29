@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ozonapi
+      POSTGRES_PASSWORD: ozonapi
+      POSTGRES_DB: ozonapi
+    ports:
+      - "5432:5432"
+    volumes:
+      - ozonapi_db_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://ozonapi:ozonapi@db:5432/ozonapi?schema=public
+
+volumes:
+  ozonapi_db_data:

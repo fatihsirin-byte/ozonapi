@@ -1,0 +1,73 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Ozon'daki ürünü cache'ler. offerId bizim SKU'muz, ozonProductId Ozon tarafındaki id.
+model Product {
+  id                    String    @id @default(cuid())
+  offerId               String    @unique
+  ozonProductId         String?
+  name                  String
+  price                 String
+  oldPrice              String?
+  currencyCode          String    @default("USD")
+  weightGrams           Int?
+  descriptionCategoryId Int?
+  typeId                Int?
+  images                Json?
+  status                String    @default("draft") // draft | pending | imported | failed
+  lastError             String?
+  lastSyncedAt          DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  orderItems OrderItem[]
+}
+
+// FBS/FBO siparişi, postingNumber Ozon tarafındaki benzersiz sipariş numarası.
+model Order {
+  id            String   @id @default(cuid())
+  postingNumber String   @unique
+  status        String
+  scheme        String // fbs | fbo
+  orderDate     DateTime?
+  rawPayload    Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  items        OrderItem[]
+  transactions FinanceTransaction[]
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  order     Order   @relation(fields: [orderId], references: [id])
+  orderId   String
+  product   Product? @relation(fields: [productId], references: [id])
+  productId String?
+  offerId   String
+  quantity  Int
+  price     String
+}
+
+// posting_number bazında finans/kesinti verisi (komisyon, kargo, diğer kesintiler).
+model FinanceTransaction {
+  id             String   @id @default(cuid())
+  order          Order?   @relation(fields: [postingNumber], references: [postingNumber])
+  postingNumber  String
+  operationType  String
+  operationDate  DateTime
+  amount         Float
+  commissionAmount Float?
+  deliveryCharge Float?
+  otherCharges   Float?
+  rawPayload     Json?
+  createdAt      DateTime @default(now())
+
+  @@index([postingNumber])
+}

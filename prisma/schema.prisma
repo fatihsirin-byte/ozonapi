@@ -18,6 +18,9 @@ model Product {
   oldPrice              String?
   currencyCode          String    @default("USD")
   weightGrams           Int?
+  widthCm               Int?
+  heightCm              Int?
+  depthCm               Int?
   descriptionCategoryId Int?
   typeId                Int?
   images                Json?

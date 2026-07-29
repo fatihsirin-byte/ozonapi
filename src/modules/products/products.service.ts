@@ -1,10 +1,13 @@
 import { prisma } from "../../db/prisma";
-import { importProducts, getImportStatus, updatePrices, updateImages } from "../../ozon/products";
+import { importProducts, getImportStatus, updatePrices } from "../../ozon/products";
 import { computeSalePrice } from "../../pricing/formula";
 
 // Ozon hesabının sözleşme para birimi USD — RUB gönderilirse ürün sessizce "pending" kalıp
 // sonunda currency_differs_from_contract hatasıyla düşüyor (Faz 1'de keşfedildi).
 const CURRENCY_CODE = "USD";
+
+// Ozon'un varyant gruplama alanı — product.service.ts ve wizard'da aynı sabit kullanılıyor.
+const MODEL_NAME_ATTRIBUTE_ID = 9048;
 
 export interface ProductAttributeInput {
   id: number;
@@ -38,6 +41,9 @@ export async function createProduct(input: CreateProductInput) {
       costPrice: input.costPrice,
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
+      widthCm: input.widthCm,
+      heightCm: input.heightCm,
+      depthCm: input.depthCm,
       descriptionCategoryId: input.descriptionCategoryId,
       typeId: input.typeId,
       images: input.images,
@@ -50,6 +56,9 @@ export async function createProduct(input: CreateProductInput) {
       costPrice: input.costPrice,
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
+      widthCm: input.widthCm,
+      heightCm: input.heightCm,
+      depthCm: input.depthCm,
       descriptionCategoryId: input.descriptionCategoryId,
       typeId: input.typeId,
       images: input.images,
@@ -154,13 +163,41 @@ export async function updateProductPrice(offerId: string, costPrice: string) {
   return { price };
 }
 
+// Ozon'da ayrı bir "sadece görsel güncelle" endpoint'i güvenilir çalışmadığı için (belirsiz
+// VALIDATION ERROR), aynı product/import mekanizmasını kullanıyoruz. Kategoriye özel dictionary
+// attribute'ları (tip/marka vb.) tekrar göndermesek de Ozon'da korunuyor — sadece ağırlık/boyut
+// ve model name (9048) her seferinde yeniden gönderilmek zorunda, aksi halde "zorunlu alan boş" hatası alınıyor.
 export async function updateProductImages(offerId: string, images: string[]) {
   const product = await prisma.product.findUnique({ where: { offerId } });
-  if (!product?.ozonProductId) {
+  if (!product?.ozonProductId || !product.descriptionCategoryId || !product.typeId) {
     throw new Error("Bu ürün henüz Ozon'da oluşmamış, görseller güncellenemez");
   }
 
-  await updateImages({ productId: Number(product.ozonProductId), images });
-  await prisma.product.update({ where: { offerId }, data: { images } });
-  return { images };
+  const { result } = await importProducts([
+    {
+      offer_id: offerId,
+      name: product.name,
+      price: product.price,
+      currency_code: CURRENCY_CODE,
+      category_id: product.descriptionCategoryId,
+      description_category_id: product.descriptionCategoryId,
+      type_id: product.typeId,
+      weight: product.weightGrams ?? 100,
+      weight_unit: "g",
+      width: product.widthCm ?? 10,
+      height: product.heightCm ?? 10,
+      depth: product.depthCm ?? 10,
+      dimension_unit: "cm",
+      vat: "0",
+      images,
+      attributes: [{ id: MODEL_NAME_ATTRIBUTE_ID, values: [{ value: offerId }] }],
+    },
+  ]);
+
+  await prisma.product.update({
+    where: { offerId },
+    data: { images, importTaskId: result.task_id, status: "pending", lastError: null },
+  });
+
+  return { images, taskId: result.task_id };
 }

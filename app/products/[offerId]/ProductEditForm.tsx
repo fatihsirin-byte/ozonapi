@@ -21,25 +21,70 @@ export function ProductEditForm({ product }: { product: ProductData }) {
   const [costPrice, setCostPrice] = useState(product.costPrice ?? "");
   const [images, setImages] = useState<string[]>(Array.isArray(product.images) ? (product.images as string[]) : []);
   const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState(product.status);
+  const [lastError, setLastError] = useState(product.lastError);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  async function save(partial: { costPrice?: string; images?: string[] }) {
+  function pollUntilResolved() {
+    const interval = setInterval(async () => {
+      const res = await fetch(`/api/products/${product.offerId}/status`);
+      const data = await res.json();
+      if (data.status !== "pending") {
+        clearInterval(interval);
+        setStatus(data.status);
+        setLastError(data.error);
+        setMessage(
+          data.status === "imported"
+            ? { type: "success", text: "Ozon'da başarıyla güncellendi." }
+            : { type: "error", text: data.error ?? "Güncelleme başarısız" },
+        );
+      }
+    }, 3000);
+  }
+
+  async function savePrice() {
     setSaving(true);
     setMessage(null);
     try {
       const res = await fetch(`/api/products/${product.offerId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(partial),
+        body: JSON.stringify({ costPrice }),
       });
       const data = await res.json();
       if (!res.ok) {
         setMessage({ type: "error", text: data.error ?? "Güncelleme başarısız" });
         return;
       }
-      setMessage({ type: "success", text: "Kaydedildi ve Ozon'a gönderildi." });
+      setMessage({ type: "success", text: "Fiyat Ozon'a kaydedildi." });
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Bilinmeyen hata" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveImages() {
+    setSaving(true);
+    setMessage(null);
+    setStatus("pending");
+    try {
+      const res = await fetch(`/api/products/${product.offerId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error ?? "Güncelleme başarısız" });
+        setStatus(product.status);
+        return;
+      }
+      setMessage({ type: "success", text: "Görseller gönderildi, Ozon işliyor..." });
+      pollUntilResolved();
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Bilinmeyen hata" });
+      setStatus(product.status);
     } finally {
       setSaving(false);
     }
@@ -53,9 +98,9 @@ export function ProductEditForm({ product }: { product: ProductData }) {
       </div>
       <div className="field">
         <label>Durum</label>
-        <span className={`badge ${product.status}`}>{product.status}</span>
+        <span className={`badge ${status}`}>{status}</span>
         {product.ozonProductId && <span className="hint"> · Ozon product_id: {product.ozonProductId}</span>}
-        {product.lastError && <div className="hint" style={{ color: "var(--danger)" }}>{product.lastError}</div>}
+        {lastError && <div className="hint" style={{ color: "var(--danger)" }}>{lastError}</div>}
       </div>
 
       <div className="row">
@@ -68,7 +113,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
           <input type="text" value={computeSalePrice(costPrice) || product.price} disabled />
         </div>
       </div>
-      <button className="btn-primary" disabled={saving || !costPrice} onClick={() => save({ costPrice })}>
+      <button className="btn-primary" disabled={saving || !costPrice} onClick={savePrice}>
         Fiyatı Kaydet
       </button>
 
@@ -76,11 +121,15 @@ export function ProductEditForm({ product }: { product: ProductData }) {
         <label>Görseller</label>
         <ImageDropzone images={images} onChange={setImages} />
       </div>
-      <button className="btn-primary" disabled={saving || images.length === 0} onClick={() => save({ images })}>
+      <button className="btn-primary" disabled={saving || images.length === 0} onClick={saveImages}>
         Görselleri Kaydet
       </button>
 
-      {message && <div className={`status-banner ${message.type === "success" ? "imported" : "failed"}`} style={{ marginTop: 16 }}>{message.text}</div>}
+      {message && (
+        <div className={`status-banner ${message.type === "success" ? "imported" : "failed"}`} style={{ marginTop: 16 }}>
+          {message.text}
+        </div>
+      )}
     </div>
   );
 }

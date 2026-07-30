@@ -33,7 +33,7 @@ function flatten(nodes: OzonCategoryTreeNode[], path: string[] = [], description
 }
 
 async function loadCategories(): Promise<FlatCategory[]> {
-  const { result } = await getCategoryTree("EN");
+  const { result } = await getCategoryTree("TR");
   return flatten(result);
 }
 

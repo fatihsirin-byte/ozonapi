@@ -11,7 +11,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { result } = await getCategoryAttributes({
     descriptionCategoryId: Number(categoryId),
     typeId: Number(typeId),
-    languageCode: "EN",
+    languageCode: "TR",
   });
 
   // Varsayılan: sadece zorunlu attribute'lar (mevcut wizard davranışı korunuyor).

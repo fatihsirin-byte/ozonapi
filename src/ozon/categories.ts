@@ -13,7 +13,7 @@ export interface OzonCategoryTreeResponse {
   result: OzonCategoryTreeNode[];
 }
 
-export function getCategoryTree(languageCode = "EN") {
+export function getCategoryTree(languageCode = "TR") {
   return ozonPost<OzonCategoryTreeResponse>("/v1/description-category/tree", {
     language: languageCode,
   });
@@ -43,7 +43,7 @@ export function getCategoryAttributes(params: {
   return ozonPost<OzonCategoryAttributesResponse>("/v1/description-category/attribute", {
     description_category_id: params.descriptionCategoryId,
     type_id: params.typeId,
-    language: params.languageCode ?? "EN",
+    language: params.languageCode ?? "TR",
   });
 }
 
@@ -70,7 +70,7 @@ export function searchAttributeValues(params: {
     type_id: params.typeId,
     value: params.value,
     limit: params.limit ?? 20,
-    language: params.languageCode ?? "EN",
+    language: params.languageCode ?? "TR",
   });
 }
 
@@ -88,6 +88,6 @@ export function getAttributeValues(params: {
     type_id: params.typeId,
     last_value_id: params.lastValueId ?? 0,
     limit: params.limit ?? 100,
-    language: params.languageCode ?? "EN",
+    language: params.languageCode ?? "TR",
   });
 }

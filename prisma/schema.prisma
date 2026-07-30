@@ -25,6 +25,7 @@ model Product {
   typeId                Int?
   images                Json?
   status                String    @default("draft") // draft | ready | pending | imported | failed
+  stockQuantity         Int?      // Ozon'a en son gönderilen stok adedi (rFBS depo: Çekmeköy)
   importTaskId          BigInt?
   lastError             String?
   lastSyncedAt          DateTime?

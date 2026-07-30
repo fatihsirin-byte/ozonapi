@@ -71,6 +71,22 @@ export function updatePrices(items: Array<{ offerId: string; price: string; oldP
   });
 }
 
+export interface OzonStockUpdateResponse {
+  result: Array<{ product_id: number; offer_id: string; updated: boolean; errors: Array<{ code: string; message: string }> }>;
+}
+
+// FBS/rFBS satıcılarda stok, depo bazında bildirilir (warehouse_id zorunlu) — hesabın
+// tek deposu Çekmeköy (1020005025032000), src/ozon/warehouses.ts'de sabitlendi.
+export function updateStocks(items: Array<{ offerId: string; stock: number; warehouseId: number }>) {
+  return ozonPost<OzonStockUpdateResponse>("/v2/products/stocks", {
+    stocks: items.map((item) => ({
+      offer_id: item.offerId,
+      stock: item.stock,
+      warehouse_id: item.warehouseId,
+    })),
+  });
+}
+
 export interface OzonProductAttributesResponse {
   result: Array<{
     id: number;

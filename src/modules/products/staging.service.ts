@@ -1,7 +1,11 @@
 import { prisma } from "../../db/prisma";
 import { computeSalePrice } from "../../pricing/formula";
 import { translateToRussian } from "../../ai/translate";
-import { updatePrices } from "../../ozon/products";
+import { updatePrices, updateStocks } from "../../ozon/products";
+import { DEFAULT_WAREHOUSE_ID } from "../../ozon/warehouses";
+
+// Yeni gönderilen her ürüne varsayılan stok — kullanıcı isteğiyle sabitlendi (2026-07-30).
+const DEFAULT_STOCK = 100;
 import { createProduct, updateProductImages, type ProductAttributeInput } from "./products.service";
 
 export interface HandlePageItem {
@@ -353,6 +357,13 @@ export async function submitHandleToOzon(input: SubmitHandleInput) {
         modelNameOverride,
         descriptionRu: variant.descriptionRu,
       });
+      try {
+        await updateStocks([{ offerId: variant.offerId, stock: DEFAULT_STOCK, warehouseId: DEFAULT_WAREHOUSE_ID }]);
+        await prisma.product.update({ where: { offerId: variant.offerId }, data: { stockQuantity: DEFAULT_STOCK } });
+      } catch {
+        // Stok ayarı başarısız olsa da ürün oluşturma başarılı sayılır — stok daha sonra
+        // "Stokları Gönder" ile tekrar denenebilir.
+      }
       results.push({ offerId: variant.offerId, taskId: taskId ? String(taskId) : undefined });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Bilinmeyen hata";

@@ -1,6 +1,7 @@
 import { prisma } from "../../db/prisma";
-import { importProducts, getImportStatus, updatePrices, getProductAttributes, getProductInfoList } from "../../ozon/products";
+import { importProducts, getImportStatus, updatePrices, updateStocks, getProductAttributes, getProductInfoList } from "../../ozon/products";
 import { getCategoryAttributes } from "../../ozon/categories";
+import { DEFAULT_WAREHOUSE_ID } from "../../ozon/warehouses";
 import { computeSalePrice } from "../../pricing/formula";
 
 // Ozon hesabının sözleşme para birimi USD — RUB gönderilirse ürün sessizce "pending" kalıp
@@ -202,6 +203,44 @@ export async function listAllProducts() {
 
 export async function getProduct(offerId: string) {
   return prisma.product.findUnique({ where: { offerId } });
+}
+
+// Ozon'a bağlı (ozonProductId'si olan) HER ürünün stoğunu tek bir sabit adede ayarlar.
+// /v2/products/stocks tek çağrıda en fazla 100 offer_id kabul ediyor, o yüzden 100'lük
+// gruplara bölüp gönderiyoruz.
+const STOCK_BATCH_SIZE = 100;
+
+export async function setStockForAllConnectedProducts(stock: number) {
+  const products = await prisma.product.findMany({
+    where: { ozonProductId: { not: null } },
+    select: { offerId: true },
+  });
+
+  const results: { offerId: string; updated: boolean; error?: string }[] = [];
+
+  for (let i = 0; i < products.length; i += STOCK_BATCH_SIZE) {
+    const batch = products.slice(i, i + STOCK_BATCH_SIZE);
+    const { result } = await updateStocks(
+      batch.map((p) => ({ offerId: p.offerId, stock, warehouseId: DEFAULT_WAREHOUSE_ID })),
+    );
+    for (const entry of result) {
+      results.push({
+        offerId: entry.offer_id,
+        updated: entry.updated,
+        error: entry.updated ? undefined : entry.errors.map((e) => e.message).join("; "),
+      });
+    }
+  }
+
+  const updatedOfferIds = results.filter((r) => r.updated).map((r) => r.offerId);
+  if (updatedOfferIds.length > 0) {
+    await prisma.product.updateMany({
+      where: { offerId: { in: updatedOfferIds } },
+      data: { stockQuantity: stock },
+    });
+  }
+
+  return { total: products.length, updated: updatedOfferIds.length, results };
 }
 
 // priceOverride verilirse (Fiyat Hesaplayıcı modalında elle girilen satış fiyatı) formülü

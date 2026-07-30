@@ -7,6 +7,7 @@ export interface HandlePageItem {
   handle: string;
   title: string;
   vendor: string | null;
+  type: string | null;
   variantCount: number;
   submittedCount: number;
   sampleImage: string | null;
@@ -21,7 +22,43 @@ export interface HandlePage {
 
 export interface HandlePageFilters {
   vendor?: string;
+  type?: string;
   search?: string;
+  // draft: hiçbir varyantı gönderilmemiş handle'lar. submitted: en az bir varyantı Ozon'a gönderilmiş (pending/imported/failed) handle'lar.
+  status?: "draft" | "submitted";
+}
+
+async function buildStatusHandleFilter(
+  status: "draft" | "submitted" | undefined,
+): Promise<{ in?: string[]; notIn?: string[] } | undefined> {
+  if (!status) return undefined;
+  const submitted = await prisma.product.findMany({
+    where: { shopifyHandle: { not: null }, status: { not: "draft" } },
+    select: { shopifyHandle: true },
+    distinct: ["shopifyHandle"],
+  });
+  const submittedHandles = submitted.map((p) => p.shopifyHandle as string);
+  return status === "submitted" ? { in: submittedHandles } : { notIn: submittedHandles };
+}
+
+// `omit` — hangi filtre boyutunu (kendi facet'ini) dışarıda bırakacağımızı belirtir, ki
+// "cascading" facet listeleri (örn. vendor listesi) kendi seçimiyle kısıtlanmasın.
+async function buildHandleWhere(filters: HandlePageFilters, omit?: keyof HandlePageFilters) {
+  const statusHandleFilter = omit === "status" ? undefined : await buildStatusHandleFilter(filters.status);
+
+  return {
+    shopifyHandle: { not: null, ...statusHandleFilter },
+    ...(omit !== "vendor" && filters.vendor ? { shopifyVendor: filters.vendor } : {}),
+    ...(omit !== "type" && filters.type ? { shopifyType: filters.type } : {}),
+    ...(omit !== "search" && filters.search
+      ? {
+          OR: [
+            { name: { contains: filters.search, mode: "insensitive" as const } },
+            { shopifyHandle: { contains: filters.search, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
 }
 
 // /import sayfasındaki staging listesi — Shopify Handle bazlı gruplanmış, sayfalanmış.
@@ -31,18 +68,7 @@ export async function listDraftHandlesPage(
   pageSize: number,
   filters: HandlePageFilters = {},
 ): Promise<HandlePage> {
-  const where = {
-    shopifyHandle: { not: null },
-    ...(filters.vendor ? { shopifyVendor: filters.vendor } : {}),
-    ...(filters.search
-      ? {
-          OR: [
-            { name: { contains: filters.search, mode: "insensitive" as const } },
-            { shopifyHandle: { contains: filters.search, mode: "insensitive" as const } },
-          ],
-        }
-      : {}),
-  };
+  const where = await buildHandleWhere(filters);
 
   const grouped = await prisma.product.groupBy({
     by: ["shopifyHandle"],
@@ -58,13 +84,14 @@ export async function listDraftHandlesPage(
     pageHandles.map(async (handle) => {
       const variants = await prisma.product.findMany({
         where: { shopifyHandle: handle },
-        select: { name: true, images: true, status: true, shopifyVendor: true },
+        select: { name: true, images: true, status: true, shopifyVendor: true, shopifyType: true },
       });
       const sampleImages = (variants[0]?.images as string[] | null) ?? [];
       return {
         handle,
         title: variants[0]?.name ?? handle,
         vendor: variants[0]?.shopifyVendor ?? null,
+        type: variants[0]?.shopifyType ?? null,
         variantCount: variants.length,
         submittedCount: variants.filter((v) => v.status !== "draft").length,
         sampleImage: sampleImages[0] ?? null,
@@ -75,15 +102,39 @@ export async function listDraftHandlesPage(
   return { items, total, page, pageSize };
 }
 
-// Filtre dropdown'u için — draft ürünlerdeki benzersiz vendor listesi.
-export async function listDistinctVendors(): Promise<string[]> {
-  const rows = await prisma.product.findMany({
-    where: { shopifyHandle: { not: null }, shopifyVendor: { not: null } },
-    select: { shopifyVendor: true },
-    distinct: ["shopifyVendor"],
-    orderBy: { shopifyVendor: "asc" },
-  });
-  return rows.map((r) => r.shopifyVendor as string);
+export interface Facets {
+  vendors: string[];
+  types: string[];
+}
+
+// Filtre dropdown'ları için — "cascading": her facet, DİĞER aktif filtrelerle kısıtlanmış
+// halde hesaplanır ama kendi boyutuyla değil (yoksa örn. bir vendor seçilince o filtre
+// kendi kendini listede tek seçenek bırakırdı).
+export async function getFacets(filters: HandlePageFilters = {}): Promise<Facets> {
+  const [vendorWhere, typeWhere] = await Promise.all([
+    buildHandleWhere(filters, "vendor"),
+    buildHandleWhere(filters, "type"),
+  ]);
+
+  const [vendorRows, typeRows] = await Promise.all([
+    prisma.product.findMany({
+      where: { ...vendorWhere, shopifyVendor: { not: null } },
+      select: { shopifyVendor: true },
+      distinct: ["shopifyVendor"],
+      orderBy: { shopifyVendor: "asc" },
+    }),
+    prisma.product.findMany({
+      where: { ...typeWhere, shopifyType: { not: null } },
+      select: { shopifyType: true },
+      distinct: ["shopifyType"],
+      orderBy: { shopifyType: "asc" },
+    }),
+  ]);
+
+  return {
+    vendors: vendorRows.map((r) => r.shopifyVendor as string),
+    types: typeRows.map((r) => r.shopifyType as string),
+  };
 }
 
 export async function getHandleGroup(handle: string) {

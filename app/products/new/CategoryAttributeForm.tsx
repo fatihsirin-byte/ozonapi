@@ -98,7 +98,7 @@ export function CategoryPicker({
       <label>Kategori ara</label>
       <input
         type="text"
-        placeholder="örn. kablo, tişört, ayakkabı..."
+        placeholder="e.g. cable, t-shirt, shoes..."
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);

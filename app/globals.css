@@ -51,6 +51,19 @@ a {
   min-width: 220px;
 }
 
+/* Küçük thumbnail'lerin üzerine gelince büyütüp net görebilmek için (import listesi, arama sonuçları). */
+.zoom-thumb {
+  transition: transform 0.2s ease;
+  position: relative;
+  z-index: 1;
+  cursor: zoom-in;
+}
+.zoom-thumb:hover {
+  transform: scale(3);
+  z-index: 50;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
 .filter-bar select {
   background: #0f1216;
   border: 1px solid var(--border);

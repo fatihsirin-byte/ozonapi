@@ -8,6 +8,7 @@ interface HandleItem {
   handle: string;
   title: string;
   vendor: string | null;
+  type: string | null;
   variantCount: number;
   submittedCount: number;
   sampleImage: string | null;
@@ -35,19 +36,32 @@ export function StagingList() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
   const [vendor, setVendor] = useState("");
+  const [type, setType] = useState("");
+  const [status, setStatus] = useState<"" | "draft" | "submitted">("");
   const [vendors, setVendors] = useState<string[]>([]);
+  const [types, setTypes] = useState<string[]>([]);
 
-  useEffect(() => {
-    fetch("/api/import/products/vendors")
+  const refreshFacets = useCallback((q: string, v: string, t: string, s: string) => {
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q.trim());
+    if (v) params.set("vendor", v);
+    if (t) params.set("type", t);
+    if (s) params.set("status", s);
+    fetch(`/api/import/products/facets?${params.toString()}`)
       .then((r) => r.json())
-      .then((data) => setVendors(data.vendors ?? []));
+      .then((data) => {
+        setVendors(data.vendors ?? []);
+        setTypes(data.types ?? []);
+      });
   }, []);
 
-  const load = useCallback(async (targetPage: number, q: string, v: string) => {
+  const load = useCallback(async (targetPage: number, q: string, v: string, t: string, s: string) => {
     setLoading(true);
     const params = new URLSearchParams({ page: String(targetPage), pageSize: String(PAGE_SIZE) });
     if (q.trim()) params.set("q", q.trim());
     if (v) params.set("vendor", v);
+    if (t) params.set("type", t);
+    if (s) params.set("status", s);
     const res = await fetch(`/api/import/products?${params.toString()}`);
     const data = await res.json();
     setItems(data.items ?? []);
@@ -55,14 +69,17 @@ export function StagingList() {
     setLoading(false);
   }, []);
 
+  // Filtreler değiştiğinde: hem liste hem de facet'ler (cascading — diğer filtrelerle
+  // eşleşen vendor/type seçenekleri) yeniden çekilir.
   useEffect(() => {
     setPage(1);
-    load(1, debouncedSearch, vendor);
-  }, [debouncedSearch, vendor, load]);
+    load(1, debouncedSearch, vendor, type, status);
+    refreshFacets(debouncedSearch, vendor, type, status);
+  }, [debouncedSearch, vendor, type, status, load, refreshFacets]);
 
   useEffect(() => {
     if (page === 1) return;
-    load(page, debouncedSearch, vendor);
+    load(page, debouncedSearch, vendor, type, status);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
@@ -90,7 +107,8 @@ export function StagingList() {
         body: JSON.stringify({ handles: Array.from(selected) }),
       });
       setSelected(new Set());
-      await load(page, debouncedSearch, vendor);
+      await load(page, debouncedSearch, vendor, type, status);
+      refreshFacets(debouncedSearch, vendor, type, status);
     } finally {
       setDeleting(false);
     }
@@ -100,7 +118,12 @@ export function StagingList() {
 
   return (
     <div>
-      <CsvDropzone onImported={() => load(1, debouncedSearch, vendor)} />
+      <CsvDropzone
+        onImported={() => {
+          load(1, debouncedSearch, vendor, type, status);
+          refreshFacets(debouncedSearch, vendor, type, status);
+        }}
+      />
 
       <div className="card">
         <div className="filter-bar">
@@ -117,6 +140,19 @@ export function StagingList() {
                 {v}
               </option>
             ))}
+          </select>
+          <select value={type} onChange={(e) => setType(e.target.value)}>
+            <option value="">Tüm tipler (Type)</option>
+            {types.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+          <select value={status} onChange={(e) => setStatus(e.target.value as "" | "draft" | "submitted")}>
+            <option value="">Tüm durumlar</option>
+            <option value="draft">Henüz gönderilmedi (draft)</option>
+            <option value="submitted">Ozon'a gönderildi</option>
           </select>
         </div>
 
@@ -135,7 +171,9 @@ export function StagingList() {
           <div className="hint">Yükleniyor...</div>
         ) : items.length === 0 ? (
           <div className="empty-state">
-            {search || vendor ? "Bu filtreyle eşleşen ürün yok." : "İçe aktarılmış ürün yok. Yukarıdan bir Shopify CSV'si yükleyin."}
+            {search || vendor || type || status
+              ? "Bu filtreyle eşleşen ürün yok."
+              : "İçe aktarılmış ürün yok. Yukarıdan bir Shopify CSV'si yükleyin."}
           </div>
         ) : (
           <table>
@@ -147,6 +185,7 @@ export function StagingList() {
                 <th>Görsel</th>
                 <th>Ürün</th>
                 <th>Vendor</th>
+                <th>Type</th>
                 <th>Varyant</th>
                 <th>Durum</th>
               </tr>
@@ -162,6 +201,7 @@ export function StagingList() {
                       <img
                         src={item.sampleImage}
                         alt=""
+                        className="zoom-thumb"
                         style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 6 }}
                       />
                     ) : (
@@ -175,6 +215,7 @@ export function StagingList() {
                     </div>
                   </td>
                   <td>{item.vendor ?? <span className="hint">—</span>}</td>
+                  <td>{item.type ?? <span className="hint">—</span>}</td>
                   <td>{item.variantCount}</td>
                   <td>
                     {item.submittedCount > 0 ? (

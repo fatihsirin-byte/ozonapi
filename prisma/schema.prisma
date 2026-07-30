@@ -35,6 +35,7 @@ model Product {
   shopifyHandle     String?
   shopifyVariantId  String?
   shopifyVendor     String?
+  shopifyType       String?
   originalImages    Json? // Shopify'dan gelen orijinal görsel URL'leri, dokunulmamış — "eski görsel" copy/keep için
   shopifyMetafields Json? // CSV'deki Flavor/Chocolate type/Color/Country vb. ham metafield değerleri, attribute ön-doldurma için
   descriptionHtml   String? // Shopify Body (HTML) — Gemini çevirisi için kaynak
@@ -48,6 +49,7 @@ model Product {
   @@index([shopifyHandle])
   @@index([modelGroupId])
   @@index([shopifyVendor])
+  @@index([shopifyType])
 }
 
 // Farklı Shopify ürünlerini (handle) tek Ozon kartında birleştirmek için — 9048 model name attribute'una karşılık gelir.

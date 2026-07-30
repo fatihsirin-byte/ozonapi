@@ -336,7 +336,12 @@ export function HandleEditor({ handle }: { handle: string }) {
                       onClick={() => linkModel(r.offerId)}
                     >
                       {thumb ? (
-                        <img src={thumb} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />
+                        <img
+                          src={thumb}
+                          alt=""
+                          className="zoom-thumb"
+                          style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, flexShrink: 0 }}
+                        />
                       ) : (
                         <div style={{ width: 40, height: 40, borderRadius: 6, background: "#1a1e24", flexShrink: 0 }} />
                       )}

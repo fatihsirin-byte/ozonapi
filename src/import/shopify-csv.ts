@@ -42,6 +42,7 @@ export interface ParsedProduct {
   title: string;
   descriptionHtml: string;
   vendor: string;
+  productType: string;
   tags: string[];
   images: string[];
   metafields: Record<string, string>;
@@ -126,6 +127,7 @@ export function parseShopifyCsv(csvText: string): ParsedProduct[] {
       title: firstNonEmpty(rows, "Title") || handle,
       descriptionHtml: firstNonEmpty(rows, "Body (HTML)"),
       vendor: firstNonEmpty(rows, "Vendor"),
+      productType: firstNonEmpty(rows, "Type"),
       tags: firstNonEmpty(rows, "Tags")
         .split(",")
         .map((t) => t.trim())

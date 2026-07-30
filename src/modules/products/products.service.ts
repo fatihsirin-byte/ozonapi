@@ -166,13 +166,18 @@ export async function getProduct(offerId: string) {
   return prisma.product.findUnique({ where: { offerId } });
 }
 
-export async function updateProductPrice(offerId: string, costPrice: string) {
+// priceOverride verilirse (Fiyat Hesaplayıcı modalında elle girilen satış fiyatı) formülü
+// yeniden hesaplamadan doğrudan o fiyat Ozon'a gönderilir — aksi halde costPrice'tan
+// formülle hesaplanan önerilen fiyat kullanılır (mevcut davranış).
+export async function updateProductPrice(offerId: string, costPrice: string, priceOverride?: string) {
   const existing = await prisma.product.findUnique({ where: { offerId } });
-  const price = computeSalePrice(costPrice, existing?.weightGrams, {
-    widthCm: existing?.widthCm,
-    heightCm: existing?.heightCm,
-    depthCm: existing?.depthCm,
-  });
+  const price =
+    priceOverride ||
+    computeSalePrice(costPrice, existing?.weightGrams, {
+      widthCm: existing?.widthCm,
+      heightCm: existing?.heightCm,
+      depthCm: existing?.depthCm,
+    });
 
   const { result } = await updatePrices([{ offerId, price }]);
   const entry = result.find((r) => r.offer_id === offerId);

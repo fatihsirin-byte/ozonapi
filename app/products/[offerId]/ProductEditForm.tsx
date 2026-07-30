@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ImageDropzone } from "../new/ImageDropzone";
 import { CategoryPicker, AttributeField, useRequiredAttributes, type CategoryOption } from "../new/CategoryAttributeForm";
 import { computeSalePrice, estimateShippingCostUsd, computeBillingWeightGrams } from "@/pricing/formula";
+import { PriceCalculatorModal } from "./PriceCalculatorModal";
 
 interface ProductData {
   offerId: string;
@@ -34,6 +35,8 @@ type Tab = (typeof TABS)[number];
 export function ProductEditForm({ product }: { product: ProductData }) {
   const [tab, setTab] = useState<Tab>("Genel");
   const [costPrice, setCostPrice] = useState(product.costPrice ?? "");
+  const [priceOverride, setPriceOverride] = useState<string | null>(null);
+  const [showCalculator, setShowCalculator] = useState(false);
   const [images, setImages] = useState<string[]>(Array.isArray(product.images) ? (product.images as string[]) : []);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(product.status);
@@ -136,20 +139,21 @@ export function ProductEditForm({ product }: { product: ProductData }) {
     }, 3000);
   }
 
-  async function savePrice() {
+  async function savePrice(override?: string) {
     setSaving(true);
     setMessage(null);
     try {
       const res = await fetch(`/api/products/${product.offerId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ costPrice }),
+        body: JSON.stringify({ costPrice, priceOverride: override }),
       });
       const data = await res.json();
       if (!res.ok) {
         setMessage({ type: "error", text: data.error ?? "Güncelleme başarısız" });
         return;
       }
+      if (override) setPriceOverride(override);
       setMessage({ type: "success", text: "Fiyat Ozon'a kaydedildi." });
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Bilinmeyen hata" });
@@ -243,18 +247,27 @@ export function ProductEditForm({ product }: { product: ProductData }) {
           <div className="row">
             <div className="field">
               <label>Alış Fiyatı (USD)</label>
-              <input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} />
+              <input
+                type="number"
+                value={costPrice}
+                onChange={(e) => {
+                  setCostPrice(e.target.value);
+                  setPriceOverride(null);
+                }}
+              />
             </div>
             <div className="field">
-              <label>Satış Fiyatı (otomatik hesaplanır: alış + %40 marj + kargo + komisyon/kesintiler, gerekirse gümrük yuvarlaması)</label>
+              <label>Satış Fiyatı (USD) — {priceOverride ? "elle belirlendi" : "otomatik hesaplanır"}</label>
               <input
                 type="text"
                 value={
+                  priceOverride ||
                   computeSalePrice(costPrice, product.weightGrams, {
                     widthCm: product.widthCm,
                     heightCm: product.heightCm,
                     depthCm: product.depthCm,
-                  }) || product.price
+                  }) ||
+                  product.price
                 }
                 disabled
               />
@@ -273,9 +286,31 @@ export function ProductEditForm({ product }: { product: ProductData }) {
               ).
             </div>
           )}
-          <button className="btn-primary" disabled={saving || !costPrice} onClick={savePrice}>
-            Fiyatı Kaydet
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn-primary" disabled={saving || !costPrice} onClick={() => savePrice(priceOverride ?? undefined)}>
+              Fiyatı Kaydet
+            </button>
+            <button type="button" className="btn-secondary" disabled={!costPrice} onClick={() => setShowCalculator(true)}>
+              Fiyat Hesaplayıcı
+            </button>
+          </div>
+
+          {showCalculator && (
+            <PriceCalculatorModal
+              costPrice={costPrice}
+              weightGrams={product.weightGrams}
+              widthCm={product.widthCm}
+              heightCm={product.heightCm}
+              depthCm={product.depthCm}
+              currentPrice={priceOverride || product.price}
+              onClose={() => setShowCalculator(false)}
+              onApply={(priceUsd) => {
+                setPriceOverride(priceUsd);
+                setShowCalculator(false);
+                savePrice(priceUsd);
+              }}
+            />
+          )}
         </>
       )}
 

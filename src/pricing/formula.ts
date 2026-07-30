@@ -83,3 +83,44 @@ export function computeSalePrice(
 
   return price.toFixed(2);
 }
+
+export interface PriceBreakdown {
+  costUsd: number;
+  shippingUsd: number;
+  recommendedPriceUsd: number;
+  actualPriceUsd: number;
+  profitUsd: number;
+  marginPct: number; // alış fiyatına göre (kâr / alış × 100)
+}
+
+// Fiyat hesaplayıcı modalı için — önerilen fiyatın yanında kullanıcının girdiği (ya da
+// önerilenle aynı) bir satış fiyatına göre kâr/marj dökümü çıkarır. Ozon Fiyat Hesaplayıcı
+// tarayıcı eklentisindeki (ozon-fiyat-hesaplayici/content.js) recalcBreakdown() ile aynı mantık.
+export function computePriceBreakdown(
+  costPrice: string | number,
+  weightGrams?: number | null,
+  dimsCm?: { widthCm?: number | null; heightCm?: number | null; depthCm?: number | null },
+  actualPriceOverrideUsd?: number,
+): PriceBreakdown | null {
+  const cost = Number(costPrice);
+  if (!cost || Number.isNaN(cost)) return null;
+
+  const billingWeight = weightGrams
+    ? computeBillingWeightGrams(weightGrams, dimsCm?.widthCm, dimsCm?.heightCm, dimsCm?.depthCm)
+    : 0;
+  const shippingUsd = billingWeight ? estimateShippingCostUsd(billingWeight) : 0;
+
+  const recommendedStr = computeSalePrice(costPrice, weightGrams, dimsCm);
+  const recommendedPriceUsd = recommendedStr ? Number(recommendedStr) : 0;
+
+  const actualPriceUsd = actualPriceOverrideUsd ?? recommendedPriceUsd;
+  if (!actualPriceUsd) {
+    return { costUsd: cost, shippingUsd, recommendedPriceUsd, actualPriceUsd: 0, profitUsd: 0, marginPct: 0 };
+  }
+
+  const netAfterFees = actualPriceUsd * (1 - totalFeeRate(actualPriceUsd));
+  const profitUsd = netAfterFees - shippingUsd - cost;
+  const marginPct = (profitUsd / cost) * 100;
+
+  return { costUsd: cost, shippingUsd, recommendedPriceUsd, actualPriceUsd, profitUsd, marginPct };
+}

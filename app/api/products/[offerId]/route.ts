@@ -26,6 +26,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const { offerId } = await params;
   const body = (await request.json()) as {
     costPrice?: string;
+    priceOverride?: string;
     images?: string[];
     category?: { descriptionCategoryId: number; typeId: number };
     attributes?: ProductAttributeInput[];
@@ -33,7 +34,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   try {
     if (body.costPrice !== undefined) {
-      await updateProductPrice(offerId, body.costPrice);
+      await updateProductPrice(offerId, body.costPrice, body.priceOverride);
     }
     if (body.images !== undefined) {
       await updateProductImages(offerId, body.images);

@@ -1,12 +1,36 @@
 import { prisma } from "../../db/prisma";
 import { computeSalePrice } from "../../pricing/formula";
 import { translateToRussian } from "../../ai/translate";
-import { updatePrices, updateStocks } from "../../ozon/products";
+import { updatePrices, updateStocks, getImportStatus } from "../../ozon/products";
 import { DEFAULT_WAREHOUSE_ID } from "../../ozon/warehouses";
+import { createProduct, updateProductImages, type ProductAttributeInput } from "./products.service";
 
 // Yeni gönderilen her ürüne varsayılan stok — kullanıcı isteğiyle sabitlendi (2026-07-30).
 const DEFAULT_STOCK = 100;
-import { createProduct, updateProductImages, type ProductAttributeInput } from "./products.service";
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Ozon /v3/product/import asenkron (task_id) — ürün gerçekten Ozon tarafında oluşana kadar
+// stok çağrısı sessizce hiçbir şey yapmıyor (200 + updated:true dönüyor ama tutmuyor, bu
+// 2026-07-30'da canlıda doğrulandı: hemen sonra çağrılan updateStocks stok yazmadı, birkaç
+// saniye sonra tekrar denendiğinde işledi). Bu yüzden import'un bitmesini (product_id
+// atanmasını) bekleyip ANCAK ondan sonra stok gönderiyoruz.
+async function waitForImportThenPushStock(offerId: string, taskId: number, stock: number) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await sleep(2000);
+    try {
+      const { result } = await getImportStatus(taskId);
+      const item = result.items.find((i) => i.offer_id === offerId) ?? result.items[0];
+      if (item?.status !== "pending" && item?.product_id > 0) break;
+    } catch {
+      // durum kontrolü başarısız oldu, yine de deneme sayısı bitince stok göndermeyi dene
+    }
+  }
+  await updateStocks([{ offerId, stock, warehouseId: DEFAULT_WAREHOUSE_ID }]);
+  await prisma.product.update({ where: { offerId }, data: { stockQuantity: stock } });
+}
 
 export interface HandlePageItem {
   handle: string;
@@ -357,12 +381,11 @@ export async function submitHandleToOzon(input: SubmitHandleInput) {
         modelNameOverride,
         descriptionRu: variant.descriptionRu,
       });
-      try {
-        await updateStocks([{ offerId: variant.offerId, stock: DEFAULT_STOCK, warehouseId: DEFAULT_WAREHOUSE_ID }]);
-        await prisma.product.update({ where: { offerId: variant.offerId }, data: { stockQuantity: DEFAULT_STOCK } });
-      } catch {
-        // Stok ayarı başarısız olsa da ürün oluşturma başarılı sayılır — stok daha sonra
-        // "Stokları Gönder" ile tekrar denenebilir.
+      if (taskId) {
+        // Bilerek await edilmiyor — import'un bitmesini beklemek saniyeler sürebiliyor,
+        // bu da toplu gönderimi yavaşlatır. Arka planda biter, hata olsa bile ürün
+        // oluşturma başarılı sayılır (stok daha sonra "Stokları Gönder" ile tekrar denenebilir).
+        waitForImportThenPushStock(variant.offerId, Number(taskId), DEFAULT_STOCK).catch(() => {});
       }
       results.push({ offerId: variant.offerId, taskId: taskId ? String(taskId) : undefined });
     } catch (error) {

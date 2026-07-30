@@ -16,7 +16,17 @@ export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const [orderDragIndex, setOrderDragIndex] = useState<number | null>(null);
+  const [orderOverIndex, setOrderOverIndex] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  function moveImage(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return;
+    const next = [...images];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    onChange(next);
+  }
 
   async function copyUrl(url: string) {
     await navigator.clipboard.writeText(url);
@@ -200,6 +210,71 @@ export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
             </div>
           ))}
         </div>
+      )}
+
+      {images.length > 0 && (
+        <>
+          <label style={{ marginTop: 20 }}>Gönderilecek görseller — sıra (Ozon'a bu sırayla gider, ilki kapak görseli)</label>
+          <div className="hint" style={{ marginTop: -4, marginBottom: 8 }}>
+            Sırayı değiştirmek için kartları sürükleyip bırakın.
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {images.map((url, index) => (
+              <div
+                key={url}
+                draggable
+                onDragStart={() => setOrderDragIndex(index)}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setOrderOverIndex(index);
+                }}
+                onDragLeave={() => setOrderOverIndex((current) => (current === index ? null : current))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (orderDragIndex !== null) moveImage(orderDragIndex, index);
+                  setOrderDragIndex(null);
+                  setOrderOverIndex(null);
+                }}
+                onDragEnd={() => {
+                  setOrderDragIndex(null);
+                  setOrderOverIndex(null);
+                }}
+                style={{
+                  position: "relative",
+                  width: 110,
+                  cursor: "grab",
+                  border: `2px solid ${orderOverIndex === index ? "var(--accent)" : "var(--border)"}`,
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  opacity: orderDragIndex === index ? 0.4 : 1,
+                  background: "#fff",
+                }}
+              >
+                <img
+                  src={url}
+                  alt=""
+                  draggable={false}
+                  style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "contain", display: "block" }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 4,
+                    left: 4,
+                    background: index === 0 ? "var(--accent)" : "rgba(0,0,0,0.65)",
+                    color: "white",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    borderRadius: 4,
+                    padding: "1px 6px",
+                  }}
+                >
+                  {index + 1}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       <div className="hint" style={{ marginTop: 12 }}>

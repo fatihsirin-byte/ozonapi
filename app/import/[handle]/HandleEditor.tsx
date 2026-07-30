@@ -27,6 +27,7 @@ interface Variant {
   nameRu: string | null;
   descriptionRu: string | null;
   status: string;
+  excludedFromSubmit: boolean;
   modelGroup: { id: string; name: string | null; products: { offerId: string }[] } | null;
 }
 
@@ -132,6 +133,23 @@ export function HandleEditor({ handle }: { handle: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [field]: field === "weightGrams" ? Number(value) || 0 : value }),
     });
+  }
+
+  async function toggleVariantExcluded(offerId: string, excluded: boolean) {
+    setVariants((prev) =>
+      prev ? prev.map((v) => (v.offerId === offerId ? { ...v, excludedFromSubmit: excluded } : v)) : prev,
+    );
+    await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ excludedFromSubmit: excluded }),
+    });
+  }
+
+  async function deleteVariant(offerId: string) {
+    if (!confirm(`${offerId} varyantını kalıcı olarak silmek istediğinize emin misiniz?`)) return;
+    await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, { method: "DELETE" });
+    setVariants((prev) => (prev ? prev.filter((v) => v.offerId !== offerId) : prev));
   }
 
   async function linkModel(targetOfferId: string) {
@@ -260,6 +278,9 @@ export function HandleEditor({ handle }: { handle: string }) {
 
       <div className="card" style={{ marginBottom: 16 }}>
         <label>Varyantlar ({variants.length})</label>
+        <div className="hint" style={{ marginBottom: 8 }}>
+          "Pasifleştir" bir varyantı silmeden Ozon'a göndermeyi atlar (geri aktifleştirilebilir). "Sil" kalıcıdır.
+        </div>
         <table>
           <thead>
             <tr>
@@ -269,11 +290,12 @@ export function HandleEditor({ handle }: { handle: string }) {
               <th>Alış Fiyatı (USD)</th>
               <th>Satış Fiyatı</th>
               <th>Durum</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {variants.map((v) => (
-              <tr key={v.id}>
+              <tr key={v.id} style={v.excludedFromSubmit ? { opacity: 0.5 } : undefined}>
                 <td>{v.offerId}</td>
                 <td>{v.name}</td>
                 <td>
@@ -294,7 +316,25 @@ export function HandleEditor({ handle }: { handle: string }) {
                 </td>
                 <td>{computeSalePrice(v.costPrice ?? "0", v.weightGrams) || v.price}</td>
                 <td>
-                  <span className={`badge ${v.status}`}>{v.status}</span>
+                  {v.excludedFromSubmit ? (
+                    <span className="badge failed">pasif</span>
+                  ) : (
+                    <span className={`badge ${v.status}`}>{v.status}</span>
+                  )}
+                </td>
+                <td style={{ display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => toggleVariantExcluded(v.offerId, !v.excludedFromSubmit)}
+                  >
+                    {v.excludedFromSubmit ? "Aktifleştir" : "Pasifleştir"}
+                  </button>
+                  {v.status === "draft" && (
+                    <button type="button" className="btn-secondary" onClick={() => deleteVariant(v.offerId)}>
+                      Sil
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

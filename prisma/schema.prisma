@@ -43,6 +43,9 @@ model Product {
   modelGroup        ModelGroup? @relation(fields: [modelGroupId], references: [id])
   nameRu            String? // Gemini çevirisi cache
   descriptionRu     String?
+  // true ise bu varyant "pasif" — handle Ozon'a gönderilirken atlanır, silinmiyor (geri
+  // aktifleştirilebilir). Kalıcı silme için deleteHandles/ExcludedOfferId kullanılıyor.
+  excludedFromSubmit Boolean @default(false)
 
   orderItems OrderItem[]
 
@@ -50,6 +53,14 @@ model Product {
   @@index([modelGroupId])
   @@index([shopifyVendor])
   @@index([shopifyType])
+}
+
+// Kullanıcının /import'tan bilerek sildiği offerId'ler — CSV tekrar import edilirse
+// (örn. yeni bir alan eklenip mevcut satırlar güncellenmek istendiğinde) bu ürünlerin
+// "hayalet" gibi geri gelmemesi için upsert bu tabloyu kontrol edip atlıyor.
+model ExcludedOfferId {
+  offerId   String   @id
+  createdAt DateTime @default(now())
 }
 
 // Farklı Shopify ürünlerini (handle) tek Ozon kartında birleştirmek için — 9048 model name attribute'una karşılık gelir.

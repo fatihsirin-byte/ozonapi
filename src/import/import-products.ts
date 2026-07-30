@@ -17,7 +17,7 @@ export async function importShopifyCsvText(csvText: string): Promise<ImportSumma
 }
 
 export async function upsertParsedProducts(products: ParsedProduct[]): Promise<ImportSummary> {
-  const rows = products.flatMap((product) =>
+  const allRows = products.flatMap((product) =>
     product.variants.map((variant) => {
       const name =
         product.variants.length > 1 ? `${product.title} - ${variant.optionValues.join(" / ")}` : product.title;
@@ -43,6 +43,12 @@ export async function upsertParsedProducts(products: ParsedProduct[]): Promise<I
       };
     })
   );
+
+  // Kullanıcının /import'tan bilerek sildiği ürünler CSV'de hâlâ var olabilir — tekrar
+  // import edilince "hayalet" gibi geri gelmesinler diye bu satırları atlıyoruz.
+  const excluded = await prisma.excludedOfferId.findMany({ select: { offerId: true } });
+  const excludedSet = new Set(excluded.map((e) => e.offerId));
+  const rows = allRows.filter((row) => !excludedSet.has(row.offerId));
 
   for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
     const chunk = rows.slice(i, i + CHUNK_SIZE);
@@ -85,5 +91,6 @@ export async function upsertParsedProducts(products: ParsedProduct[]): Promise<I
     );
   }
 
-  return { handles: products.length, variants: rows.length };
+  const handleCount = new Set(rows.map((r) => r.shopifyHandle)).size;
+  return { handles: handleCount, variants: rows.length };
 }

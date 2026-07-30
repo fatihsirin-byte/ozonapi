@@ -132,7 +132,7 @@ async function countHandlesPerValue(
 
   return Array.from(counts.entries())
     .map(([value, count]) => ({ value, count }))
-    .sort((a, b) => a.value.localeCompare(b.value));
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
 }
 
 // Filtre dropdown'ları için — "cascading": her facet, DİĞER aktif filtrelerle kısıtlanmış
@@ -180,9 +180,37 @@ export async function updateDraftVariant(
   });
 }
 
+// Silinen offerId'leri ExcludedOfferId'e kaydeder — CSV tekrar import edilirse bu ürünler
+// "yeni satır" sanılıp geri getirilmesin diye (bkz. upsertParsedProducts).
 export async function deleteHandles(handles: string[]) {
+  const toDelete = await prisma.product.findMany({
+    where: { shopifyHandle: { in: handles }, status: "draft" },
+    select: { offerId: true },
+  });
+
+  await prisma.excludedOfferId.createMany({
+    data: toDelete.map((p) => ({ offerId: p.offerId })),
+    skipDuplicates: true,
+  });
+
   const result = await prisma.product.deleteMany({ where: { shopifyHandle: { in: handles }, status: "draft" } });
   return result.count;
+}
+
+// Tek bir varyantı kalıcı olarak siler (handle'ın diğer varyantlarına dokunmadan).
+export async function deleteVariant(offerId: string) {
+  const product = await prisma.product.findUnique({ where: { offerId } });
+  if (!product || product.status !== "draft") return false;
+
+  await prisma.excludedOfferId.upsert({ where: { offerId }, create: { offerId }, update: {} });
+  await prisma.product.delete({ where: { offerId } });
+  return true;
+}
+
+// Bir varyantı "pasif" işaretler — silinmez, ama submitHandleToOzon bu varyantı atlar.
+// Kullanıcı istediğinde tekrar aktifleştirebilir.
+export async function setVariantExcludedFromSubmit(offerId: string, excluded: boolean) {
+  return prisma.product.update({ where: { offerId }, data: { excludedFromSubmit: excluded } });
 }
 
 export async function searchStagedProducts(query: string, excludeHandle?: string) {
@@ -258,10 +286,10 @@ export interface SubmitHandleInput {
 // Model grubu varsa hepsine aynı 9048 değeri yazılır, ki Ozon bunları tek kartta göstersin.
 export async function submitHandleToOzon(input: SubmitHandleInput) {
   const variants = await prisma.product.findMany({
-    where: { shopifyHandle: input.handle },
+    where: { shopifyHandle: input.handle, excludedFromSubmit: false },
     include: { modelGroup: true },
   });
-  if (variants.length === 0) throw new Error("Bu handle için varyant bulunamadı");
+  if (variants.length === 0) throw new Error("Bu handle için gönderilecek (pasif olmayan) varyant bulunamadı");
 
   const results: { offerId: string; taskId?: string; error?: string }[] = [];
 

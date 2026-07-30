@@ -3,6 +3,8 @@ node_modules/
 dist/
 .env
 .env.local
+.credentials
+products_export_1.csv
 *.log
 next-env.d.ts
 *.tsbuildinfo

@@ -24,14 +24,37 @@ model Product {
   descriptionCategoryId Int?
   typeId                Int?
   images                Json?
-  status                String    @default("draft") // draft | pending | imported | failed
+  status                String    @default("draft") // draft | ready | pending | imported | failed
   importTaskId          BigInt?
   lastError             String?
   lastSyncedAt          DateTime?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
+  // Shopify CSV içe aktarımından gelen alanlar
+  shopifyHandle     String?
+  shopifyVariantId  String?
+  originalImages    Json? // Shopify'dan gelen orijinal görsel URL'leri, dokunulmamış — "eski görsel" copy/keep için
+  shopifyMetafields Json? // CSV'deki Flavor/Chocolate type/Color/Country vb. ham metafield değerleri, attribute ön-doldurma için
+  descriptionHtml   String? // Shopify Body (HTML) — Gemini çevirisi için kaynak
+  modelGroupId      String?
+  modelGroup        ModelGroup? @relation(fields: [modelGroupId], references: [id])
+  nameRu            String? // Gemini çevirisi cache
+  descriptionRu     String?
+
   orderItems OrderItem[]
+
+  @@index([shopifyHandle])
+  @@index([modelGroupId])
+}
+
+// Farklı Shopify ürünlerini (handle) tek Ozon kartında birleştirmek için — 9048 model name attribute'una karşılık gelir.
+model ModelGroup {
+  id        String   @id @default(cuid())
+  name      String?
+  createdAt DateTime @default(now())
+
+  products Product[]
 }
 
 // FBS/FBO siparişi, postingNumber Ozon tarafındaki benzersiz sipariş numarası.

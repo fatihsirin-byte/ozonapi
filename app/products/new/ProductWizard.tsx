@@ -4,26 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ImageDropzone } from "./ImageDropzone";
 import { computeSalePrice } from "@/pricing/formula";
-
-interface CategoryOption {
-  descriptionCategoryId: number;
-  typeId: number;
-  path: string;
-  typeName: string;
-}
-
-interface RequiredAttribute {
-  id: number;
-  name: string;
-  type: string;
-  dictionary_id: number;
-}
-
-interface AttributeAnswer {
-  value?: string;
-  dictionaryValueId?: number;
-  displayValue?: string;
-}
+import {
+  CategoryPicker,
+  AttributeValuePicker,
+  type CategoryOption,
+  type RequiredAttribute,
+  type AttributeAnswer,
+} from "./CategoryAttributeForm";
 
 interface Variant {
   key: string;
@@ -70,151 +57,6 @@ function emptyVariant(): Variant {
     depthCm: "10",
     images: [],
   };
-}
-
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(timer);
-  }, [value, delayMs]);
-  return debounced;
-}
-
-function CategoryPicker({
-  selected,
-  onSelect,
-}: {
-  selected: CategoryOption | null;
-  onSelect: (category: CategoryOption | null) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const debouncedQuery = useDebouncedValue(query, 300);
-  const [results, setResults] = useState<CategoryOption[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!debouncedQuery.trim()) {
-      setResults([]);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    fetch(`/api/categories/search?q=${encodeURIComponent(debouncedQuery)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled) setResults(data.results ?? []);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [debouncedQuery]);
-
-  if (selected) {
-    return (
-      <div className="field">
-        <label>Kategori</label>
-        <div className="selected-pill">
-          <strong>{selected.typeName}</strong>&nbsp;({selected.path})
-          <button className="btn-secondary" onClick={() => onSelect(null)} type="button">
-            Değiştir
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="field">
-      <label>Kategori ara</label>
-      <input
-        type="text"
-        placeholder="örn. kablo, tişört, ayakkabı..."
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
-      <div className="hint">Ürününüze en yakın Ozon kategorisini yazıp aratın.</div>
-      {loading && <div className="hint">Aranıyor...</div>}
-      {results.length > 0 && (
-        <div className="search-results">
-          {results.map((r) => (
-            <div
-              key={`${r.descriptionCategoryId}-${r.typeId}`}
-              className="search-result-item"
-              onClick={() => onSelect(r)}
-            >
-              <strong>{r.typeName}</strong>
-              <div className="hint" style={{ margin: 0 }}>
-                {r.path}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AttributeValuePicker({
-  attribute,
-  category,
-  answer,
-  onChange,
-}: {
-  attribute: RequiredAttribute;
-  category: CategoryOption;
-  answer: AttributeAnswer | undefined;
-  onChange(answer: AttributeAnswer): void;
-}) {
-  const [query, setQuery] = useState(answer?.displayValue ?? "");
-  const debouncedQuery = useDebouncedValue(query, 300);
-  const [results, setResults] = useState<Array<{ id: number; value: string }>>([]);
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    fetch(
-      `/api/attributes/${attribute.id}/values?categoryId=${category.descriptionCategoryId}&typeId=${category.typeId}&q=${encodeURIComponent(debouncedQuery)}`,
-    )
-      .then((r) => r.json())
-      .then((data) => setResults(data.values ?? []));
-  }, [debouncedQuery, open, attribute.id, category.descriptionCategoryId, category.typeId]);
-
-  return (
-    <div className="field">
-      <label>{attribute.name}</label>
-      <input
-        type="text"
-        value={query}
-        placeholder="Ara ve seç..."
-        onFocus={() => setOpen(true)}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setOpen(true);
-        }}
-      />
-      {open && results.length > 0 && (
-        <div className="search-results">
-          {results.map((v) => (
-            <div
-              key={v.id}
-              className="search-result-item"
-              onClick={() => {
-                onChange({ dictionaryValueId: v.id, displayValue: v.value });
-                setQuery(v.value);
-                setOpen(false);
-              }}
-            >
-              {v.value}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function VariantCard({

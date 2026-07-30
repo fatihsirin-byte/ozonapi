@@ -27,6 +27,9 @@ export interface CreateProductInput {
   heightCm: number;
   depthCm: number;
   attributes: ProductAttributeInput[];
+  // Farklı Shopify handle'larını (ModelGroup) tek Ozon kartında birleştirirken 9048 attribute'una
+  // grubun tüm üyeleri için aynı değeri yazmak için — verilmezse offerId kullanılır (mevcut davranış).
+  modelNameOverride?: string;
 }
 
 export async function createProduct(input: CreateProductInput) {
@@ -88,15 +91,20 @@ export async function createProduct(input: CreateProductInput) {
       dimension_unit: "cm",
       vat: "0",
       images: input.images,
-      attributes: input.attributes.map((attr) => ({
-        id: attr.id,
-        values: [
-          {
-            value: attr.value ?? "",
-            ...(attr.dictionaryValueId ? { dictionary_value_id: attr.dictionaryValueId } : {}),
-          },
-        ],
-      })),
+      attributes: [
+        ...input.attributes
+          .filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID)
+          .map((attr) => ({
+            id: attr.id,
+            values: [
+              {
+                value: attr.value ?? "",
+                ...(attr.dictionaryValueId ? { dictionary_value_id: attr.dictionaryValueId } : {}),
+              },
+            ],
+          })),
+        { id: MODEL_NAME_ATTRIBUTE_ID, values: [{ value: input.modelNameOverride ?? input.offerId }] },
+      ],
     },
   ]);
 
@@ -148,8 +156,10 @@ export async function checkImportStatus(offerId: string) {
   return { status, ozonProductId: created ? String(item.product_id) : null, error: errorMessage };
 }
 
+// Shopify CSV içe aktarımından gelen "draft" satırlar (binlerce olabilir) burada listelenmiyor —
+// onlar /import sayfasında ayrı, sayfalanmış bir listede yönetiliyor (bkz. staging.service.ts).
 export async function listAllProducts() {
-  return prisma.product.findMany({ orderBy: { createdAt: "desc" } });
+  return prisma.product.findMany({ where: { status: { not: "draft" } }, orderBy: { createdAt: "desc" } });
 }
 
 export async function getProduct(offerId: string) {
@@ -179,10 +189,11 @@ export async function updateProductPrice(offerId: string, costPrice: string) {
 // attribute'ları (tip/marka vb.) tekrar göndermesek de Ozon'da korunuyor — sadece ağırlık/boyut
 // ve model name (9048) her seferinde yeniden gönderilmek zorunda, aksi halde "zorunlu alan boş" hatası alınıyor.
 export async function updateProductImages(offerId: string, images: string[]) {
-  const product = await prisma.product.findUnique({ where: { offerId } });
+  const product = await prisma.product.findUnique({ where: { offerId }, include: { modelGroup: true } });
   if (!product?.ozonProductId || !product.descriptionCategoryId || !product.typeId) {
     throw new Error("Bu ürün henüz Ozon'da oluşmamış, görseller güncellenemez");
   }
+  const modelName = product.modelGroup?.name ?? offerId;
 
   const { result } = await importProducts([
     {
@@ -201,7 +212,7 @@ export async function updateProductImages(offerId: string, images: string[]) {
       dimension_unit: "cm",
       vat: "0",
       images,
-      attributes: [{ id: MODEL_NAME_ATTRIBUTE_ID, values: [{ value: offerId }] }],
+      attributes: [{ id: MODEL_NAME_ATTRIBUTE_ID, values: [{ value: modelName }] }],
     },
   ]);
 

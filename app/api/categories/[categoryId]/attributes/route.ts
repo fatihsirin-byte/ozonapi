@@ -14,5 +14,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     languageCode: "EN",
   });
 
-  return NextResponse.json({ attributes: result.filter((attr) => attr.is_required) });
+  // Varsayılan: sadece zorunlu attribute'lar (mevcut wizard davranışı korunuyor).
+  // includeOptional=1 verilirse opsiyonel olanlar da döner (Annotation, Composition, PDF, JSON
+  // rich content, Ozon.Video vb. — Ozon'un içerik kalite puanını artıran ama zorunlu olmayan alanlar).
+  const includeOptional = request.nextUrl.searchParams.get("includeOptional") === "1";
+  const attributes = includeOptional ? result : result.filter((attr) => attr.is_required);
+
+  return NextResponse.json({ attributes });
 }

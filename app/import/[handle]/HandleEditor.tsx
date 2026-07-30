@@ -256,14 +256,14 @@ export function HandleEditor({ handle }: { handle: string }) {
 
   if (!variants) {
     return (
-      <div className="page">
+      <div className="page-wide">
         <div className="card">Yükleniyor...</div>
       </div>
     );
   }
 
   return (
-    <div className="page">
+    <div className="page-wide">
       <div className="topbar">
         <h1>{variants[0]?.name ?? handle}</h1>
         <Link href="/import">

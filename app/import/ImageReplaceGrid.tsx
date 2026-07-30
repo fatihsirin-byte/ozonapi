@@ -77,7 +77,7 @@ export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
               gap: 12,
               marginBottom: 20,
             }}
@@ -92,7 +92,17 @@ export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
                   background: "#0f1216",
                 }}
               >
-                <img src={url} alt="" style={{ width: "100%", height: 220, objectFit: "cover", display: "block" }} />
+                <img
+                  src={url}
+                  alt=""
+                  style={{
+                    width: "100%",
+                    aspectRatio: "1 / 1",
+                    objectFit: "contain",
+                    background: "#fff",
+                    display: "block",
+                  }}
+                />
                 <div style={{ display: "flex", gap: 6, padding: 8 }}>
                   <button
                     type="button"

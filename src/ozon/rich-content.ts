@@ -36,6 +36,27 @@ interface RichTextBlock {
   };
 }
 
+// Her ürün sayfasının sonuna eklenen sabit güven/destek bloğu — kullanıcı isteğiyle
+// eklendi (2026-07-31), tüm ürünlerde aynı, ürüne özel bir veri gerektirmiyor.
+const CLOSING_BLOCK: RichTextBlock = {
+  widgetName: "raTextBlock",
+  title: { items: [{ type: "text", content: "Есть вопросы?" }], size: "size4", color: "color1" },
+  theme: "primary",
+  padding: "type2",
+  gapSize: "m",
+  text: {
+    size: "size2",
+    align: "left",
+    color: "color1",
+    items: [
+      {
+        type: "text",
+        content: "Не стесняйтесь задавать нам вопросы — мы всегда рады помочь!",
+      },
+    ],
+  },
+};
+
 export function buildRichContentJson(descriptionRu: string, title = "Описание"): string {
   const chunks = splitIntoChunks(descriptionRu);
   const content: RichTextBlock[] = chunks.map((chunk, index) => ({
@@ -53,6 +74,7 @@ export function buildRichContentJson(descriptionRu: string, title = "Описа�
       items: [{ type: "text", content: chunk }],
     },
   }));
+  content.push(CLOSING_BLOCK);
 
   return JSON.stringify({ content, version: 0.3 });
 }

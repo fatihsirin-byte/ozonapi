@@ -52,6 +52,12 @@ export function HandleEditor({ handle }: { handle: string }) {
   const [translating, setTranslating] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
 
+  const [sloganProductName, setSloganProductName] = useState("");
+  const [sloganLoading, setSloganLoading] = useState(false);
+  const [sloganError, setSloganError] = useState<string | null>(null);
+  const [slogan, setSlogan] = useState<{ title: string; slogan1: string; slogan2: string } | null>(null);
+  const [copiedSloganField, setCopiedSloganField] = useState<string | null>(null);
+
   const [category, setCategory] = useState<CategoryOption | null>(null);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -65,6 +71,7 @@ export function HandleEditor({ handle }: { handle: string }) {
     const data = await res.json();
     setVariants(data.variants ?? []);
     setImages(asStringArray(data.variants?.[0]?.images));
+    setSloganProductName((prev) => prev || data.variants?.[0]?.name || "");
   }, [handle]);
 
   useEffect(() => {
@@ -179,6 +186,32 @@ export function HandleEditor({ handle }: { handle: string }) {
     }
   }
 
+  async function generateSlogan() {
+    setSloganLoading(true);
+    setSloganError(null);
+    try {
+      const res = await fetch(`/api/import/products/${encodeURIComponent(handle)}/slogan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productName: sloganProductName }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSloganError(data.error ?? "Slogan oluşturulamadı");
+        return;
+      }
+      setSlogan(data);
+    } finally {
+      setSloganLoading(false);
+    }
+  }
+
+  async function copySloganField(field: string, value: string) {
+    await navigator.clipboard.writeText(value);
+    setCopiedSloganField(field);
+    setTimeout(() => setCopiedSloganField((current) => (current === field ? null : current)), 1500);
+  }
+
   async function unlinkModel() {
     await fetch(`/api/import/products/${encodeURIComponent(handle)}/link-model`, { method: "DELETE" });
     await load();
@@ -248,6 +281,59 @@ export function HandleEditor({ handle }: { handle: string }) {
         <button className="btn-primary" style={{ marginTop: 12 }} disabled={savingImages} onClick={saveImages}>
           {savingImages ? "Kaydediliyor..." : "Görselleri Kaydet"}
         </button>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <label>Canva Slogan Oluştur</label>
+        <div className="hint" style={{ marginBottom: 8 }}>
+          İnfografik görsel için Rusça ana başlık + 2 kısa slogan üretir (Canva'da kullanmak üzere kopyalayın).
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            type="text"
+            value={sloganProductName}
+            onChange={(e) => setSloganProductName(e.target.value)}
+            placeholder="Ürün adı"
+            style={{ flex: 1 }}
+          />
+          <button type="button" className="btn-primary" disabled={sloganLoading || !sloganProductName.trim()} onClick={generateSlogan}>
+            {sloganLoading ? "Oluşturuluyor..." : "Slogan Oluştur"}
+          </button>
+        </div>
+        {sloganError && <div className="hint" style={{ color: "var(--danger)" }}>{sloganError}</div>}
+        {slogan && (
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            {(
+              [
+                ["title", "Başlık", slogan.title],
+                ["slogan1", "Slogan 1", slogan.slogan1],
+                ["slogan2", "Slogan 2", slogan.slogan2],
+              ] as const
+            ).map(([field, label, value]) => (
+              <div
+                key={field}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 12px",
+                  background: "#0f1216",
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                }}
+              >
+                <div>
+                  <div className="hint" style={{ margin: 0 }}>{label}</div>
+                  <strong>{value}</strong>
+                </div>
+                <button type="button" className="btn-secondary" onClick={() => copySloganField(field, value)}>
+                  {copiedSloganField === field ? "Kopyalandı ✓" : "Kopyala"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>

@@ -269,7 +269,7 @@ export async function translateHandle(handle: string) {
   const first = await prisma.product.findFirst({ where: { shopifyHandle: handle } });
   if (!first) throw new Error("Handle bulunamadı");
 
-  const { nameRu, descriptionRu } = await translateToRussian(first.name, first.descriptionHtml ?? "");
+  const { nameRu, descriptionRu } = await translateToRussian(first.name, first.descriptionHtml ?? "", first.shopifyVendor);
   await prisma.product.updateMany({ where: { shopifyHandle: handle }, data: { nameRu, descriptionRu } });
   return { nameRu, descriptionRu };
 }

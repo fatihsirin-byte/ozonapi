@@ -2,6 +2,7 @@ import { prisma } from "../../db/prisma";
 import { importProducts, getImportStatus, updatePrices, updateStocks, getProductAttributes, getProductInfoList } from "../../ozon/products";
 import { getCategoryAttributes } from "../../ozon/categories";
 import { DEFAULT_WAREHOUSE_ID } from "../../ozon/warehouses";
+import { buildRichContentJson } from "../../ozon/rich-content";
 import { computeSalePrice } from "../../pricing/formula";
 
 // Ozon hesabının sözleşme para birimi USD — RUB gönderilirse ürün sessizce "pending" kalıp
@@ -17,6 +18,10 @@ const MODEL_NAME_ATTRIBUTE_ID = 9048;
 // kategori bu attribute'ları tanımıyorsa (id kategori şemasında yoksa) hiç göndermiyoruz.
 const ANNOTATION_ATTRIBUTE_ID = 4191;
 const WEIGHT_GRAMS_ATTRIBUTE_ID = 4383;
+// "Rich content" (kategori formunda hiç gösterilmiyor, içerik puanının büyük kısmını
+// belirliyor) — kullanıcının Rich content design tool'da oluşturup kaydettiği gerçek JSON
+// çıktısından şema alınıp descriptionRu'dan otomatik üretiliyor (bkz. ozon/rich-content.ts).
+const RICH_CONTENT_ATTRIBUTE_ID = 11254;
 
 // Ozon'un "#Hashtag'ler" attribute'u kesin format istiyor: her hashtag "#" ile başlamalı,
 // sadece harf/rakam/alt çizgi içermeli, boşlukla ayrılmalı. Kullanıcı elle "halva" gibi
@@ -44,15 +49,16 @@ async function applyContentAttributeFixes(
   descriptionCategoryId: number,
   typeId: number,
   attributes: ProductAttributeInput[],
-  data: { descriptionRu?: string | null; weightGrams?: number | null },
+  data: { descriptionRu?: string | null; weightGrams?: number | null; title?: string | null },
 ): Promise<ProductAttributeInput[]> {
   const existingIds = new Set(attributes.map((a) => a.id));
   const needsAnnotation = !existingIds.has(ANNOTATION_ATTRIBUTE_ID) && !!data.descriptionRu;
   const needsWeight = !existingIds.has(WEIGHT_GRAMS_ATTRIBUTE_ID) && !!data.weightGrams;
+  const needsRichContent = !existingIds.has(RICH_CONTENT_ATTRIBUTE_ID) && !!data.descriptionRu;
   const hasHashtagCandidate = attributes.some(
     (a) => typeof a.value === "string" && a.value.trim() && !/^#\S+(\s+#\S+)*$/.test(a.value.trim()),
   );
-  if (!needsAnnotation && !needsWeight && !hasHashtagCandidate) return attributes;
+  if (!needsAnnotation && !needsWeight && !needsRichContent && !hasHashtagCandidate) return attributes;
 
   try {
     const { result } = await getCategoryAttributes({ descriptionCategoryId, typeId });
@@ -71,6 +77,12 @@ async function applyContentAttributeFixes(
     }
     if (needsWeight && byId.has(WEIGHT_GRAMS_ATTRIBUTE_ID)) {
       fixed.push({ id: WEIGHT_GRAMS_ATTRIBUTE_ID, value: String(data.weightGrams) });
+    }
+    if (needsRichContent && byId.has(RICH_CONTENT_ATTRIBUTE_ID)) {
+      fixed.push({
+        id: RICH_CONTENT_ATTRIBUTE_ID,
+        value: buildRichContentJson(data.descriptionRu!, data.title ?? undefined),
+      });
     }
     return fixed;
   } catch {
@@ -148,7 +160,7 @@ export async function createProduct(input: CreateProductInput) {
     input.descriptionCategoryId,
     input.typeId,
     input.attributes.filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID),
-    { descriptionRu: input.descriptionRu, weightGrams: input.weightGrams },
+    { descriptionRu: input.descriptionRu, weightGrams: input.weightGrams, title: input.name },
   );
 
   const { result } = await importProducts([
@@ -356,7 +368,7 @@ export async function updateProductImages(offerId: string, images: string[]) {
     product.descriptionCategoryId,
     product.typeId,
     await getLiveOzonAttributes(offerId),
-    { descriptionRu: product.descriptionRu, weightGrams: product.weightGrams },
+    { descriptionRu: product.descriptionRu, weightGrams: product.weightGrams, title: product.nameRu ?? product.name },
   );
 
   const { result } = await importProducts([
@@ -422,7 +434,7 @@ export async function updateProductCategoryAttributes(
     input.descriptionCategoryId,
     input.typeId,
     Array.from(merged.values()),
-    { descriptionRu: product.descriptionRu, weightGrams: product.weightGrams },
+    { descriptionRu: product.descriptionRu, weightGrams: product.weightGrams, title: product.nameRu ?? product.name },
   );
 
   const { result } = await importProducts([

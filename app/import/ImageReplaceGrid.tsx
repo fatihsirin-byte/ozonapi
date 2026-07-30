@@ -17,6 +17,7 @@ export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [copyMode, setCopyMode] = useState<"image" | "url" | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [orderDragIndex, setOrderDragIndex] = useState<number | null>(null);
   const [orderOverIndex, setOrderOverIndex] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -46,19 +47,36 @@ export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
   }
 
   // Gerçek görseli panoya kopyalar (Canva/Photoshop gibi bir yere doğrudan yapıştırılabilsin diye).
-  // CORS engeli (bazı CDN'ler) ya da tarayıcı desteklemiyorsa en azından URL'i kopyalar.
+  // ÖNEMLİ: clipboard.write() bir tıklamanın hemen ardından (senkron) çağrılmazsa Safari ve
+  // bazı tarayıcılar sessizce reddediyor — bu yüzden fetch'i "await" ETMEDEN, Blob promise'ini
+  // doğrudan ClipboardItem'a veriyoruz (spec buna izin veriyor, tarayıcı promise'i kendi bekliyor).
   async function copyUrl(url: string) {
+    setCopyError(null);
+    const imageBlobPromise = fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Görsel indirilemedi (${res.status})`);
+        return res.blob();
+      })
+      .then((blob) => toPngBlob(blob));
+
     try {
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const pngBlob = await toPngBlob(blob);
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlob })]);
+      if (typeof ClipboardItem === "undefined") {
+        throw new Error("Tarayıcı görsel kopyalamayı desteklemiyor");
+      }
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": imageBlobPromise })]);
       setCopyMode("image");
-    } catch {
-      await navigator.clipboard.writeText(url);
-      setCopyMode("url");
+      setCopiedUrl(url);
+    } catch (err) {
+      console.error("Görsel panoya kopyalanamadı, URL'e düşülüyor:", err);
+      try {
+        await navigator.clipboard.writeText(url);
+        setCopyMode("url");
+        setCopiedUrl(url);
+      } catch (err2) {
+        console.error("URL de panoya kopyalanamadı:", err2);
+        setCopyError("Kopyalama başarısız — tarayıcı panoya erişim izni vermiyor olabilir.");
+      }
     }
-    setCopiedUrl(url);
     setTimeout(() => setCopiedUrl((current) => (current === url ? null : current)), 1500);
   }
 
@@ -112,6 +130,7 @@ export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
               Tümünü kullan
             </button>
           </div>
+          {copyError && <div className="hint" style={{ color: "var(--danger)", marginBottom: 8 }}>{copyError}</div>}
           <div
             style={{
               display: "grid",

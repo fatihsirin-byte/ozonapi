@@ -27,11 +27,11 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ handle: string }> }) {
   const { handle } = await params;
-  const { images } = (await request.json()) as { images?: string[] };
+  const { images, resendToOzon } = (await request.json()) as { images?: string[]; resendToOzon?: boolean };
   if (images === undefined) {
     return NextResponse.json({ error: "images gerekli" }, { status: 400 });
   }
-  const { errors } = await updateHandleImages(decodeURIComponent(handle), images);
+  const { errors } = await updateHandleImages(decodeURIComponent(handle), images, resendToOzon ?? true);
   const variants = await getHandleGroup(decodeURIComponent(handle));
   return NextResponse.json({ variants: serializeVariants(variants), errors });
 }

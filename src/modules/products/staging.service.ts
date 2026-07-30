@@ -163,21 +163,24 @@ export async function getHandleGroup(handle: string) {
 }
 
 // Görseller handle içindeki tüm varyantlarda paylaşılıyor (Shopify'da da öyle) — tek seferde
-// hepsine yazılır. Ürün zaten Ozon'a gönderilmişse (ozonProductId dolu), sadece DB kopyasını
-// güncellemek yetmez — updateProductImages ile gerçekten Ozon'a da resend edilir, aksi halde
-// "Görselleri Kaydet" görünüşte çalışır ama Ozon'daki görseller/sıra hiç değişmez.
-export async function updateHandleImages(handle: string, images: string[]) {
-  const variants = await prisma.product.findMany({ where: { shopifyHandle: handle } });
-
+// hepsine yazılır. resendToOzon=true (varsayılan, "Görselleri Kaydet" butonu) ve ürün zaten
+// Ozon'a gönderilmişse (ozonProductId dolu), updateProductImages ile gerçekten Ozon'a da
+// resend edilir. resendToOzon=false ise sadece DB'ye yazılır — her değişiklikte (yükleme,
+// sıralama, kaldırma) otomatik çağrılıp veri kaybını önlemek için, Ozon'u her seferinde
+// yeniden işlemeye zorlamadan (moderasyon sıfırlanmasın diye).
+export async function updateHandleImages(handle: string, images: string[], resendToOzon = true) {
   await prisma.product.updateMany({ where: { shopifyHandle: handle }, data: { images } });
 
   const errors: { offerId: string; error: string }[] = [];
-  for (const variant of variants) {
-    if (variant.ozonProductId) {
-      try {
-        await updateProductImages(variant.offerId, images);
-      } catch (error) {
-        errors.push({ offerId: variant.offerId, error: error instanceof Error ? error.message : "Bilinmeyen hata" });
+  if (resendToOzon) {
+    const variants = await prisma.product.findMany({ where: { shopifyHandle: handle } });
+    for (const variant of variants) {
+      if (variant.ozonProductId) {
+        try {
+          await updateProductImages(variant.offerId, images);
+        } catch (error) {
+          errors.push({ offerId: variant.offerId, error: error instanceof Error ? error.message : "Bilinmeyen hata" });
+        }
       }
     }
   }

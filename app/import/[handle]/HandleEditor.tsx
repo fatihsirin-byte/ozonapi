@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ImageReplaceGrid } from "../ImageReplaceGrid";
 import {
@@ -84,11 +84,16 @@ export function HandleEditor({ handle }: { handle: string }) {
   const [imageSaveError, setImageSaveError] = useState<string | null>(null);
   const [priceCalcOfferId, setPriceCalcOfferId] = useState<string | null>(null);
 
+  // Sunucudan gelen images'i state'e yazarken auto-save efekti bunu "kullanıcı değişikliği"
+  // sanıp gereksiz bir PATCH atmasın diye bu bayrağı kullanıyoruz.
+  const skipAutoSaveRef = useRef(true);
+
   const load = useCallback(async () => {
     const res = await fetch(`/api/import/products/${encodeURIComponent(handle)}`);
     const data = await res.json();
     const loadedVariants: Variant[] = data.variants ?? [];
     setVariants(loadedVariants);
+    skipAutoSaveRef.current = true;
     setImages(asStringArray(loadedVariants?.[0]?.images));
     setSloganProductName((prev) => prev || loadedVariants?.[0]?.name || "");
     return loadedVariants;
@@ -97,6 +102,25 @@ export function HandleEditor({ handle }: { handle: string }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Görsel listesindeki HER değişikliği (yükleme, sıralama, kaldırma, kullan/kullanma) DB'ye
+  // otomatik kaydeder — Ozon'a göndermeden (o hâlâ "Görselleri Kaydet" butonuyla, kullanıcı
+  // kararıyla oluyor). Sayfa yenilenince yükleyip henüz kaydetmediğiniz görsellerin kaybolmaması içindi.
+  useEffect(() => {
+    if (skipAutoSaveRef.current) {
+      skipAutoSaveRef.current = false;
+      return;
+    }
+    const timer = setTimeout(() => {
+      fetch(`/api/import/products/${encodeURIComponent(handle)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images, resendToOzon: false }),
+      }).catch(() => {});
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [images]);
 
   // Ürün zaten Ozon'a gönderilmişse, daha önce seçilmiş kategori/attribute'ları geri yükle —
   // aksi halde her sayfa açılışında kategori/özellikler sıfırdan seçilmek zorunda kalınıyordu.
@@ -530,7 +554,7 @@ export function HandleEditor({ handle }: { handle: string }) {
                   />
                 </td>
                 <td>
-                  {v.price || computeSalePrice(v.costPrice ?? "0", v.weightGrams)}
+                  {computeSalePrice(v.costPrice ?? "0", v.weightGrams) || v.price}
                   {v.ozonProductId && (
                     <button
                       type="button"
@@ -580,7 +604,7 @@ export function HandleEditor({ handle }: { handle: string }) {
               widthCm={v.widthCm}
               heightCm={v.heightCm}
               depthCm={v.depthCm}
-              currentPrice={v.price}
+              currentPrice={computeSalePrice(v.costPrice ?? "0", v.weightGrams) || v.price}
               onClose={() => setPriceCalcOfferId(null)}
               onApply={(priceUsd) => applyPriceOverride(v.offerId, v.costPrice ?? "0", priceUsd)}
             />

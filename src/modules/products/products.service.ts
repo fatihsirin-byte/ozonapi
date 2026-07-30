@@ -189,16 +189,57 @@ export async function updateProductPrice(offerId: string, costPrice: string, pri
   return { price };
 }
 
+// ÖNEMLİ: Ozon'un /v3/product/import'u attribute'lar için MERGE değil, TAM REPLACE yapıyor —
+// gönderilmeyen bir attribute "korunmuyor", siliniyor (bu, 2026-07-30'da canlıda Composition
+// ve diğer tüm attribute'ların bir görsel-resend sonrası silinmesiyle doğrulandı; önceki yorum
+// "resend etmesek de korunuyor" diyordu, bu YANLIŞTI). Bu yüzden her resend'de Ozon'daki GÜNCEL
+// attribute'ları önce çekip yeniden gönderiyoruz — aksi halde attribute'lar sessizce kayboluyor.
+async function getLiveOzonAttributes(offerId: string): Promise<ProductAttributeInput[]> {
+  try {
+    const { result } = await getProductAttributes([offerId]);
+    const item = result[0];
+    if (!item) return [];
+    return item.attributes
+      .filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID)
+      .map((attr) => {
+        const v = attr.values[0];
+        return {
+          id: attr.id,
+          value: v?.dictionary_value_id ? undefined : v?.value,
+          dictionaryValueId: v?.dictionary_value_id || undefined,
+        };
+      });
+  } catch {
+    // Ozon'dan mevcut attribute'lar çekilemedi — üst fonksiyon zaten sadece elindeki
+    // attribute'ları (varsa) gönderecek, burada ekstra bir şey yapmıyoruz.
+    return [];
+  }
+}
+
+function buildAttributesPayload(attributes: ProductAttributeInput[], modelName: string) {
+  return [
+    ...attributes.map((attr) => ({
+      id: attr.id,
+      values: [
+        {
+          value: attr.value ?? "",
+          ...(attr.dictionaryValueId ? { dictionary_value_id: attr.dictionaryValueId } : {}),
+        },
+      ],
+    })),
+    { id: MODEL_NAME_ATTRIBUTE_ID, values: [{ value: modelName }] },
+  ];
+}
+
 // Ozon'da ayrı bir "sadece görsel güncelle" endpoint'i güvenilir çalışmadığı için (belirsiz
-// VALIDATION ERROR), aynı product/import mekanizmasını kullanıyoruz. Kategoriye özel dictionary
-// attribute'ları (tip/marka vb.) tekrar göndermesek de Ozon'da korunuyor — sadece ağırlık/boyut
-// ve model name (9048) her seferinde yeniden gönderilmek zorunda, aksi halde "zorunlu alan boş" hatası alınıyor.
+// VALIDATION ERROR), aynı product/import mekanizmasını kullanıyoruz.
 export async function updateProductImages(offerId: string, images: string[]) {
   const product = await prisma.product.findUnique({ where: { offerId }, include: { modelGroup: true } });
   if (!product?.ozonProductId || !product.descriptionCategoryId || !product.typeId) {
     throw new Error("Bu ürün henüz Ozon'da oluşmamış, görseller güncellenemez");
   }
   const modelName = product.modelGroup?.name ?? offerId;
+  const liveAttributes = await getLiveOzonAttributes(offerId);
 
   const { result } = await importProducts([
     {
@@ -220,7 +261,7 @@ export async function updateProductImages(offerId: string, images: string[]) {
       dimension_unit: "cm",
       vat: "0",
       images,
-      attributes: [{ id: MODEL_NAME_ATTRIBUTE_ID, values: [{ value: modelName }] }],
+      attributes: buildAttributesPayload(liveAttributes, modelName),
     },
   ]);
 
@@ -245,6 +286,21 @@ export async function updateProductCategoryAttributes(
   const modelName = product.modelGroup?.name ?? offerId;
   const images = Array.isArray(product.images) ? (product.images as string[]) : [];
 
+  // Kategori DEĞİŞMEDİYSE Ozon'daki güncel attribute'ları taban alıp üzerine yeni/değişen
+  // değerleri yazıyoruz (aksi halde bu resend, formda gösterilmeyen ama daha önce Ozon'da
+  // set edilmiş her attribute'u siler). Kategori değiştiyse eski attribute ID'leri yeni
+  // kategoriye ait olmayabilir, o yüzden sadece bu durumda eski attribute'ları taşımıyoruz.
+  const categoryUnchanged =
+    product.descriptionCategoryId === input.descriptionCategoryId && product.typeId === input.typeId;
+  const liveAttributes = categoryUnchanged ? await getLiveOzonAttributes(offerId) : [];
+
+  const merged = new Map<number, ProductAttributeInput>();
+  for (const attr of liveAttributes) merged.set(attr.id, attr);
+  for (const attr of input.attributes) {
+    if (attr.id === MODEL_NAME_ATTRIBUTE_ID) continue;
+    merged.set(attr.id, attr);
+  }
+
   const { result } = await importProducts([
     {
       offer_id: offerId,
@@ -262,20 +318,7 @@ export async function updateProductCategoryAttributes(
       dimension_unit: "cm",
       vat: "0",
       images,
-      attributes: [
-        ...input.attributes
-          .filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID)
-          .map((attr) => ({
-            id: attr.id,
-            values: [
-              {
-                value: attr.value ?? "",
-                ...(attr.dictionaryValueId ? { dictionary_value_id: attr.dictionaryValueId } : {}),
-              },
-            ],
-          })),
-        { id: MODEL_NAME_ATTRIBUTE_ID, values: [{ value: modelName }] },
-      ],
+      attributes: buildAttributesPayload(Array.from(merged.values()), modelName),
     },
   ]);
 

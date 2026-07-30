@@ -85,6 +85,7 @@ export async function listDraftHandlesPage(
       const variants = await prisma.product.findMany({
         where: { shopifyHandle: handle },
         select: { name: true, images: true, status: true, shopifyVendor: true, shopifyType: true },
+        orderBy: { variantPosition: "asc" },
       });
       const sampleImages = (variants[0]?.images as string[] | null) ?? [];
       return {
@@ -156,7 +157,7 @@ export async function getHandleGroup(handle: string) {
   return prisma.product.findMany({
     where: { shopifyHandle: handle },
     include: { modelGroup: { include: { products: true } } },
-    orderBy: { offerId: "asc" },
+    orderBy: { variantPosition: "asc" },
   });
 }
 

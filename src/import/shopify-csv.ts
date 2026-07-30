@@ -35,6 +35,9 @@ export interface ParsedVariant {
   optionValues: string[];
   /** Variant Image kolonu doluysa bu varyanta özel görsel; boşsa genel galeriden seçilir. */
   image: string | null;
+  /** CSV'deki orijinal sıra (0-based) — offerId alfabetik sıralaması Shopify'ın gerçek
+   *  varyant sırasıyla uyuşmadığından, "ilk varyant" referansı bunu kullanmalı. */
+  position: number;
 }
 
 export interface ParsedProduct {
@@ -63,6 +66,20 @@ function firstNonEmpty(rows: CsvRow[], column: string): string {
 // başına tek tırnak (') koyuyor — barkod/SKU olarak kullanmadan önce temizlenmeli.
 function stripLeadingQuote(value: string): string {
   return value.startsWith("'") ? value.slice(1) : value;
+}
+
+// Bu mağazanın CSV'sinde bazı ürünlerin "Title" alanı yanlışlıkla ilk varyantın paket/beden
+// bilgisini de içeriyor (örn. Title = "... Candy Drops - 1 Case - 24 Packs x 65g Each" ve
+// ilk varyantın Option1 Value'su da birebir "1 Case - 24 Packs x 65g Each"). Bu durumda
+// varyant adı oluştururken aynı metni bir daha eklersek isim ikileniyor — burada tespit edip
+// temiz bir taban isim çıkarıyoruz.
+function stripEmbeddedOptionSuffix(title: string, firstVariantOptionValues: string[]): string {
+  const suffix = firstVariantOptionValues.join(" / ");
+  if (!suffix || !title.toLowerCase().endsWith(suffix.toLowerCase())) {
+    return title;
+  }
+  const stripped = title.slice(0, title.length - suffix.length).replace(/[\s\-–—]+$/, "");
+  return stripped || title;
 }
 
 export function parseShopifyCsv(csvText: string): ParsedProduct[] {
@@ -119,12 +136,16 @@ export function parseShopifyCsv(csvText: string): ParsedProduct[] {
         costPrice: row["Cost per item"]?.trim() || row["Variant Price"]?.trim() || null,
         optionValues,
         image: row["Variant Image"]?.trim() || null,
+        position: index,
       };
     });
 
+    const rawTitle = firstNonEmpty(rows, "Title") || handle;
+    const title = stripEmbeddedOptionSuffix(rawTitle, variants[0]?.optionValues ?? []);
+
     products.push({
       handle,
-      title: firstNonEmpty(rows, "Title") || handle,
+      title,
       descriptionHtml: firstNonEmpty(rows, "Body (HTML)"),
       vendor: firstNonEmpty(rows, "Vendor"),
       productType: firstNonEmpty(rows, "Type"),
@@ -136,6 +157,28 @@ export function parseShopifyCsv(csvText: string): ParsedProduct[] {
       metafields,
       variants,
     });
+  }
+
+  return dedupeCollidingSkus(products);
+}
+
+// Mağazanın CSV'sinde nadiren aynı SKU birden fazla kez kullanılmış oluyor — ya FARKLI bir
+// üründe (handle) ya da aynı ürünün içinde birebir tekrarlanan bir satır olarak (muhtemelen
+// kaynak veri hatası, örn. iki aynı yüzük SKU'su tek üründe). offerId = SKU olduğundan bu
+// durum bizim tarafta iki farklı varyantın aynı DB satırında sessizce çakışmasına (birinin
+// diğerini ezmesine) yol açardı — her SKU'nun İLK görüldüğü yer olduğu gibi bırakılıyor,
+// sonraki her tekrarına -2, -3... eklenerek benzersizleştiriliyor (ezici çoğunluk zaten
+// tekil olduğu için okunabilirlik bozulmuyor).
+function dedupeCollidingSkus(products: ParsedProduct[]): ParsedProduct[] {
+  const seenCount = new Map<string, number>();
+  for (const product of products) {
+    for (const variant of product.variants) {
+      const count = (seenCount.get(variant.sku) ?? 0) + 1;
+      seenCount.set(variant.sku, count);
+      if (count > 1) {
+        variant.sku = `${variant.sku}-${product.handle}-${count}`;
+      }
+    }
   }
 
   return products;

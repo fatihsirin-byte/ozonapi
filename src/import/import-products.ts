@@ -40,6 +40,7 @@ export async function upsertParsedProducts(products: ParsedProduct[]): Promise<I
         shopifyType: product.productType || null,
         shopifyMetafields: product.metafields,
         descriptionHtml: product.descriptionHtml,
+        variantPosition: variant.position,
       };
     })
   );
@@ -70,6 +71,7 @@ export async function upsertParsedProducts(products: ParsedProduct[]): Promise<I
             shopifyType: row.shopifyType,
             shopifyMetafields: row.shopifyMetafields,
             descriptionHtml: row.descriptionHtml,
+            variantPosition: row.variantPosition,
             status: "draft",
           },
           // CSV yeniden çalıştırıldığında images/status'a kasıtlı dokunmuyoruz — kullanıcı
@@ -85,6 +87,7 @@ export async function upsertParsedProducts(products: ParsedProduct[]): Promise<I
             shopifyType: row.shopifyType,
             shopifyMetafields: row.shopifyMetafields,
             descriptionHtml: row.descriptionHtml,
+            variantPosition: row.variantPosition,
           },
         })
       )

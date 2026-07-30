@@ -46,6 +46,10 @@ model Product {
   // true ise bu varyant "pasif" — handle Ozon'a gönderilirken atlanır, silinmiyor (geri
   // aktifleştirilebilir). Kalıcı silme için deleteHandles/ExcludedOfferId kullanılıyor.
   excludedFromSubmit Boolean @default(false)
+  // Shopify CSV'sindeki orijinal varyant sırası (0-based) — offerId alfabetik sıralaması
+  // Shopify'ın gerçek varyant sırasıyla uyuşmuyor (örn. "SKU-BOX" "SKU"'dan önce gelebiliyor),
+  // bu yüzden handle sayfasında "ilk varyant" (görsel/isim/vendor referansı) bunu kullanıyor.
+  variantPosition Int @default(0)
 
   orderItems OrderItem[]
 

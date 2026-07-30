@@ -24,6 +24,8 @@ interface Variant {
   images: unknown;
   originalImages: unknown;
   shopifyMetafields: unknown;
+  shopifyVendor: string | null;
+  shopifyType: string | null;
   nameRu: string | null;
   descriptionRu: string | null;
   status: string;
@@ -79,11 +81,12 @@ export function HandleEditor({ handle }: { handle: string }) {
   }, [load]);
 
   const metafields = (variants?.[0]?.shopifyMetafields as Record<string, string> | null) ?? null;
+  const vendor = variants?.[0]?.shopifyVendor ?? null;
 
   const { requiredAttributes, attributesLoading, attributeAnswers, setAttributeAnswers } = useRequiredAttributes(
     category,
     (attr) => {
-      const suggested = suggestAttributeValue(attr.name, metafields);
+      const suggested = suggestAttributeValue(attr.name, metafields, vendor);
       return suggested ? { value: suggested, displayValue: suggested } : undefined;
     },
     true,
@@ -498,6 +501,19 @@ export function HandleEditor({ handle }: { handle: string }) {
 
       <div className="card">
         <label>Ozon'a Gönder</label>
+        <div className="row" style={{ marginBottom: 16 }}>
+          <div className="field" style={{ margin: 0 }}>
+            <label>Vendor (Shopify)</label>
+            {variants[0]?.shopifyVendor ?? <span className="hint">—</span>}
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label>Type (Shopify)</label>
+            {variants[0]?.shopifyType ?? <span className="hint">—</span>}
+          </div>
+        </div>
+        <div className="hint" style={{ marginTop: -8, marginBottom: 16 }}>
+          Kategori seçerken Type'ı, Marka (Brand) attribute'unu doldururken Vendor'ı referans alabilirsiniz.
+        </div>
         <CategoryPicker selected={category} onSelect={setCategory} />
         {attributesLoading && <div className="hint">Kategori özellikleri yükleniyor...</div>}
         {category && mandatoryAttributes.length > 0 && (

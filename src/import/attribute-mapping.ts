@@ -24,14 +24,16 @@ const ATTRIBUTE_NAME_PATTERNS: { patterns: RegExp[]; metafieldKey: keyof typeof 
  */
 export function suggestAttributeValue(
   attributeName: string,
-  shopifyMetafields: Record<string, string> | null | undefined
+  shopifyMetafields: Record<string, string> | null | undefined,
+  vendor?: string | null,
 ): string | null {
-  if (!shopifyMetafields) return null;
-
   for (const { patterns, metafieldKey } of ATTRIBUTE_NAME_PATTERNS) {
     if (patterns.some((pattern) => pattern.test(attributeName))) {
-      const value = shopifyMetafields[metafieldKey];
+      const value = shopifyMetafields?.[metafieldKey];
       if (value) return value;
+      // "Brand (custom metafield)" doldurulmamışsa, Shopify'ın ayrı Vendor alanına düş —
+      // çoğu üründe marka bilgisi metafield'de değil Vendor'da tutuluyor.
+      if (metafieldKey === "brand" && vendor) return vendor;
     }
   }
 

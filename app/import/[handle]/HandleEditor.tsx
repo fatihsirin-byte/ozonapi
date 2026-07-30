@@ -367,7 +367,16 @@ export function HandleEditor({ handle }: { handle: string }) {
         <div className="hint" style={{ marginBottom: 8 }}>
           "Pasifleştir" bir varyantı silmeden Ozon'a göndermeyi atlar (geri aktifleştirilebilir). "Sil" kalıcıdır.
         </div>
-        <table>
+        <table style={{ tableLayout: "fixed", wordBreak: "break-word" }}>
+          <colgroup>
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "28%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "17%" }} />
+          </colgroup>
           <thead>
             <tr>
               <th>SKU</th>
@@ -408,7 +417,7 @@ export function HandleEditor({ handle }: { handle: string }) {
                     <span className={`badge ${v.status}`}>{v.status}</span>
                   )}
                 </td>
-                <td style={{ display: "flex", gap: 6 }}>
+                <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <button
                     type="button"
                     className="btn-secondary"

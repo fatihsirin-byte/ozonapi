@@ -36,6 +36,7 @@ export async function upsertParsedProducts(products: ParsedProduct[]): Promise<I
         originalImages: product.images,
         shopifyHandle: product.handle,
         shopifyVariantId: variant.sku,
+        shopifyVendor: product.vendor || null,
         shopifyMetafields: product.metafields,
         descriptionHtml: product.descriptionHtml,
       };
@@ -58,6 +59,7 @@ export async function upsertParsedProducts(products: ParsedProduct[]): Promise<I
             originalImages: row.originalImages,
             shopifyHandle: row.shopifyHandle,
             shopifyVariantId: row.shopifyVariantId,
+            shopifyVendor: row.shopifyVendor,
             shopifyMetafields: row.shopifyMetafields,
             descriptionHtml: row.descriptionHtml,
             status: "draft",
@@ -71,6 +73,7 @@ export async function upsertParsedProducts(products: ParsedProduct[]): Promise<I
             originalImages: row.originalImages,
             shopifyHandle: row.shopifyHandle,
             shopifyVariantId: row.shopifyVariantId,
+            shopifyVendor: row.shopifyVendor,
             shopifyMetafields: row.shopifyMetafields,
             descriptionHtml: row.descriptionHtml,
           },

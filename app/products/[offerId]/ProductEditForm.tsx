@@ -59,6 +59,16 @@ export function ProductEditForm({ product }: { product: ProductData }) {
     true,
   );
 
+  const mandatoryAttributes = requiredAttributes.filter(
+    (attr) => attr.is_required && attr.id !== MODEL_NAME_ATTRIBUTE_ID,
+  );
+  const optionalAttributes = requiredAttributes.filter(
+    (attr) => !attr.is_required && attr.id !== MODEL_NAME_ATTRIBUTE_ID,
+  );
+  const canSaveSpec =
+    Boolean(category) &&
+    mandatoryAttributes.every((attr) => Boolean(attributeAnswers[attr.id]?.value || attributeAnswers[attr.id]?.dictionaryValueId));
+
   useEffect(() => {
     if (tab !== "Kategori & Özellikler" || specLoaded) return;
     setSpecLoading(true);
@@ -84,8 +94,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           category: { descriptionCategoryId: category.descriptionCategoryId, typeId: category.typeId },
-          attributes: requiredAttributes
-            .filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID)
+          attributes: [...mandatoryAttributes, ...optionalAttributes]
             .filter((attr) => attributeAnswers[attr.id]?.value || attributeAnswers[attr.id]?.dictionaryValueId)
             .map((attr) => ({
               id: attr.id,
@@ -288,10 +297,10 @@ export function ProductEditForm({ product }: { product: ProductData }) {
             <>
               <CategoryPicker selected={category} onSelect={setCategory} />
               {attributesLoading && <div className="hint">Kategori özellikleri yükleniyor...</div>}
-              {category &&
-                requiredAttributes
-                  .filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID)
-                  .map((attr) => (
+              {category && mandatoryAttributes.length > 0 && (
+                <>
+                  <div className="hint" style={{ marginTop: 8 }}>Zorunlu özellikler</div>
+                  {mandatoryAttributes.map((attr) => (
                     <AttributeField
                       key={attr.id}
                       attr={attr}
@@ -300,7 +309,25 @@ export function ProductEditForm({ product }: { product: ProductData }) {
                       onChange={(answer) => setAttributeAnswers((prev) => ({ ...prev, [attr.id]: answer }))}
                     />
                   ))}
-              <button className="btn-primary" disabled={saving || !category} onClick={saveSpec}>
+                </>
+              )}
+              {category && optionalAttributes.length > 0 && (
+                <>
+                  <div className="hint" style={{ marginTop: 20 }}>
+                    Opsiyonel özellikler — doldurmak zorunlu değil, ama Ozon'un içerik puanını/görünürlüğü artırır.
+                  </div>
+                  {optionalAttributes.map((attr) => (
+                    <AttributeField
+                      key={attr.id}
+                      attr={attr}
+                      category={category}
+                      answer={attributeAnswers[attr.id]}
+                      onChange={(answer) => setAttributeAnswers((prev) => ({ ...prev, [attr.id]: answer }))}
+                    />
+                  ))}
+                </>
+              )}
+              <button className="btn-primary" disabled={saving || !canSaveSpec} onClick={saveSpec} style={{ marginTop: 12 }}>
                 Özellikleri Kaydet
               </button>
             </>

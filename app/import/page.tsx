@@ -3,7 +3,7 @@ import { StagingList } from "./StagingList";
 
 export default function ImportPage() {
   return (
-    <div className="page">
+    <div className="page-wide">
       <div className="topbar">
         <h1>Shopify İçe Aktarım</h1>
         <Link href="/products">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface CategoryOption {
   descriptionCategoryId: number;
@@ -44,8 +44,11 @@ export function CategoryPicker({
   const debouncedQuery = useDebouncedValue(query, 300);
   const [results, setResults] = useState<CategoryOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setDismissed(false);
     if (!debouncedQuery.trim()) {
       setResults([]);
       return;
@@ -65,6 +68,17 @@ export function CategoryPicker({
     };
   }, [debouncedQuery]);
 
+  useEffect(() => {
+    if (dismissed || results.length === 0) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setDismissed(true);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [dismissed, results.length]);
+
   if (selected) {
     return (
       <div className="field">
@@ -80,17 +94,21 @@ export function CategoryPicker({
   }
 
   return (
-    <div className="field">
+    <div className="field" ref={containerRef}>
       <label>Kategori ara</label>
       <input
         type="text"
         placeholder="örn. kablo, tişört, ayakkabı..."
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setDismissed(false);
+        }}
+        onFocus={() => setDismissed(false)}
       />
       <div className="hint">Ürününüze en yakın Ozon kategorisini yazıp aratın.</div>
       {loading && <div className="hint">Aranıyor...</div>}
-      {results.length > 0 && (
+      {!dismissed && results.length > 0 && (
         <div className="search-results">
           {results.map((r) => (
             <div
@@ -125,6 +143,7 @@ export function AttributeValuePicker({
   const debouncedQuery = useDebouncedValue(query, 300);
   const [results, setResults] = useState<Array<{ id: number; value: string }>>([]);
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -135,8 +154,20 @@ export function AttributeValuePicker({
       .then((data) => setResults(data.values ?? []));
   }, [debouncedQuery, open, attribute.id, category.descriptionCategoryId, category.typeId]);
 
+  // Dropdown açıkken dışına tıklanınca kapat — açık bırakılıp hiçbir şey seçilmemesini önler.
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
   return (
-    <div className="field">
+    <div className="field" ref={containerRef}>
       <label>{attribute.name}</label>
       <input
         type="text"

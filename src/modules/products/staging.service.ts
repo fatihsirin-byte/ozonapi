@@ -6,6 +6,7 @@ import { createProduct, type ProductAttributeInput } from "./products.service";
 export interface HandlePageItem {
   handle: string;
   title: string;
+  vendor: string | null;
   variantCount: number;
   submittedCount: number;
   sampleImage: string | null;
@@ -18,12 +19,34 @@ export interface HandlePage {
   pageSize: number;
 }
 
+export interface HandlePageFilters {
+  vendor?: string;
+  search?: string;
+}
+
 // /import sayfasındaki staging listesi — Shopify Handle bazlı gruplanmış, sayfalanmış.
 // Tek tek varyant (6000+ satır) yerine handle (ürün) bazında listelemek UI'ı kullanılabilir tutuyor.
-export async function listDraftHandlesPage(page: number, pageSize: number): Promise<HandlePage> {
+export async function listDraftHandlesPage(
+  page: number,
+  pageSize: number,
+  filters: HandlePageFilters = {},
+): Promise<HandlePage> {
+  const where = {
+    shopifyHandle: { not: null },
+    ...(filters.vendor ? { shopifyVendor: filters.vendor } : {}),
+    ...(filters.search
+      ? {
+          OR: [
+            { name: { contains: filters.search, mode: "insensitive" as const } },
+            { shopifyHandle: { contains: filters.search, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
+
   const grouped = await prisma.product.groupBy({
     by: ["shopifyHandle"],
-    where: { shopifyHandle: { not: null } },
+    where,
     _count: { _all: true },
     orderBy: { shopifyHandle: "asc" },
   });
@@ -35,12 +58,13 @@ export async function listDraftHandlesPage(page: number, pageSize: number): Prom
     pageHandles.map(async (handle) => {
       const variants = await prisma.product.findMany({
         where: { shopifyHandle: handle },
-        select: { name: true, images: true, status: true },
+        select: { name: true, images: true, status: true, shopifyVendor: true },
       });
       const sampleImages = (variants[0]?.images as string[] | null) ?? [];
       return {
         handle,
         title: variants[0]?.name ?? handle,
+        vendor: variants[0]?.shopifyVendor ?? null,
         variantCount: variants.length,
         submittedCount: variants.filter((v) => v.status !== "draft").length,
         sampleImage: sampleImages[0] ?? null,
@@ -49,6 +73,17 @@ export async function listDraftHandlesPage(page: number, pageSize: number): Prom
   );
 
   return { items, total, page, pageSize };
+}
+
+// Filtre dropdown'u için — draft ürünlerdeki benzersiz vendor listesi.
+export async function listDistinctVendors(): Promise<string[]> {
+  const rows = await prisma.product.findMany({
+    where: { shopifyHandle: { not: null }, shopifyVendor: { not: null } },
+    select: { shopifyVendor: true },
+    distinct: ["shopifyVendor"],
+    orderBy: { shopifyVendor: "asc" },
+  });
+  return rows.map((r) => r.shopifyVendor as string);
 }
 
 export async function getHandleGroup(handle: string) {
@@ -94,6 +129,15 @@ export async function searchStagedProducts(query: string, excludeHandle?: string
         { shopifyHandle: { contains: query, mode: "insensitive" } },
         { offerId: { contains: query, mode: "insensitive" } },
       ],
+    },
+    select: {
+      id: true,
+      offerId: true,
+      name: true,
+      shopifyHandle: true,
+      shopifyVendor: true,
+      images: true,
+      originalImages: true,
     },
     take: 20,
     orderBy: { name: "asc" },

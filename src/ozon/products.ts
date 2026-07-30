@@ -112,3 +112,12 @@ export function listProducts(lastId = "", limit = 100) {
     limit,
   });
 }
+
+export interface OzonArchiveResponse {
+  result: boolean;
+}
+
+// Ürünü Ozon'da arşivler (yayından kaldırır) — test/hatalı ürünleri temizlerken kullanılır.
+export function archiveProducts(productIds: number[]) {
+  return ozonPost<OzonArchiveResponse>("/v1/product/archive", { product_id: productIds });
+}

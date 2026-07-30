@@ -7,12 +7,22 @@ import { CsvDropzone } from "./CsvDropzone";
 interface HandleItem {
   handle: string;
   title: string;
+  vendor: string | null;
   variantCount: number;
   submittedCount: number;
   sampleImage: string | null;
 }
 
 const PAGE_SIZE = 25;
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 export function StagingList() {
   const [page, setPage] = useState(1);
@@ -22,9 +32,23 @@ export function StagingList() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
 
-  const load = useCallback(async (targetPage: number) => {
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
+  const [vendor, setVendor] = useState("");
+  const [vendors, setVendors] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch("/api/import/products/vendors")
+      .then((r) => r.json())
+      .then((data) => setVendors(data.vendors ?? []));
+  }, []);
+
+  const load = useCallback(async (targetPage: number, q: string, v: string) => {
     setLoading(true);
-    const res = await fetch(`/api/import/products?page=${targetPage}&pageSize=${PAGE_SIZE}`);
+    const params = new URLSearchParams({ page: String(targetPage), pageSize: String(PAGE_SIZE) });
+    if (q.trim()) params.set("q", q.trim());
+    if (v) params.set("vendor", v);
+    const res = await fetch(`/api/import/products?${params.toString()}`);
     const data = await res.json();
     setItems(data.items ?? []);
     setTotal(data.total ?? 0);
@@ -32,8 +56,15 @@ export function StagingList() {
   }, []);
 
   useEffect(() => {
-    load(page);
-  }, [page, load]);
+    setPage(1);
+    load(1, debouncedSearch, vendor);
+  }, [debouncedSearch, vendor, load]);
+
+  useEffect(() => {
+    if (page === 1) return;
+    load(page, debouncedSearch, vendor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   function toggle(handle: string) {
     setSelected((prev) => {
@@ -59,7 +90,7 @@ export function StagingList() {
         body: JSON.stringify({ handles: Array.from(selected) }),
       });
       setSelected(new Set());
-      await load(page);
+      await load(page, debouncedSearch, vendor);
     } finally {
       setDeleting(false);
     }
@@ -69,9 +100,26 @@ export function StagingList() {
 
   return (
     <div>
-      <CsvDropzone onImported={() => load(1)} />
+      <CsvDropzone onImported={() => load(1, debouncedSearch, vendor)} />
 
       <div className="card">
+        <div className="filter-bar">
+          <input
+            type="text"
+            placeholder="Ürün adı veya handle ara..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <select value={vendor} onChange={(e) => setVendor(e.target.value)}>
+            <option value="">Tüm tedarikçiler (Vendor)</option>
+            {vendors.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
             <strong>{total}</strong> ürün bekliyor (henüz Ozon'a gönderilmedi)
@@ -86,7 +134,9 @@ export function StagingList() {
         {loading ? (
           <div className="hint">Yükleniyor...</div>
         ) : items.length === 0 ? (
-          <div className="empty-state">İçe aktarılmış ürün yok. Yukarıdan bir Shopify CSV'si yükleyin.</div>
+          <div className="empty-state">
+            {search || vendor ? "Bu filtreyle eşleşen ürün yok." : "İçe aktarılmış ürün yok. Yukarıdan bir Shopify CSV'si yükleyin."}
+          </div>
         ) : (
           <table>
             <thead>
@@ -96,6 +146,7 @@ export function StagingList() {
                 </th>
                 <th>Görsel</th>
                 <th>Ürün</th>
+                <th>Vendor</th>
                 <th>Varyant</th>
                 <th>Durum</th>
               </tr>
@@ -111,10 +162,10 @@ export function StagingList() {
                       <img
                         src={item.sampleImage}
                         alt=""
-                        style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6 }}
+                        style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 6 }}
                       />
                     ) : (
-                      <div style={{ width: 48, height: 48, borderRadius: 6, background: "#1a1e24" }} />
+                      <div style={{ width: 56, height: 56, borderRadius: 6, background: "#1a1e24" }} />
                     )}
                   </td>
                   <td>
@@ -123,6 +174,7 @@ export function StagingList() {
                       {item.handle}
                     </div>
                   </td>
+                  <td>{item.vendor ?? <span className="hint">—</span>}</td>
                   <td>{item.variantCount}</td>
                   <td>
                     {item.submittedCount > 0 ? (

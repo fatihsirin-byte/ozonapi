@@ -34,6 +34,9 @@ interface SearchResult {
   offerId: string;
   name: string;
   shopifyHandle: string | null;
+  shopifyVendor: string | null;
+  images: unknown;
+  originalImages: unknown;
 }
 
 function asStringArray(value: unknown): string[] {
@@ -323,14 +326,30 @@ export function HandleEditor({ handle }: { handle: string }) {
             />
             {searchResults.length > 0 && (
               <div className="search-results">
-                {searchResults.map((r) => (
-                  <div key={r.offerId} className="search-result-item" onClick={() => linkModel(r.offerId)}>
-                    <strong>{r.name}</strong>
-                    <div className="hint" style={{ margin: 0 }}>
-                      {r.offerId} · {r.shopifyHandle}
+                {searchResults.map((r) => {
+                  const thumb = asStringArray(r.images)[0] ?? asStringArray(r.originalImages)[0] ?? null;
+                  return (
+                    <div
+                      key={r.offerId}
+                      className="search-result-item"
+                      style={{ display: "flex", gap: 10, alignItems: "center" }}
+                      onClick={() => linkModel(r.offerId)}
+                    >
+                      {thumb ? (
+                        <img src={thumb} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 40, height: 40, borderRadius: 6, background: "#1a1e24", flexShrink: 0 }} />
+                      )}
+                      <div>
+                        <strong>{r.name}</strong>
+                        <div className="hint" style={{ margin: 0 }}>
+                          {r.offerId} · {r.shopifyHandle}
+                          {r.shopifyVendor ? ` · ${r.shopifyVendor}` : ""}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </>

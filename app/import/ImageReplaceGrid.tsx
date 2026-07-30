@@ -303,6 +303,26 @@ export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
                 >
                   {index + 1}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => removeImage(url)}
+                  title="Bu görseli kaldır (eski/yeni fark etmeksizin)"
+                  style={{
+                    position: "absolute",
+                    top: 4,
+                    right: 4,
+                    width: 20,
+                    height: 20,
+                    borderRadius: "50%",
+                    background: "var(--danger)",
+                    color: "white",
+                    fontSize: 13,
+                    padding: 0,
+                    lineHeight: 1,
+                  }}
+                >
+                  ×
+                </button>
               </div>
             ))}
           </div>

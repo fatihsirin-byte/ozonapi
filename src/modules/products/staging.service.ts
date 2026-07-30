@@ -13,10 +13,12 @@ function sleep(ms: number) {
 }
 
 // Ozon /v3/product/import asenkron (task_id) — ürün gerçekten Ozon tarafında oluşana kadar
-// stok çağrısı sessizce hiçbir şey yapmıyor (200 + updated:true dönüyor ama tutmuyor, bu
-// 2026-07-30'da canlıda doğrulandı: hemen sonra çağrılan updateStocks stok yazmadı, birkaç
-// saniye sonra tekrar denendiğinde işledi). Bu yüzden import'un bitmesini (product_id
-// atanmasını) bekleyip ANCAK ondan sonra stok gönderiyoruz.
+// stok çağrısı sessizce hiçbir şey yapmıyor ya da "PRODUCT_IS_NOT_CREATED" ile reddediyor,
+// üstelik product_id atandıktan (import "imported" göründükten) SONRA bile bu durum bir
+// süre daha devam edebiliyor (2026-07-30/31'de canlıda doğrulandı — bazı ürünlerde 16
+// saniyelik bekleme yetmedi, birkaç dakika sonra tekrar denendiğinde işledi). Bu yüzden
+// hem import'un bitmesini bekliyoruz HEM DE stok çağrısının kendisini, başarısız olursa
+// (updated:false ya da hata), artan aralıklarla birkaç kez tekrar deniyoruz.
 async function waitForImportThenPushStock(offerId: string, taskId: number, stock: number) {
   for (let attempt = 0; attempt < 8; attempt++) {
     await sleep(2000);
@@ -28,8 +30,22 @@ async function waitForImportThenPushStock(offerId: string, taskId: number, stock
       // durum kontrolü başarısız oldu, yine de deneme sayısı bitince stok göndermeyi dene
     }
   }
-  await updateStocks([{ offerId, stock, warehouseId: DEFAULT_WAREHOUSE_ID }]);
-  await prisma.product.update({ where: { offerId }, data: { stockQuantity: stock } });
+
+  const backoffsMs = [0, 5000, 15000, 30000, 60000, 120000];
+  for (const delay of backoffsMs) {
+    if (delay > 0) await sleep(delay);
+    try {
+      const { result } = await updateStocks([{ offerId, stock, warehouseId: DEFAULT_WAREHOUSE_ID }]);
+      if (result[0]?.updated) {
+        await prisma.product.update({ where: { offerId }, data: { stockQuantity: stock } });
+        return;
+      }
+    } catch {
+      // bu deneme başarısız oldu, sıradaki (daha uzun) beklemeyle tekrar denenecek
+    }
+  }
+  // Tüm denemeler tükendi — stockQuantity kasıtlı olarak güncellenmiyor ki UI gerçek
+  // durumu yansıtsın (stok gerçekte gitmediyse DB de "gitti" yalanı söylemesin).
 }
 
 export interface HandlePageItem {

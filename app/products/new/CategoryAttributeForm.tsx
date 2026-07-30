@@ -169,6 +169,28 @@ export function AttributeValuePicker({
   );
 }
 
+export function AttributeField({
+  attr,
+  category,
+  answer,
+  onChange,
+}: {
+  attr: RequiredAttribute;
+  category: CategoryOption;
+  answer: AttributeAnswer | undefined;
+  onChange(answer: AttributeAnswer): void;
+}) {
+  if (attr.dictionary_id > 0) {
+    return <AttributeValuePicker attribute={attr} category={category} answer={answer} onChange={onChange} />;
+  }
+  return (
+    <div className="field">
+      <label>{attr.name}</label>
+      <input type="text" value={answer?.value ?? ""} onChange={(e) => onChange({ value: e.target.value })} />
+    </div>
+  );
+}
+
 /**
  * Bir kategorinin zorunlu attribute'larını, kategori seçilir seçilmez çeker; ayrıca varsa
  * bir "ön doldurma" fonksiyonu (örn. Shopify metafield eşleştirmesi) çağırarak boş cevapları doldurur.

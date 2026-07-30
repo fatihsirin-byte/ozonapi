@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ImageDropzone } from "../new/ImageDropzone";
+import { CategoryPicker, AttributeField, useRequiredAttributes, type CategoryOption } from "../new/CategoryAttributeForm";
 import { computeSalePrice, estimateShippingCostUsd, computeBillingWeightGrams } from "@/pricing/formula";
 
 interface ProductData {
@@ -20,7 +21,14 @@ interface ProductData {
   depthCm: number | null;
 }
 
-const TABS = ["Genel", "Fiyat", "Görseller"] as const;
+interface CloneAttribute {
+  id: number;
+  dictionaryValueId?: number;
+  value?: string;
+}
+
+const MODEL_NAME_ATTRIBUTE_ID = 9048;
+const TABS = ["Genel", "Fiyat", "Görseller", "Kategori & Özellikler"] as const;
 type Tab = (typeof TABS)[number];
 
 export function ProductEditForm({ product }: { product: ProductData }) {
@@ -31,6 +39,76 @@ export function ProductEditForm({ product }: { product: ProductData }) {
   const [status, setStatus] = useState(product.status);
   const [lastError, setLastError] = useState(product.lastError);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const [category, setCategory] = useState<CategoryOption | null>(null);
+  const [cloneAttributes, setCloneAttributes] = useState<CloneAttribute[] | null>(null);
+  const [specLoading, setSpecLoading] = useState(false);
+  const [specLoaded, setSpecLoaded] = useState(false);
+
+  const { requiredAttributes, attributesLoading, attributeAnswers, setAttributeAnswers } = useRequiredAttributes(
+    category,
+    (attr) => {
+      const cloned = cloneAttributes?.find((a) => a.id === attr.id);
+      if (!cloned) return undefined;
+      return {
+        dictionaryValueId: cloned.dictionaryValueId,
+        value: cloned.value,
+        displayValue: cloned.dictionaryValueId ? "(mevcut değer — değiştirmek için yazın)" : undefined,
+      };
+    },
+    true,
+  );
+
+  useEffect(() => {
+    if (tab !== "Kategori & Özellikler" || specLoaded) return;
+    setSpecLoading(true);
+    setSpecLoaded(true);
+    fetch(`/api/products/${product.offerId}/clone-data`)
+      .then((r) => r.json())
+      .then((data) => {
+        setCategory(data.category ?? null);
+        setCloneAttributes(data.attributes ?? []);
+      })
+      .finally(() => setSpecLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, specLoaded]);
+
+  async function saveSpec() {
+    if (!category) return;
+    setSaving(true);
+    setMessage(null);
+    setStatus("pending");
+    try {
+      const res = await fetch(`/api/products/${product.offerId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: { descriptionCategoryId: category.descriptionCategoryId, typeId: category.typeId },
+          attributes: requiredAttributes
+            .filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID)
+            .filter((attr) => attributeAnswers[attr.id]?.value || attributeAnswers[attr.id]?.dictionaryValueId)
+            .map((attr) => ({
+              id: attr.id,
+              value: attributeAnswers[attr.id]?.value,
+              dictionaryValueId: attributeAnswers[attr.id]?.dictionaryValueId,
+            })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error ?? "Güncelleme başarısız" });
+        setStatus(product.status);
+        return;
+      }
+      setMessage({ type: "success", text: "Özellikler gönderildi, Ozon işliyor..." });
+      pollUntilResolved();
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Bilinmeyen hata" });
+      setStatus(product.status);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function pollUntilResolved() {
     const interval = setInterval(async () => {
@@ -147,7 +225,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
               <span className="hint">Bilinmiyor</span>
             )}
           </div>
-          <div className="hint">Kategori/özellik bilgileri şu an düzenlenemiyor — bunlar sadece ürün oluşturulurken belirlenir.</div>
+          <div className="hint">Kategori/özellik bilgilerini "Kategori & Özellikler" sekmesinden düzenleyebilirsiniz.</div>
         </>
       )}
 
@@ -200,6 +278,33 @@ export function ProductEditForm({ product }: { product: ProductData }) {
           <button className="btn-primary" disabled={saving || images.length === 0} onClick={saveImages}>
             Görselleri Kaydet
           </button>
+        </>
+      )}
+
+      {tab === "Kategori & Özellikler" && (
+        <>
+          {specLoading && <div className="hint">Mevcut kategori/özellikler Ozon'dan çekiliyor...</div>}
+          {!specLoading && (
+            <>
+              <CategoryPicker selected={category} onSelect={setCategory} />
+              {attributesLoading && <div className="hint">Kategori özellikleri yükleniyor...</div>}
+              {category &&
+                requiredAttributes
+                  .filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID)
+                  .map((attr) => (
+                    <AttributeField
+                      key={attr.id}
+                      attr={attr}
+                      category={category}
+                      answer={attributeAnswers[attr.id]}
+                      onChange={(answer) => setAttributeAnswers((prev) => ({ ...prev, [attr.id]: answer }))}
+                    />
+                  ))}
+              <button className="btn-primary" disabled={saving || !category} onClick={saveSpec}>
+                Özellikleri Kaydet
+              </button>
+            </>
+          )}
         </>
       )}
 

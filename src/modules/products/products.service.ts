@@ -224,6 +224,67 @@ export async function updateProductImages(offerId: string, images: string[]) {
   return { images, taskId: result.task_id };
 }
 
+// Ozon'a gönderilmiş bir ürünün kategori/attribute'larını sonradan değiştirir — updateProductImages
+// ile aynı mantık (ayrı bir "sadece attribute güncelle" endpoint'i yok, tüm ürünü yeniden gönderiyoruz).
+export async function updateProductCategoryAttributes(
+  offerId: string,
+  input: { descriptionCategoryId: number; typeId: number; attributes: ProductAttributeInput[] },
+) {
+  const product = await prisma.product.findUnique({ where: { offerId }, include: { modelGroup: true } });
+  if (!product?.ozonProductId) {
+    throw new Error("Bu ürün henüz Ozon'da oluşmamış, özellikler güncellenemez");
+  }
+  const modelName = product.modelGroup?.name ?? offerId;
+  const images = Array.isArray(product.images) ? (product.images as string[]) : [];
+
+  const { result } = await importProducts([
+    {
+      offer_id: offerId,
+      name: product.name,
+      price: product.price,
+      currency_code: CURRENCY_CODE,
+      category_id: input.descriptionCategoryId,
+      description_category_id: input.descriptionCategoryId,
+      type_id: input.typeId,
+      weight: product.weightGrams ?? 100,
+      weight_unit: "g",
+      width: product.widthCm ?? 10,
+      height: product.heightCm ?? 10,
+      depth: product.depthCm ?? 10,
+      dimension_unit: "cm",
+      vat: "0",
+      images,
+      attributes: [
+        ...input.attributes
+          .filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID)
+          .map((attr) => ({
+            id: attr.id,
+            values: [
+              {
+                value: attr.value ?? "",
+                ...(attr.dictionaryValueId ? { dictionary_value_id: attr.dictionaryValueId } : {}),
+              },
+            ],
+          })),
+        { id: MODEL_NAME_ATTRIBUTE_ID, values: [{ value: modelName }] },
+      ],
+    },
+  ]);
+
+  await prisma.product.update({
+    where: { offerId },
+    data: {
+      descriptionCategoryId: input.descriptionCategoryId,
+      typeId: input.typeId,
+      importTaskId: result.task_id,
+      status: "pending",
+      lastError: null,
+    },
+  });
+
+  return { taskId: result.task_id };
+}
+
 function mmToCm(value: number, unit: string): number {
   if (unit === "mm") return Math.round(value / 10);
   if (unit === "m") return Math.round(value * 100);

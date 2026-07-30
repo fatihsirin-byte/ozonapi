@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProduct, updateProductPrice, updateProductImages } from "@/modules/products/products.service";
+import {
+  getProduct,
+  updateProductPrice,
+  updateProductImages,
+  updateProductCategoryAttributes,
+  type ProductAttributeInput,
+} from "@/modules/products/products.service";
 import { OzonApiError } from "@/ozon/client";
 
 // importTaskId BigInt — JSON.stringify edilemiyor, string'e çevirip dönüyoruz.
@@ -18,7 +24,12 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ offerId: string }> }) {
   const { offerId } = await params;
-  const body = (await request.json()) as { costPrice?: string; images?: string[] };
+  const body = (await request.json()) as {
+    costPrice?: string;
+    images?: string[];
+    category?: { descriptionCategoryId: number; typeId: number };
+    attributes?: ProductAttributeInput[];
+  };
 
   try {
     if (body.costPrice !== undefined) {
@@ -26,6 +37,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
     if (body.images !== undefined) {
       await updateProductImages(offerId, body.images);
+    }
+    if (body.category !== undefined) {
+      await updateProductCategoryAttributes(offerId, {
+        descriptionCategoryId: body.category.descriptionCategoryId,
+        typeId: body.category.typeId,
+        attributes: body.attributes ?? [],
+      });
     }
     const product = await getProduct(offerId);
     return NextResponse.json({ product: product ? serializeProduct(product) : null });

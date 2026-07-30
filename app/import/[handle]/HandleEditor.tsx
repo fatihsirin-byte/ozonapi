@@ -5,38 +5,14 @@ import Link from "next/link";
 import { ImageReplaceGrid } from "../ImageReplaceGrid";
 import {
   CategoryPicker,
-  AttributeValuePicker,
+  AttributeField,
   useRequiredAttributes,
   type CategoryOption,
-  type RequiredAttribute,
-  type AttributeAnswer,
 } from "../../products/new/CategoryAttributeForm";
 import { suggestAttributeValue } from "@/import/attribute-mapping";
 import { computeSalePrice } from "@/pricing/formula";
 
 const MODEL_NAME_ATTRIBUTE_ID = 9048;
-
-function AttributeField({
-  attr,
-  category,
-  answer,
-  onChange,
-}: {
-  attr: RequiredAttribute;
-  category: CategoryOption;
-  answer: AttributeAnswer | undefined;
-  onChange(answer: AttributeAnswer): void;
-}) {
-  if (attr.dictionary_id > 0) {
-    return <AttributeValuePicker attribute={attr} category={category} answer={answer} onChange={onChange} />;
-  }
-  return (
-    <div className="field">
-      <label>{attr.name}</label>
-      <input type="text" value={answer?.value ?? ""} onChange={(e) => onChange({ value: e.target.value })} />
-    </div>
-  );
-}
 
 interface Variant {
   id: string;

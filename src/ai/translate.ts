@@ -15,6 +15,16 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
+// Gemini prompt'ta emoji kullanmaması istense de bazen kaçıyor — Ozon'da emoji içeren
+// açıklamalar moderasyonda sorun çıkarabiliyor, ek güvence olarak burada da temizliyoruz.
+function stripEmoji(text: string): string {
+  return text
+    .replace(/[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}️]/gu, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .trim();
+}
+
 export async function translateToRussian(
   title: string,
   descriptionHtml: string,
@@ -63,7 +73,10 @@ Hangi kelimenin gerçekten marka/model olduğuna karar verirken şu ayrımı kul
 4. Marka adı VE model kodu ikisi de Latin bırakılıyorsa, çevrilen metinde bu ikisini
    YAN YANA (aralarına Rusça kelime girmeden) yaz.
 5. Ürün TÜRÜNÜ (kolye/yüzük, havlu/çarşaf, kap/cihaz vb.) başlıktaki kelimeye sadık
-   kalarak çevir, farklı bir ürün türüne dönüştürme.${vendorRule}
+   kalarak çevir, farklı bir ürün türüne dönüştürme.
+6. EMOJİ KULLANMA: nameRu ve descriptionRu içinde hiçbir emoji, sembol ikon (✨🔥💧⭐ vb.)
+   veya özel dekoratif karakter olmayacak — sadece düz metin. Bu bir pazaryeri ürün kartı,
+   sosyal medya gönderisi değil.${vendorRule}
 
 Sadece şu JSON formatında cevap ver, başka hiçbir şey yazma: {"nameRu": "...", "descriptionRu": "..."}
 
@@ -95,5 +108,5 @@ Açıklama: ${description}`;
   if (!parsed.nameRu || !parsed.descriptionRu) {
     throw new Error("Gemini beklenen alanları döndürmedi");
   }
-  return parsed;
+  return { nameRu: stripEmoji(parsed.nameRu), descriptionRu: stripEmoji(parsed.descriptionRu) };
 }

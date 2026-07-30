@@ -3,7 +3,7 @@ import { importProducts, getImportStatus, updatePrices, updateStocks, getProduct
 import { getCategoryAttributes } from "../../ozon/categories";
 import { DEFAULT_WAREHOUSE_ID } from "../../ozon/warehouses";
 import { buildRichContentJson } from "../../ozon/rich-content";
-import { computeSalePrice } from "../../pricing/formula";
+import { computeSalePrice, computeOldPrice } from "../../pricing/formula";
 
 // Ozon hesabının sözleşme para birimi USD — RUB gönderilirse ürün sessizce "pending" kalıp
 // sonunda currency_differs_from_contract hatasıyla düşüyor (Faz 1'de keşfedildi).
@@ -120,6 +120,7 @@ export async function createProduct(input: CreateProductInput) {
     heightCm: input.heightCm,
     depthCm: input.depthCm,
   });
+  const oldPrice = computeOldPrice(price);
 
   await prisma.product.upsert({
     where: { offerId: input.offerId },
@@ -127,6 +128,7 @@ export async function createProduct(input: CreateProductInput) {
       offerId: input.offerId,
       name: input.name,
       price,
+      oldPrice,
       costPrice: input.costPrice,
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
@@ -142,6 +144,7 @@ export async function createProduct(input: CreateProductInput) {
     update: {
       name: input.name,
       price,
+      oldPrice,
       costPrice: input.costPrice,
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
@@ -168,6 +171,7 @@ export async function createProduct(input: CreateProductInput) {
       offer_id: input.offerId,
       name: input.name,
       price,
+      old_price: oldPrice,
       currency_code: CURRENCY_CODE,
       category_id: input.descriptionCategoryId,
       description_category_id: input.descriptionCategoryId,
@@ -304,13 +308,14 @@ export async function updateProductPrice(offerId: string, costPrice: string, pri
       depthCm: existing?.depthCm,
     });
 
-  const { result } = await updatePrices([{ offerId, price }]);
+  const oldPrice = computeOldPrice(price);
+  const { result } = await updatePrices([{ offerId, price, oldPrice }]);
   const entry = result.find((r) => r.offer_id === offerId);
   if (entry && !entry.updated) {
     throw new Error(entry.errors.map((e) => e.message).join("; ") || "Fiyat güncellenemedi");
   }
 
-  await prisma.product.update({ where: { offerId }, data: { costPrice, price } });
+  await prisma.product.update({ where: { offerId }, data: { costPrice, price, oldPrice } });
   return { price };
 }
 
@@ -370,6 +375,7 @@ export async function updateProductImages(offerId: string, images: string[]) {
     await getLiveOzonAttributes(offerId),
     { descriptionRu: product.descriptionRu, weightGrams: product.weightGrams, title: product.nameRu ?? product.name },
   );
+  const resendOldPrice = product.oldPrice ?? computeOldPrice(product.price);
 
   const { result } = await importProducts([
     {
@@ -379,6 +385,7 @@ export async function updateProductImages(offerId: string, images: string[]) {
       // sessizce İngilizce'ye geri döner.
       name: product.nameRu ?? product.name,
       price: product.price,
+      old_price: resendOldPrice,
       currency_code: CURRENCY_CODE,
       category_id: product.descriptionCategoryId,
       description_category_id: product.descriptionCategoryId,
@@ -397,7 +404,7 @@ export async function updateProductImages(offerId: string, images: string[]) {
 
   await prisma.product.update({
     where: { offerId },
-    data: { images, importTaskId: result.task_id, status: "pending", lastError: null },
+    data: { images, oldPrice: resendOldPrice, importTaskId: result.task_id, status: "pending", lastError: null },
   });
 
   return { images, taskId: result.task_id };
@@ -436,12 +443,14 @@ export async function updateProductCategoryAttributes(
     Array.from(merged.values()),
     { descriptionRu: product.descriptionRu, weightGrams: product.weightGrams, title: product.nameRu ?? product.name },
   );
+  const resendOldPrice = product.oldPrice ?? computeOldPrice(product.price);
 
   const { result } = await importProducts([
     {
       offer_id: offerId,
       name: product.nameRu ?? product.name,
       price: product.price,
+      old_price: resendOldPrice,
       currency_code: CURRENCY_CODE,
       category_id: input.descriptionCategoryId,
       description_category_id: input.descriptionCategoryId,
@@ -463,6 +472,7 @@ export async function updateProductCategoryAttributes(
     data: {
       descriptionCategoryId: input.descriptionCategoryId,
       typeId: input.typeId,
+      oldPrice: resendOldPrice,
       importTaskId: result.task_id,
       status: "pending",
       lastError: null,

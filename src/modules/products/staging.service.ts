@@ -1,5 +1,5 @@
 import { prisma } from "../../db/prisma";
-import { computeSalePrice } from "../../pricing/formula";
+import { computeSalePrice, computeOldPrice } from "../../pricing/formula";
 import { translateToRussian } from "../../ai/translate";
 import { updatePrices, updateStocks, getImportStatus } from "../../ozon/products";
 import { DEFAULT_WAREHOUSE_ID } from "../../ozon/warehouses";
@@ -245,15 +245,16 @@ export async function updateDraftVariant(
   const costPrice = data.costPrice ?? existing?.costPrice ?? undefined;
   const price = costPrice ? computeSalePrice(costPrice, weightGrams) : existing?.price;
   const finalPrice = price || existing?.price;
+  const oldPrice = finalPrice && finalPrice !== existing?.price ? computeOldPrice(finalPrice) : existing?.oldPrice;
 
   const updated = await prisma.product.update({
     where: { offerId },
-    data: { ...data, price: finalPrice },
+    data: { ...data, price: finalPrice, oldPrice },
   });
 
   if (updated.ozonProductId && finalPrice) {
     try {
-      await updatePrices([{ offerId, price: finalPrice }]);
+      await updatePrices([{ offerId, price: finalPrice, oldPrice: oldPrice ?? undefined }]);
     } catch {
       // Fiyat Ozon'a gönderilemedi (örn. Ozon tarafında geçici bir hata) — local DB güncellendi,
       // kullanıcı Fiyat Hesaplayıcı'dan tekrar deneyebilir. Sessizce yutuyoruz ki her tuş

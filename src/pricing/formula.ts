@@ -84,6 +84,16 @@ export function computeSalePrice(
   return price.toFixed(2);
 }
 
+// "Üstü çizili" (eski/indirim) fiyat — kullanıcı isteğiyle her üründe satış fiyatının
+// %30-%50 üzerinde, rastgele (ürün başına ayrı) bir değer olacak şekilde üretiliyor;
+// hepsi aynı oranda olmasın diye her çağrıda yeniden rastgele seçiliyor.
+export function computeOldPrice(price: string | number): string {
+  const sale = Number(price);
+  if (!sale || Number.isNaN(sale)) return "";
+  const markup = 0.3 + Math.random() * 0.2; // %30 - %50
+  return (sale * (1 + markup)).toFixed(2);
+}
+
 export interface PriceBreakdown {
   costUsd: number;
   shippingUsd: number;

@@ -11,6 +11,7 @@ import {
 } from "../../products/new/CategoryAttributeForm";
 import { suggestAttributeValue } from "@/import/attribute-mapping";
 import { computeSalePrice } from "@/pricing/formula";
+import { PriceCalculatorModal } from "../../products/[offerId]/PriceCalculatorModal";
 
 const MODEL_NAME_ATTRIBUTE_ID = 9048;
 
@@ -21,6 +22,9 @@ interface Variant {
   price: string;
   costPrice: string | null;
   weightGrams: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+  depthCm: number | null;
   images: unknown;
   originalImages: unknown;
   shopifyMetafields: unknown;
@@ -78,6 +82,7 @@ export function HandleEditor({ handle }: { handle: string }) {
     { offerId: string; status: "pending" | "imported" | "failed"; ozonProductId?: string | null; error?: string }[] | null
   >(null);
   const [imageSaveError, setImageSaveError] = useState<string | null>(null);
+  const [priceCalcOfferId, setPriceCalcOfferId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/import/products/${encodeURIComponent(handle)}`);
@@ -225,6 +230,16 @@ export function HandleEditor({ handle }: { handle: string }) {
     if (!confirm(`${offerId} varyantını kalıcı olarak silmek istediğinize emin misiniz?`)) return;
     await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, { method: "DELETE" });
     setVariants((prev) => (prev ? prev.filter((v) => v.offerId !== offerId) : prev));
+  }
+
+  async function applyPriceOverride(offerId: string, costPrice: string, priceUsd: string) {
+    await fetch(`/api/products/${encodeURIComponent(offerId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ costPrice, priceOverride: priceUsd }),
+    });
+    setPriceCalcOfferId(null);
+    await load();
   }
 
   async function linkModel(targetOfferId: string) {
@@ -512,7 +527,19 @@ export function HandleEditor({ handle }: { handle: string }) {
                     onBlur={(e) => updateVariantField(v.offerId, "costPrice", e.target.value)}
                   />
                 </td>
-                <td>{computeSalePrice(v.costPrice ?? "0", v.weightGrams) || v.price}</td>
+                <td>
+                  {v.price || computeSalePrice(v.costPrice ?? "0", v.weightGrams)}
+                  {v.ozonProductId && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ marginLeft: 6, fontSize: 11, padding: "2px 6px" }}
+                      onClick={() => setPriceCalcOfferId(v.offerId)}
+                    >
+                      Düzenle
+                    </button>
+                  )}
+                </td>
                 <td>
                   {v.excludedFromSubmit ? (
                     <span className="badge failed">pasif</span>
@@ -539,6 +566,24 @@ export function HandleEditor({ handle }: { handle: string }) {
           </tbody>
         </table>
       </div>
+
+      {priceCalcOfferId &&
+        (() => {
+          const v = variants.find((variant) => variant.offerId === priceCalcOfferId);
+          if (!v) return null;
+          return (
+            <PriceCalculatorModal
+              costPrice={v.costPrice ?? ""}
+              weightGrams={v.weightGrams}
+              widthCm={v.widthCm}
+              heightCm={v.heightCm}
+              depthCm={v.depthCm}
+              currentPrice={v.price}
+              onClose={() => setPriceCalcOfferId(null)}
+              onApply={(priceUsd) => applyPriceOverride(v.offerId, v.costPrice ?? "0", priceUsd)}
+            />
+          );
+        })()}
 
       <div className="card" style={{ marginBottom: 16 }}>
         <label>Modele Bağla</label>

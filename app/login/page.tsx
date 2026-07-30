@@ -3,10 +3,12 @@ import { LoginForm } from "./LoginForm";
 
 export default function LoginPage() {
   return (
-    <div className="page" style={{ maxWidth: 360, paddingTop: 100 }}>
-      <Suspense>
-        <LoginForm />
-      </Suspense>
+    <div className="login-page">
+      <div className="login-card">
+        <Suspense>
+          <LoginForm />
+        </Suspense>
+      </div>
     </div>
   );
 }

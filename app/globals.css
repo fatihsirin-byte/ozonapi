@@ -85,6 +85,7 @@ label {
 
 input[type="text"],
 input[type="number"],
+input[type="password"],
 textarea {
   width: 100%;
   background: #0f1216;
@@ -99,6 +100,48 @@ input:focus,
 textarea:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
+}
+
+/* Chrome/Safari şifre alanını sarı autofill rengiyle boyuyor — koyu temaya zorla uydur. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0px 1000px #0f1216 inset;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+}
+
+.login-title {
+  text-align: center;
+  margin: 0 0 24px;
+  font-size: 20px;
+}
+
+.password-row {
+  display: flex;
+  gap: 8px;
+}
+
+.password-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.password-row button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .hint {

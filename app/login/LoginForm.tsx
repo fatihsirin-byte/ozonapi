@@ -35,30 +35,25 @@ export function LoginForm() {
 
   return (
     <div className="card">
+      <h1 className="login-title">Ozon Panel</h1>
       <form onSubmit={handleSubmit}>
         <div className="field">
           <label>Şifre</label>
-          <div style={{ position: "relative" }}>
+          <div className="password-row">
             <input
               type={showPassword ? "text" : "password"}
               autoFocus
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              style={{ paddingRight: 60, fontFamily: "monospace", letterSpacing: showPassword ? 0 : 2 }}
             />
-            <button
-              type="button"
-              onClick={() => setShowPassword((v) => !v)}
-              className="btn-secondary"
-              style={{ position: "absolute", right: 4, top: 4, bottom: 4, padding: "0 10px", fontSize: 12 }}
-            >
+            <button type="button" onClick={() => setShowPassword((v) => !v)} className="btn-secondary">
               {showPassword ? "Gizle" : "Göster"}
             </button>
           </div>
         </div>
-        {error && <div className="status-banner failed">{error}</div>}
-        <button className="btn-primary" type="submit" disabled={submitting} style={{ width: "100%" }}>
+        {error && <div className="status-banner failed" style={{ marginBottom: 16 }}>{error}</div>}
+        <button className="btn-primary" type="submit" disabled={submitting} style={{ width: "100%", marginTop: 4 }}>
           {submitting ? "Kontrol ediliyor..." : "Giriş"}
         </button>
       </form>

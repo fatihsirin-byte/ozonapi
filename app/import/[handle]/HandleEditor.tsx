@@ -484,6 +484,8 @@ export function HandleEditor({ handle }: { handle: string }) {
         <label>Varyantlar ({variants.length})</label>
         <div className="hint" style={{ marginBottom: 8 }}>
           "Pasifleştir" bir varyantı silmeden Ozon'a göndermeyi atlar (geri aktifleştirilebilir). "Sil" kalıcıdır.
+          Ürün zaten gönderilmişse, ağırlık/alış fiyatı değiştirince yeni satış fiyatı otomatik Ozon'a gider —
+          ağırlığın kendisi Ozon'da değişmez, o "Görselleri Kaydet" gibi tam bir yeniden gönderim gerektirir.
         </div>
         <table style={{ tableLayout: "fixed", wordBreak: "break-word" }}>
           <colgroup>

@@ -1,6 +1,7 @@
 import { prisma } from "../../db/prisma";
 import { computeSalePrice } from "../../pricing/formula";
 import { translateToRussian } from "../../ai/translate";
+import { updatePrices } from "../../ozon/products";
 import { createProduct, updateProductImages, type ProductAttributeInput } from "./products.service";
 
 export interface HandlePageItem {
@@ -183,6 +184,11 @@ export async function updateHandleImages(handle: string, images: string[]) {
   return { errors };
 }
 
+// Ağırlık/alış fiyatı değiştiğinde yeni fiyatı hesaplar ve local DB'ye yazar. Ürün zaten
+// Ozon'a gönderilmişse (ozonProductId dolu), sadece fiyatı da hafif uç (/v1/product/import/prices)
+// ile otomatik Ozon'a gönderir — ağırlığın kendisi Ozon'da hâlâ değişmez, o ancak görsel/spec
+// resend'i gibi tam bir /v3/product/import ile güncellenebiliyor (Ozon'da "sadece ağırlık
+// güncelle" diye ayrı bir uç yok).
 export async function updateDraftVariant(
   offerId: string,
   data: { weightGrams?: number; costPrice?: string }
@@ -191,11 +197,24 @@ export async function updateDraftVariant(
   const weightGrams = data.weightGrams ?? existing?.weightGrams ?? undefined;
   const costPrice = data.costPrice ?? existing?.costPrice ?? undefined;
   const price = costPrice ? computeSalePrice(costPrice, weightGrams) : existing?.price;
+  const finalPrice = price || existing?.price;
 
-  return prisma.product.update({
+  const updated = await prisma.product.update({
     where: { offerId },
-    data: { ...data, price: price || existing?.price },
+    data: { ...data, price: finalPrice },
   });
+
+  if (updated.ozonProductId && finalPrice) {
+    try {
+      await updatePrices([{ offerId, price: finalPrice }]);
+    } catch {
+      // Fiyat Ozon'a gönderilemedi (örn. Ozon tarafında geçici bir hata) — local DB güncellendi,
+      // kullanıcı Fiyat Hesaplayıcı'dan tekrar deneyebilir. Sessizce yutuyoruz ki her tuş
+      // vuruşunda (onBlur) kullanıcıya hata göstermek UX'i bozmasın.
+    }
+  }
+
+  return updated;
 }
 
 // Silinen offerId'leri ExcludedOfferId'e kaydeder — CSV tekrar import edilirse bu ürünler

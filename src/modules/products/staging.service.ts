@@ -102,9 +102,37 @@ export async function listDraftHandlesPage(
   return { items, total, page, pageSize };
 }
 
+export interface FacetOption {
+  value: string;
+  count: number;
+}
+
 export interface Facets {
-  vendors: string[];
-  types: string[];
+  vendors: FacetOption[];
+  types: FacetOption[];
+}
+
+// Bir alanın (vendor/type) her değeri için KAÇ FARKLI ÜRÜN (handle) eşleştiğini sayar —
+// groupBy tek başına varyant satırı sayardı, bir handle'ın 4 varyantı varsa 4 sayardı.
+async function countHandlesPerValue(
+  field: "shopifyVendor" | "shopifyType",
+  where: Record<string, unknown>,
+): Promise<FacetOption[]> {
+  const rows = await prisma.product.findMany({
+    where: { ...where, [field]: { not: null } },
+    select: { shopifyHandle: true, [field]: true },
+    distinct: [field, "shopifyHandle"],
+  });
+
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const value = (row as Record<string, unknown>)[field] as string;
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => a.value.localeCompare(b.value));
 }
 
 // Filtre dropdown'ları için — "cascading": her facet, DİĞER aktif filtrelerle kısıtlanmış
@@ -116,25 +144,12 @@ export async function getFacets(filters: HandlePageFilters = {}): Promise<Facets
     buildHandleWhere(filters, "type"),
   ]);
 
-  const [vendorRows, typeRows] = await Promise.all([
-    prisma.product.findMany({
-      where: { ...vendorWhere, shopifyVendor: { not: null } },
-      select: { shopifyVendor: true },
-      distinct: ["shopifyVendor"],
-      orderBy: { shopifyVendor: "asc" },
-    }),
-    prisma.product.findMany({
-      where: { ...typeWhere, shopifyType: { not: null } },
-      select: { shopifyType: true },
-      distinct: ["shopifyType"],
-      orderBy: { shopifyType: "asc" },
-    }),
+  const [vendors, types] = await Promise.all([
+    countHandlesPerValue("shopifyVendor", vendorWhere),
+    countHandlesPerValue("shopifyType", typeWhere),
   ]);
 
-  return {
-    vendors: vendorRows.map((r) => r.shopifyVendor as string),
-    types: typeRows.map((r) => r.shopifyType as string),
-  };
+  return { vendors, types };
 }
 
 export async function getHandleGroup(handle: string) {

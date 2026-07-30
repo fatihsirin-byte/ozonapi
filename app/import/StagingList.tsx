@@ -14,6 +14,11 @@ interface HandleItem {
   sampleImage: string | null;
 }
 
+interface FacetOption {
+  value: string;
+  count: number;
+}
+
 const PAGE_SIZE = 25;
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
@@ -38,8 +43,8 @@ export function StagingList() {
   const [vendor, setVendor] = useState("");
   const [type, setType] = useState("");
   const [status, setStatus] = useState<"" | "draft" | "submitted">("");
-  const [vendors, setVendors] = useState<string[]>([]);
-  const [types, setTypes] = useState<string[]>([]);
+  const [vendors, setVendors] = useState<FacetOption[]>([]);
+  const [types, setTypes] = useState<FacetOption[]>([]);
 
   const refreshFacets = useCallback((q: string, v: string, t: string, s: string) => {
     const params = new URLSearchParams();
@@ -136,16 +141,16 @@ export function StagingList() {
           <select value={vendor} onChange={(e) => setVendor(e.target.value)}>
             <option value="">Tüm tedarikçiler (Vendor)</option>
             {vendors.map((v) => (
-              <option key={v} value={v}>
-                {v}
+              <option key={v.value} value={v.value}>
+                {v.value} ({v.count})
               </option>
             ))}
           </select>
           <select value={type} onChange={(e) => setType(e.target.value)}>
             <option value="">Tüm tipler (Type)</option>
             {types.map((t) => (
-              <option key={t} value={t}>
-                {t}
+              <option key={t.value} value={t.value}>
+                {t.value} ({t.count})
               </option>
             ))}
           </select>

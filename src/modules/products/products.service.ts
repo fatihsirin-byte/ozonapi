@@ -203,7 +203,10 @@ export async function updateProductImages(offerId: string, images: string[]) {
   const { result } = await importProducts([
     {
       offer_id: offerId,
-      name: product.name,
+      // nameRu varsa onu kullan — yoksa Ozon Latin harfli isme "critical" hata verir. Bunu
+      // resendetmeyi unutursak (product.name kullanırsak) daha önce çevrilmiş isim burada
+      // sessizce İngilizce'ye geri döner.
+      name: product.nameRu ?? product.name,
       price: product.price,
       currency_code: CURRENCY_CODE,
       category_id: product.descriptionCategoryId,
@@ -245,7 +248,7 @@ export async function updateProductCategoryAttributes(
   const { result } = await importProducts([
     {
       offer_id: offerId,
-      name: product.name,
+      name: product.nameRu ?? product.name,
       price: product.price,
       currency_code: CURRENCY_CODE,
       category_id: input.descriptionCategoryId,

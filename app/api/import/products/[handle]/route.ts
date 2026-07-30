@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getHandleGroup, updateDraftImages } from "@/modules/products/staging.service";
+import { getHandleGroup, updateHandleImages } from "@/modules/products/staging.service";
 
 // importTaskId BigInt — JSON.stringify edilemiyor (Ozon'a gönderilmiş varyantlarda dolu
 // oluyor), string'e çevirip dönüyoruz. Aksi halde bu route submitted ürünlerde 500 atıp
@@ -31,7 +31,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (images === undefined) {
     return NextResponse.json({ error: "images gerekli" }, { status: 400 });
   }
-  await updateDraftImages(decodeURIComponent(handle), images);
+  const { errors } = await updateHandleImages(decodeURIComponent(handle), images);
   const variants = await getHandleGroup(decodeURIComponent(handle));
-  return NextResponse.json({ variants: serializeVariants(variants) });
+  return NextResponse.json({ variants: serializeVariants(variants), errors });
 }

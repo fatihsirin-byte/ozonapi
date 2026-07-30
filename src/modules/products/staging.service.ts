@@ -1,7 +1,7 @@
 import { prisma } from "../../db/prisma";
 import { computeSalePrice } from "../../pricing/formula";
 import { translateToRussian } from "../../ai/translate";
-import { createProduct, type ProductAttributeInput } from "./products.service";
+import { createProduct, updateProductImages, type ProductAttributeInput } from "./products.service";
 
 export interface HandlePageItem {
   handle: string;
@@ -161,9 +161,26 @@ export async function getHandleGroup(handle: string) {
   });
 }
 
-// Görseller handle içindeki tüm varyantlarda paylaşılıyor (Shopify'da da öyle) — tek seferde hepsine yazılır.
-export async function updateDraftImages(handle: string, images: string[]) {
-  await prisma.product.updateMany({ where: { shopifyHandle: handle, status: "draft" }, data: { images } });
+// Görseller handle içindeki tüm varyantlarda paylaşılıyor (Shopify'da da öyle) — tek seferde
+// hepsine yazılır. Ürün zaten Ozon'a gönderilmişse (ozonProductId dolu), sadece DB kopyasını
+// güncellemek yetmez — updateProductImages ile gerçekten Ozon'a da resend edilir, aksi halde
+// "Görselleri Kaydet" görünüşte çalışır ama Ozon'daki görseller/sıra hiç değişmez.
+export async function updateHandleImages(handle: string, images: string[]) {
+  const variants = await prisma.product.findMany({ where: { shopifyHandle: handle } });
+
+  await prisma.product.updateMany({ where: { shopifyHandle: handle }, data: { images } });
+
+  const errors: { offerId: string; error: string }[] = [];
+  for (const variant of variants) {
+    if (variant.ozonProductId) {
+      try {
+        await updateProductImages(variant.offerId, images);
+      } catch (error) {
+        errors.push({ offerId: variant.offerId, error: error instanceof Error ? error.message : "Bilinmeyen hata" });
+      }
+    }
+  }
+  return { errors };
 }
 
 export async function updateDraftVariant(

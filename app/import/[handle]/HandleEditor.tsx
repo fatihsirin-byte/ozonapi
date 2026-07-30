@@ -30,7 +30,15 @@ interface Variant {
   descriptionRu: string | null;
   status: string;
   excludedFromSubmit: boolean;
+  ozonProductId: string | null;
+  importTaskId: string | null;
   modelGroup: { id: string; name: string | null; products: { offerId: string }[] } | null;
+}
+
+interface CloneAttribute {
+  id: number;
+  dictionaryValueId?: number;
+  value?: string;
 }
 
 interface SearchResult {
@@ -61,24 +69,65 @@ export function HandleEditor({ handle }: { handle: string }) {
   const [copiedSloganField, setCopiedSloganField] = useState<string | null>(null);
 
   const [category, setCategory] = useState<CategoryOption | null>(null);
+  const [cloneAttributes, setCloneAttributes] = useState<CloneAttribute[] | null>(null);
+  const [specLoaded, setSpecLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitResults, setSubmitResults] = useState<
     { offerId: string; status: "pending" | "imported" | "failed"; ozonProductId?: string | null; error?: string }[] | null
   >(null);
+  const [imageSaveError, setImageSaveError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/import/products/${encodeURIComponent(handle)}`);
     const data = await res.json();
-    setVariants(data.variants ?? []);
-    setImages(asStringArray(data.variants?.[0]?.images));
-    setSloganProductName((prev) => prev || data.variants?.[0]?.name || "");
+    const loadedVariants: Variant[] = data.variants ?? [];
+    setVariants(loadedVariants);
+    setImages(asStringArray(loadedVariants?.[0]?.images));
+    setSloganProductName((prev) => prev || loadedVariants?.[0]?.name || "");
+    return loadedVariants;
   }, [handle]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Ürün zaten Ozon'a gönderilmişse, daha önce seçilmiş kategori/attribute'ları geri yükle —
+  // aksi halde her sayfa açılışında kategori/özellikler sıfırdan seçilmek zorunda kalınıyordu.
+  useEffect(() => {
+    if (!variants || specLoaded) return;
+    const submittedOfferId = variants.find((v) => v.ozonProductId)?.offerId;
+    if (!submittedOfferId) return;
+    setSpecLoaded(true);
+    fetch(`/api/products/${encodeURIComponent(submittedOfferId)}/clone-data`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.category) setCategory(data.category);
+        if (data.attributes) setCloneAttributes(data.attributes);
+      })
+      .catch(() => {});
+  }, [variants, specLoaded]);
+
+  // "pending" durumda kalmış (daha önce gönderilmiş ama sonucu hiç kontrol edilmemiş)
+  // varyantların gerçek Ozon durumunu sayfa açılışında otomatik sorgula.
+  useEffect(() => {
+    if (!variants) return;
+    const pendingWithTask = variants.filter((v) => v.status === "pending" && v.importTaskId);
+    for (const v of pendingWithTask) {
+      fetch(`/api/products/${encodeURIComponent(v.offerId)}/status`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.status !== "pending") {
+            setVariants((prev) =>
+              prev ? prev.map((p) => (p.offerId === v.offerId ? { ...p, status: data.status } : p)) : prev,
+            );
+          }
+        })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variants?.map((v) => v.offerId).join(",")]);
 
   const metafields = (variants?.[0]?.shopifyMetafields as Record<string, string> | null) ?? null;
   const vendor = variants?.[0]?.shopifyVendor ?? null;
@@ -86,6 +135,15 @@ export function HandleEditor({ handle }: { handle: string }) {
   const { requiredAttributes, attributesLoading, attributeAnswers, setAttributeAnswers } = useRequiredAttributes(
     category,
     (attr) => {
+      // Daha önce Ozon'a gönderilmişse, o zaman seçilmiş gerçek değeri her şeyden önce kullan.
+      const cloned = cloneAttributes?.find((a) => a.id === attr.id);
+      if (cloned) {
+        return {
+          dictionaryValueId: cloned.dictionaryValueId,
+          value: cloned.value,
+          displayValue: cloned.dictionaryValueId ? "(mevcut değer — değiştirmek için yazın)" : undefined,
+        };
+      }
       const suggested = suggestAttributeValue(attr.name, metafields, vendor);
       return suggested ? { value: suggested, displayValue: suggested } : undefined;
     },
@@ -116,12 +174,19 @@ export function HandleEditor({ handle }: { handle: string }) {
 
   async function saveImages() {
     setSavingImages(true);
+    setImageSaveError(null);
     try {
-      await fetch(`/api/import/products/${encodeURIComponent(handle)}`, {
+      const res = await fetch(`/api/import/products/${encodeURIComponent(handle)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ images }),
       });
+      const data = await res.json();
+      if (data.errors?.length) {
+        setImageSaveError(
+          data.errors.map((e: { offerId: string; error: string }) => `${e.offerId}: ${e.error}`).join("; "),
+        );
+      }
       await load();
     } finally {
       setSavingImages(false);
@@ -313,6 +378,12 @@ export function HandleEditor({ handle }: { handle: string }) {
         <button className="btn-primary" style={{ marginTop: 12 }} disabled={savingImages} onClick={saveImages}>
           {savingImages ? "Kaydediliyor..." : "Görselleri Kaydet"}
         </button>
+        {variants.some((v) => v.ozonProductId) && (
+          <div className="hint" style={{ marginTop: 8 }}>
+            Bu ürün zaten Ozon'a gönderilmiş — kaydedince görseller Ozon'a da yeniden gönderilir.
+          </div>
+        )}
+        {imageSaveError && <div className="hint" style={{ color: "var(--danger)", marginTop: 8 }}>{imageSaveError}</div>}
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>

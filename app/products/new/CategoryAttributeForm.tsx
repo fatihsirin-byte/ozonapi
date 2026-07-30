@@ -200,6 +200,24 @@ export function AttributeValuePicker({
   );
 }
 
+// Ozon "#Hashtag'ler" gibi alanlarda kesin format istiyor (her kelime "#" ile başlamalı,
+// boşlukla ayrılmalı) — kullanıcı elle yazınca unutması içerik puanını düşüren bir uyarıya
+// yol açıyordu. Odak kaybedince (blur) otomatik düzeltiyoruz; backend de aynısını ayrıca
+// garanti ediyor (bkz. products.service.ts normalizeHashtagValue).
+const HASHTAG_NAME_PATTERN = /hashtag|хештег/i;
+
+function normalizeHashtagValue(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => {
+      const cleaned = token.replace(/^#+/, "").replace(/[^\p{L}\p{N}_]/gu, "_");
+      return cleaned ? `#${cleaned}` : "";
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function AttributeField({
   attr,
   category,
@@ -214,10 +232,21 @@ export function AttributeField({
   if (attr.dictionary_id > 0) {
     return <AttributeValuePicker attribute={attr} category={category} answer={answer} onChange={onChange} />;
   }
+  const isHashtagField = HASHTAG_NAME_PATTERN.test(attr.name);
   return (
     <div className="field">
       <label>{attr.name}</label>
-      <input type="text" value={answer?.value ?? ""} onChange={(e) => onChange({ value: e.target.value })} />
+      <input
+        type="text"
+        value={answer?.value ?? ""}
+        onChange={(e) => onChange({ value: e.target.value })}
+        onBlur={(e) => {
+          if (isHashtagField && e.target.value.trim()) {
+            onChange({ value: normalizeHashtagValue(e.target.value) });
+          }
+        }}
+      />
+      {isHashtagField && <div className="hint">Her kelime otomatik "#" ile başlatılır, boşlukla ayrılır.</div>}
     </div>
   );
 }

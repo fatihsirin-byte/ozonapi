@@ -18,27 +18,64 @@ const MODEL_NAME_ATTRIBUTE_ID = 9048;
 const ANNOTATION_ATTRIBUTE_ID = 4191;
 const WEIGHT_GRAMS_ATTRIBUTE_ID = 4383;
 
-async function getAutoFillAttributes(
+// Ozon'un "#Hashtag'ler" attribute'u kesin format istiyor: her hashtag "#" ile başlamalı,
+// sadece harf/rakam/alt çizgi içermeli, boşlukla ayrılmalı. Kullanıcı elle "halva" gibi
+// "#"sız bir kelime yazınca Ozon bunu (moderasyonu engellemeyen ama içerik puanını düşüren)
+// bir uyarı olarak işaretliyor — burada göndermeden önce otomatik düzeltiyoruz.
+const HASHTAG_NAME_PATTERN = /hashtag|хештег/i;
+
+function normalizeHashtagValue(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => {
+      const cleaned = token.replace(/^#+/, "").replace(/[^\p{L}\p{N}_]/gu, "_");
+      return cleaned ? `#${cleaned}` : "";
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
+// Gönderilecek attribute listesini kategori şemasına göre otomatik düzeltir/tamamlar:
+// (1) Annotation/ağırlık attribute'ları eksikse ve kategori destekliyorsa elimizdeki
+// descriptionRu/weightGrams'tan ekler, (2) hashtag-tipi attribute'ların değeri format
+// dışıysa normalize eder. Kategori şeması çekilemezse hiçbir şey değiştirmeden devam eder.
+async function applyContentAttributeFixes(
   descriptionCategoryId: number,
   typeId: number,
-  existingIds: Set<number>,
+  attributes: ProductAttributeInput[],
   data: { descriptionRu?: string | null; weightGrams?: number | null },
 ): Promise<ProductAttributeInput[]> {
-  const extras: ProductAttributeInput[] = [];
-  if (existingIds.has(ANNOTATION_ATTRIBUTE_ID) && existingIds.has(WEIGHT_GRAMS_ATTRIBUTE_ID)) return extras;
+  const existingIds = new Set(attributes.map((a) => a.id));
+  const needsAnnotation = !existingIds.has(ANNOTATION_ATTRIBUTE_ID) && !!data.descriptionRu;
+  const needsWeight = !existingIds.has(WEIGHT_GRAMS_ATTRIBUTE_ID) && !!data.weightGrams;
+  const hasHashtagCandidate = attributes.some(
+    (a) => typeof a.value === "string" && a.value.trim() && !/^#\S+(\s+#\S+)*$/.test(a.value.trim()),
+  );
+  if (!needsAnnotation && !needsWeight && !hasHashtagCandidate) return attributes;
+
   try {
     const { result } = await getCategoryAttributes({ descriptionCategoryId, typeId });
-    const categoryIds = new Set(result.map((a) => a.id));
-    if (!existingIds.has(ANNOTATION_ATTRIBUTE_ID) && categoryIds.has(ANNOTATION_ATTRIBUTE_ID) && data.descriptionRu) {
-      extras.push({ id: ANNOTATION_ATTRIBUTE_ID, value: data.descriptionRu });
+    const byId = new Map(result.map((a) => [a.id, a]));
+
+    const fixed = attributes.map((attr) => {
+      const schema = byId.get(attr.id);
+      if (schema && HASHTAG_NAME_PATTERN.test(schema.name) && typeof attr.value === "string" && attr.value.trim()) {
+        return { ...attr, value: normalizeHashtagValue(attr.value) };
+      }
+      return attr;
+    });
+
+    if (needsAnnotation && byId.has(ANNOTATION_ATTRIBUTE_ID)) {
+      fixed.push({ id: ANNOTATION_ATTRIBUTE_ID, value: data.descriptionRu! });
     }
-    if (!existingIds.has(WEIGHT_GRAMS_ATTRIBUTE_ID) && categoryIds.has(WEIGHT_GRAMS_ATTRIBUTE_ID) && data.weightGrams) {
-      extras.push({ id: WEIGHT_GRAMS_ATTRIBUTE_ID, value: String(data.weightGrams) });
+    if (needsWeight && byId.has(WEIGHT_GRAMS_ATTRIBUTE_ID)) {
+      fixed.push({ id: WEIGHT_GRAMS_ATTRIBUTE_ID, value: String(data.weightGrams) });
     }
+    return fixed;
   } catch {
-    // kategori attribute şeması çekilemedi — otomatik doldurma olmadan devam et
+    return attributes;
   }
-  return extras;
 }
 
 export interface ProductAttributeInput {
@@ -107,11 +144,10 @@ export async function createProduct(input: CreateProductInput) {
     },
   });
 
-  const baseAttributes = input.attributes.filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID);
-  const autoFillAttributes = await getAutoFillAttributes(
+  const baseAttributes = await applyContentAttributeFixes(
     input.descriptionCategoryId,
     input.typeId,
-    new Set(baseAttributes.map((a) => a.id)),
+    input.attributes.filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID),
     { descriptionRu: input.descriptionRu, weightGrams: input.weightGrams },
   );
 
@@ -133,7 +169,7 @@ export async function createProduct(input: CreateProductInput) {
       vat: "0",
       images: input.images,
       attributes: [
-        ...[...baseAttributes, ...autoFillAttributes].map((attr) => ({
+        ...baseAttributes.map((attr) => ({
           id: attr.id,
           values: [
             {
@@ -316,11 +352,10 @@ export async function updateProductImages(offerId: string, images: string[]) {
     throw new Error("Bu ürün henüz Ozon'da oluşmamış, görseller güncellenemez");
   }
   const modelName = product.modelGroup?.name ?? offerId;
-  const liveAttributes = await getLiveOzonAttributes(offerId);
-  const autoFillAttributes = await getAutoFillAttributes(
+  const liveAttributes = await applyContentAttributeFixes(
     product.descriptionCategoryId,
     product.typeId,
-    new Set(liveAttributes.map((a) => a.id)),
+    await getLiveOzonAttributes(offerId),
     { descriptionRu: product.descriptionRu, weightGrams: product.weightGrams },
   );
 
@@ -344,7 +379,7 @@ export async function updateProductImages(offerId: string, images: string[]) {
       dimension_unit: "cm",
       vat: "0",
       images,
-      attributes: buildAttributesPayload([...liveAttributes, ...autoFillAttributes], modelName),
+      attributes: buildAttributesPayload(liveAttributes, modelName),
     },
   ]);
 
@@ -383,13 +418,12 @@ export async function updateProductCategoryAttributes(
     if (attr.id === MODEL_NAME_ATTRIBUTE_ID) continue;
     merged.set(attr.id, attr);
   }
-  const autoFillAttributes = await getAutoFillAttributes(
+  const fixedAttributes = await applyContentAttributeFixes(
     input.descriptionCategoryId,
     input.typeId,
-    new Set(merged.keys()),
+    Array.from(merged.values()),
     { descriptionRu: product.descriptionRu, weightGrams: product.weightGrams },
   );
-  for (const attr of autoFillAttributes) merged.set(attr.id, attr);
 
   const { result } = await importProducts([
     {
@@ -408,7 +442,7 @@ export async function updateProductCategoryAttributes(
       dimension_unit: "cm",
       vat: "0",
       images,
-      attributes: buildAttributesPayload(Array.from(merged.values()), modelName),
+      attributes: buildAttributesPayload(fixedAttributes, modelName),
     },
   ]);
 

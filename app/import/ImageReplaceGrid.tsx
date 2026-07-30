@@ -16,6 +16,7 @@ export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const [copyMode, setCopyMode] = useState<"image" | "url" | null>(null);
   const [orderDragIndex, setOrderDragIndex] = useState<number | null>(null);
   const [orderOverIndex, setOrderOverIndex] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -28,8 +29,35 @@ export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
     onChange(next);
   }
 
+  // Çoğu tarayıcının pano API'si sadece image/png kabul ediyor — Shopify/upload görselleri
+  // genelde jpg olduğu için canvas ile png'ye çevirip öyle kopyalıyoruz.
+  async function toPngBlob(blob: Blob): Promise<Blob> {
+    if (blob.type === "image/png") return blob;
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("canvas context yok");
+    ctx.drawImage(bitmap, 0, 0);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob başarısız"))), "image/png");
+    });
+  }
+
+  // Gerçek görseli panoya kopyalar (Canva/Photoshop gibi bir yere doğrudan yapıştırılabilsin diye).
+  // CORS engeli (bazı CDN'ler) ya da tarayıcı desteklemiyorsa en azından URL'i kopyalar.
   async function copyUrl(url: string) {
-    await navigator.clipboard.writeText(url);
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const pngBlob = await toPngBlob(blob);
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlob })]);
+      setCopyMode("image");
+    } catch {
+      await navigator.clipboard.writeText(url);
+      setCopyMode("url");
+    }
     setCopiedUrl(url);
     setTimeout(() => setCopiedUrl((current) => (current === url ? null : current)), 1500);
   }
@@ -127,9 +155,13 @@ export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
                     className="btn-secondary"
                     style={{ fontSize: 12 }}
                     onClick={() => copyUrl(url)}
-                    title="Görsel URL'ini kopyala"
+                    title="Görseli panoya kopyala (yapıştıramazsanız URL kopyalanır)"
                   >
-                    {copiedUrl === url ? "Kopyalandı ✓" : "Kopyala"}
+                    {copiedUrl === url
+                      ? copyMode === "image"
+                        ? "Görsel Kopyalandı ✓"
+                        : "URL Kopyalandı ✓"
+                      : "Kopyala"}
                   </button>
                 </div>
               </div>

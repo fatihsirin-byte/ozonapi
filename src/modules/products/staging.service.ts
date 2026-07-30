@@ -297,9 +297,11 @@ export async function submitHandleToOzon(input: SubmitHandleInput) {
   for (const variant of variants) {
     const modelNameOverride = variant.modelGroup?.name ?? undefined;
     try {
+      // Ozon Rusça olmayan (Latin harfli) ürün adını "critical" hata olarak reddediyor —
+      // çeviri yapıldıysa (nameRu) onu kullan, yoksa orijinal (İngilizce) adı gönder.
       const { taskId } = await createProduct({
         offerId: variant.offerId,
-        name: input.nameOverrideByOfferId?.[variant.offerId] ?? variant.name,
+        name: input.nameOverrideByOfferId?.[variant.offerId] ?? variant.nameRu ?? variant.name,
         costPrice: variant.costPrice ?? "0",
         images: Array.isArray(variant.images) ? (variant.images as string[]) : [],
         descriptionCategoryId: input.descriptionCategoryId,

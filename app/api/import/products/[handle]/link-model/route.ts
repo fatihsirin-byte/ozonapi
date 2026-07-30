@@ -10,7 +10,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const group = await linkHandleToModelGroup(decodeURIComponent(handle), targetOfferId);
-    return NextResponse.json({ group });
+    // importTaskId BigInt — Ozon'a gönderilmiş bir ürün gruba dahilse JSON.stringify çöküyordu.
+    const serialized = group && {
+      ...group,
+      products: group.products.map((p) => ({ ...p, importTaskId: p.importTaskId?.toString() ?? null })),
+    };
+    return NextResponse.json({ group: serialized });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Bilinmeyen hata";
     return NextResponse.json({ error: message }, { status: 400 });

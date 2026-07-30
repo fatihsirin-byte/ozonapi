@@ -64,9 +64,9 @@ export function HandleEditor({ handle }: { handle: string }) {
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [submitResults, setSubmitResults] = useState<{ offerId: string; taskId?: string; error?: string }[] | null>(
-    null,
-  );
+  const [submitResults, setSubmitResults] = useState<
+    { offerId: string; status: "pending" | "imported" | "failed"; ozonProductId?: string | null; error?: string }[] | null
+  >(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/import/products/${encodeURIComponent(handle)}`);
@@ -220,6 +220,26 @@ export function HandleEditor({ handle }: { handle: string }) {
     await load();
   }
 
+  function pollSubmittedVariant(offerId: string) {
+    const interval = setInterval(async () => {
+      const res = await fetch(`/api/products/${encodeURIComponent(offerId)}/status`);
+      const data = await res.json();
+      if (data.status !== "pending") {
+        clearInterval(interval);
+        setSubmitResults((prev) =>
+          prev
+            ? prev.map((r) =>
+                r.offerId === offerId
+                  ? { ...r, status: data.status, ozonProductId: data.ozonProductId, error: data.error }
+                  : r,
+              )
+            : prev,
+        );
+        load();
+      }
+    }, 3000);
+  }
+
   async function submit() {
     if (!category) return;
     setSubmitting(true);
@@ -243,8 +263,17 @@ export function HandleEditor({ handle }: { handle: string }) {
         }),
       });
       const data = await res.json();
-      setSubmitResults(data.results ?? []);
-      await load();
+      const results = (data.results ?? []) as { offerId: string; taskId?: string; error?: string }[];
+      setSubmitResults(
+        results.map((r) => ({
+          offerId: r.offerId,
+          status: r.error ? ("failed" as const) : ("pending" as const),
+          error: r.error,
+        })),
+      );
+      for (const r of results) {
+        if (!r.error) pollSubmittedVariant(r.offerId);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -555,8 +584,11 @@ export function HandleEditor({ handle }: { handle: string }) {
         {submitResults && (
           <div style={{ marginTop: 16 }}>
             {submitResults.map((r) => (
-              <div key={r.offerId} className={`status-banner ${r.error ? "failed" : "pending"}`}>
-                <strong>{r.offerId}</strong> — {r.error ? `Hata: ${r.error}` : "Gönderildi, Ozon işliyor..."}
+              <div key={r.offerId} className={`status-banner ${r.status}`}>
+                <strong>{r.offerId}</strong> —{" "}
+                {r.status === "pending" && "Gönderildi, Ozon işliyor... (birkaç dakika sürebilir)"}
+                {r.status === "imported" && `Başarıyla oluşturuldu! product_id: ${r.ozonProductId}`}
+                {r.status === "failed" && `Hata: ${r.error ?? "Bilinmeyen hata"}`}
               </div>
             ))}
           </div>

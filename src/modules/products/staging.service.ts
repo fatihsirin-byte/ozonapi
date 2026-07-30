@@ -351,6 +351,7 @@ export async function submitHandleToOzon(input: SubmitHandleInput) {
         depthCm: variant.depthCm ?? 10,
         attributes: input.attributes,
         modelNameOverride,
+        descriptionRu: variant.descriptionRu,
       });
       results.push({ offerId: variant.offerId, taskId: taskId ? String(taskId) : undefined });
     } catch (error) {

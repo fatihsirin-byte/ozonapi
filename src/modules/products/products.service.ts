@@ -1,5 +1,6 @@
 import { prisma } from "../../db/prisma";
 import { importProducts, getImportStatus, updatePrices, getProductAttributes, getProductInfoList } from "../../ozon/products";
+import { getCategoryAttributes } from "../../ozon/categories";
 import { computeSalePrice } from "../../pricing/formula";
 
 // Ozon hesabının sözleşme para birimi USD — RUB gönderilirse ürün sessizce "pending" kalıp
@@ -8,6 +9,36 @@ const CURRENCY_CODE = "USD";
 
 // Ozon'un varyant gruplama alanı — product.service.ts ve wizard'da aynı sabit kullanılıyor.
 const MODEL_NAME_ATTRIBUTE_ID = 9048;
+
+// "Annotation" (Kısa bilgi) ve "Product weight, g" — kategori formunda kullanıcıya
+// gösterilmiyor ama içerik puanının büyük kısmını (Product description bloğu) bu tek alan
+// belirliyor. Elimizde zaten olan descriptionRu/weightGrams'ı bu ID'lere otomatik yazıyoruz;
+// kategori bu attribute'ları tanımıyorsa (id kategori şemasında yoksa) hiç göndermiyoruz.
+const ANNOTATION_ATTRIBUTE_ID = 4191;
+const WEIGHT_GRAMS_ATTRIBUTE_ID = 4383;
+
+async function getAutoFillAttributes(
+  descriptionCategoryId: number,
+  typeId: number,
+  existingIds: Set<number>,
+  data: { descriptionRu?: string | null; weightGrams?: number | null },
+): Promise<ProductAttributeInput[]> {
+  const extras: ProductAttributeInput[] = [];
+  if (existingIds.has(ANNOTATION_ATTRIBUTE_ID) && existingIds.has(WEIGHT_GRAMS_ATTRIBUTE_ID)) return extras;
+  try {
+    const { result } = await getCategoryAttributes({ descriptionCategoryId, typeId });
+    const categoryIds = new Set(result.map((a) => a.id));
+    if (!existingIds.has(ANNOTATION_ATTRIBUTE_ID) && categoryIds.has(ANNOTATION_ATTRIBUTE_ID) && data.descriptionRu) {
+      extras.push({ id: ANNOTATION_ATTRIBUTE_ID, value: data.descriptionRu });
+    }
+    if (!existingIds.has(WEIGHT_GRAMS_ATTRIBUTE_ID) && categoryIds.has(WEIGHT_GRAMS_ATTRIBUTE_ID) && data.weightGrams) {
+      extras.push({ id: WEIGHT_GRAMS_ATTRIBUTE_ID, value: String(data.weightGrams) });
+    }
+  } catch {
+    // kategori attribute şeması çekilemedi — otomatik doldurma olmadan devam et
+  }
+  return extras;
+}
 
 export interface ProductAttributeInput {
   id: number;
@@ -30,6 +61,7 @@ export interface CreateProductInput {
   // Farklı Shopify handle'larını (ModelGroup) tek Ozon kartında birleştirirken 9048 attribute'una
   // grubun tüm üyeleri için aynı değeri yazmak için — verilmezse offerId kullanılır (mevcut davranış).
   modelNameOverride?: string;
+  descriptionRu?: string | null;
 }
 
 export async function createProduct(input: CreateProductInput) {
@@ -74,6 +106,14 @@ export async function createProduct(input: CreateProductInput) {
     },
   });
 
+  const baseAttributes = input.attributes.filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID);
+  const autoFillAttributes = await getAutoFillAttributes(
+    input.descriptionCategoryId,
+    input.typeId,
+    new Set(baseAttributes.map((a) => a.id)),
+    { descriptionRu: input.descriptionRu, weightGrams: input.weightGrams },
+  );
+
   const { result } = await importProducts([
     {
       offer_id: input.offerId,
@@ -92,17 +132,15 @@ export async function createProduct(input: CreateProductInput) {
       vat: "0",
       images: input.images,
       attributes: [
-        ...input.attributes
-          .filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID)
-          .map((attr) => ({
-            id: attr.id,
-            values: [
-              {
-                value: attr.value ?? "",
-                ...(attr.dictionaryValueId ? { dictionary_value_id: attr.dictionaryValueId } : {}),
-              },
-            ],
-          })),
+        ...[...baseAttributes, ...autoFillAttributes].map((attr) => ({
+          id: attr.id,
+          values: [
+            {
+              value: attr.value ?? "",
+              ...(attr.dictionaryValueId ? { dictionary_value_id: attr.dictionaryValueId } : {}),
+            },
+          ],
+        })),
         { id: MODEL_NAME_ATTRIBUTE_ID, values: [{ value: input.modelNameOverride ?? input.offerId }] },
       ],
     },
@@ -240,6 +278,12 @@ export async function updateProductImages(offerId: string, images: string[]) {
   }
   const modelName = product.modelGroup?.name ?? offerId;
   const liveAttributes = await getLiveOzonAttributes(offerId);
+  const autoFillAttributes = await getAutoFillAttributes(
+    product.descriptionCategoryId,
+    product.typeId,
+    new Set(liveAttributes.map((a) => a.id)),
+    { descriptionRu: product.descriptionRu, weightGrams: product.weightGrams },
+  );
 
   const { result } = await importProducts([
     {
@@ -261,7 +305,7 @@ export async function updateProductImages(offerId: string, images: string[]) {
       dimension_unit: "cm",
       vat: "0",
       images,
-      attributes: buildAttributesPayload(liveAttributes, modelName),
+      attributes: buildAttributesPayload([...liveAttributes, ...autoFillAttributes], modelName),
     },
   ]);
 
@@ -300,6 +344,13 @@ export async function updateProductCategoryAttributes(
     if (attr.id === MODEL_NAME_ATTRIBUTE_ID) continue;
     merged.set(attr.id, attr);
   }
+  const autoFillAttributes = await getAutoFillAttributes(
+    input.descriptionCategoryId,
+    input.typeId,
+    new Set(merged.keys()),
+    { descriptionRu: product.descriptionRu, weightGrams: product.weightGrams },
+  );
+  for (const attr of autoFillAttributes) merged.set(attr.id, attr);
 
   const { result } = await importProducts([
     {

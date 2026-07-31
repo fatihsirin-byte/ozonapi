@@ -1,7 +1,7 @@
 import { prisma } from "../../db/prisma";
 import { importProducts, getImportStatus, updatePrices, updateStocks, getProductAttributes, getProductInfoList } from "../../ozon/products";
 import { getCategoryAttributes } from "../../ozon/categories";
-import { DEFAULT_WAREHOUSE_ID } from "../../ozon/warehouses";
+import { selectWarehouseId } from "../../ozon/warehouses";
 import { buildRichContentJson } from "../../ozon/rich-content";
 import { computeSalePrice, computeOldPrice } from "../../pricing/formula";
 
@@ -266,7 +266,7 @@ const STOCK_BATCH_SIZE = 100;
 export async function setStockForAllConnectedProducts(stock: number) {
   const products = await prisma.product.findMany({
     where: { ozonProductId: { not: null } },
-    select: { offerId: true },
+    select: { offerId: true, weightGrams: true, widthCm: true, heightCm: true, depthCm: true },
   });
 
   const results: { offerId: string; updated: boolean; error?: string }[] = [];
@@ -274,7 +274,11 @@ export async function setStockForAllConnectedProducts(stock: number) {
   for (let i = 0; i < products.length; i += STOCK_BATCH_SIZE) {
     const batch = products.slice(i, i + STOCK_BATCH_SIZE);
     const { result } = await updateStocks(
-      batch.map((p) => ({ offerId: p.offerId, stock, warehouseId: DEFAULT_WAREHOUSE_ID })),
+      batch.map((p) => ({
+        offerId: p.offerId,
+        stock,
+        warehouseId: selectWarehouseId(p.weightGrams ?? 100, p.widthCm, p.heightCm, p.depthCm),
+      })),
     );
     for (const entry of result) {
       results.push({

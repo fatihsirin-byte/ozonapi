@@ -2,7 +2,7 @@ import { prisma } from "../../db/prisma";
 import { computeSalePrice, computeOldPrice } from "../../pricing/formula";
 import { translateToRussian } from "../../ai/translate";
 import { updatePrices, updateStocks, getImportStatus, archiveProducts } from "../../ozon/products";
-import { DEFAULT_WAREHOUSE_ID } from "../../ozon/warehouses";
+import { selectWarehouseId } from "../../ozon/warehouses";
 import { createProduct, updateProductImages, type ProductAttributeInput } from "./products.service";
 
 // Yeni gönderilen her ürüne varsayılan stok — kullanıcı isteğiyle sabitlendi (2026-07-30).
@@ -19,7 +19,12 @@ function sleep(ms: number) {
 // saniyelik bekleme yetmedi, birkaç dakika sonra tekrar denendiğinde işledi). Bu yüzden
 // hem import'un bitmesini bekliyoruz HEM DE stok çağrısının kendisini, başarısız olursa
 // (updated:false ya da hata), artan aralıklarla birkaç kez tekrar deniyoruz.
-async function waitForImportThenPushStock(offerId: string, taskId: number, stock: number) {
+async function waitForImportThenPushStock(
+  offerId: string,
+  taskId: number,
+  stock: number,
+  dims: { weightGrams?: number | null; widthCm?: number | null; heightCm?: number | null; depthCm?: number | null },
+) {
   for (let attempt = 0; attempt < 8; attempt++) {
     await sleep(2000);
     try {
@@ -31,11 +36,12 @@ async function waitForImportThenPushStock(offerId: string, taskId: number, stock
     }
   }
 
+  const warehouseId = selectWarehouseId(dims.weightGrams ?? 100, dims.widthCm, dims.heightCm, dims.depthCm);
   const backoffsMs = [0, 5000, 15000, 30000, 60000, 120000];
   for (const delay of backoffsMs) {
     if (delay > 0) await sleep(delay);
     try {
-      const { result } = await updateStocks([{ offerId, stock, warehouseId: DEFAULT_WAREHOUSE_ID }]);
+      const { result } = await updateStocks([{ offerId, stock, warehouseId }]);
       if (result[0]?.updated) {
         await prisma.product.update({ where: { offerId }, data: { stockQuantity: stock } });
         return;
@@ -437,7 +443,12 @@ export async function submitHandleToOzon(input: SubmitHandleInput) {
         // Bilerek await edilmiyor — import'un bitmesini beklemek saniyeler sürebiliyor,
         // bu da toplu gönderimi yavaşlatır. Arka planda biter, hata olsa bile ürün
         // oluşturma başarılı sayılır (stok daha sonra "Stokları Gönder" ile tekrar denenebilir).
-        waitForImportThenPushStock(variant.offerId, Number(taskId), DEFAULT_STOCK).catch(() => {});
+        waitForImportThenPushStock(variant.offerId, Number(taskId), DEFAULT_STOCK, {
+          weightGrams: variant.weightGrams,
+          widthCm: variant.widthCm,
+          heightCm: variant.heightCm,
+          depthCm: variant.depthCm,
+        }).catch(() => {});
       }
       results.push({ offerId: variant.offerId, taskId: taskId ? String(taskId) : undefined });
     } catch (error) {

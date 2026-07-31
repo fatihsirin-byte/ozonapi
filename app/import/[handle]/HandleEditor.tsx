@@ -88,6 +88,14 @@ export function HandleEditor({ handle }: { handle: string }) {
   // sanıp gereksiz bir PATCH atmasın diye bu bayrağı kullanıyoruz.
   const skipAutoSaveRef = useRef(true);
 
+  // Kategori + attribute seçimleri "Ozon'a Gönder"e basılana kadar sadece bu component'in
+  // state'inde duruyordu — kullanıcı yanlışlıkla geri tuşuna basınca ya da sayfa yenilenince
+  // tamamı sessizce kayboluyordu. localStorage'a debounce'lu taslak olarak yazıp, sayfa
+  // açılışında geri yüklüyoruz; başarılı gönderimde taslağı temizliyoruz.
+  const draftKey = `ozon-spec-draft:${handle}`;
+  const skipDraftSaveRef = useRef(true);
+  const draftRestoredRef = useRef(false);
+
   const load = useCallback(async () => {
     const res = await fetch(`/api/import/products/${encodeURIComponent(handle)}`);
     const data = await res.json();
@@ -178,6 +186,45 @@ export function HandleEditor({ handle }: { handle: string }) {
     },
     true,
   );
+
+  // Henüz Ozon'a hiç gönderilmemiş bir handle için, önceki oturumdan kalan taslak
+  // kategori/attribute seçimi varsa geri yükle (yukarıdaki clone-data zaten gönderilmiş
+  // ürünler için gerçek veriyi çekiyor — bu sadece o durum geçerli değilken çalışır).
+  useEffect(() => {
+    if (!variants || draftRestoredRef.current) return;
+    const alreadySubmitted = variants.some((v) => v.ozonProductId);
+    draftRestoredRef.current = true;
+    if (alreadySubmitted) return;
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as { category?: CategoryOption; attributeAnswers?: Record<number, unknown> };
+      if (draft.category) setCategory(draft.category);
+      if (draft.attributeAnswers) setAttributeAnswers(draft.attributeAnswers as never);
+    } catch {
+      // bozuk/eski taslak — yok say
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variants]);
+
+  // Kategori/attribute seçimi değiştikçe taslağı localStorage'a debounce'lu yaz — "Ozon'a
+  // Gönder"e basmadan önce geri tuşu/yenileme ile seçimlerin sessizce kaybolmasını önler.
+  useEffect(() => {
+    if (skipDraftSaveRef.current) {
+      skipDraftSaveRef.current = false;
+      return;
+    }
+    if (!category && Object.keys(attributeAnswers).length === 0) return;
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({ category, attributeAnswers }));
+      } catch {
+        // localStorage dolu/erişilemez — sessizce vazgeç
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, attributeAnswers]);
 
   const mandatoryAttributes = requiredAttributes.filter(
     (attr) => attr.is_required && attr.id !== MODEL_NAME_ATTRIBUTE_ID,
@@ -377,6 +424,13 @@ export function HandleEditor({ handle }: { handle: string }) {
       );
       for (const r of results) {
         if (!r.error) pollSubmittedVariant(r.offerId);
+      }
+      if (results.some((r) => !r.error)) {
+        try {
+          localStorage.removeItem(draftKey);
+        } catch {
+          // önemli değil, taslak bir sonraki gönderimde zaten üzerine yazılır
+        }
       }
     } finally {
       setSubmitting(false);

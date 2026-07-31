@@ -300,8 +300,11 @@ export function HandleEditor({ handle }: { handle: string }) {
     });
   }
 
-  async function deleteVariant(offerId: string) {
-    if (!confirm(`${offerId} varyantını kalıcı olarak silmek istediğinize emin misiniz?`)) return;
+  async function deleteVariant(offerId: string, isSubmitted: boolean) {
+    const message = isSubmitted
+      ? `${offerId} zaten Ozon'a gönderilmiş — silmek önce Ozon'da arşivleyip sonra kalıcı olarak siler. Emin misiniz?`
+      : `${offerId} varyantını kalıcı olarak silmek istediğinize emin misiniz?`;
+    if (!confirm(message)) return;
     await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, { method: "DELETE" });
     setVariants((prev) => (prev ? prev.filter((v) => v.offerId !== offerId) : prev));
   }
@@ -673,11 +676,13 @@ export function HandleEditor({ handle }: { handle: string }) {
                   >
                     {v.excludedFromSubmit ? "Aktifleştir" : "Pasifleştir"}
                   </button>
-                  {v.status === "draft" && (
-                    <button type="button" className="btn-secondary" onClick={() => deleteVariant(v.offerId)}>
-                      Sil
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => deleteVariant(v.offerId, Boolean(v.ozonProductId))}
+                  >
+                    Sil
+                  </button>
                 </td>
               </tr>
             ))}

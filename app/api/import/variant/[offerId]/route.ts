@@ -29,7 +29,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
   const { offerId } = await params;
   const deleted = await deleteVariant(decodeURIComponent(offerId));
   if (!deleted) {
-    return NextResponse.json({ error: "Bu varyant silinemez (draft değil ya da bulunamadı)" }, { status: 400 });
+    return NextResponse.json({ error: "Bu varyant bulunamadı" }, { status: 400 });
   }
   return NextResponse.json({ ok: true });
 }

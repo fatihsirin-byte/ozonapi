@@ -1,7 +1,7 @@
 import { prisma } from "../../db/prisma";
 import { computeSalePrice, computeOldPrice } from "../../pricing/formula";
 import { translateToRussian } from "../../ai/translate";
-import { updatePrices, updateStocks, getImportStatus } from "../../ozon/products";
+import { updatePrices, updateStocks, getImportStatus, archiveProducts } from "../../ozon/products";
 import { DEFAULT_WAREHOUSE_ID } from "../../ozon/warehouses";
 import { createProduct, updateProductImages, type ProductAttributeInput } from "./products.service";
 
@@ -283,9 +283,21 @@ export async function deleteHandles(handles: string[]) {
 }
 
 // Tek bir varyantı kalıcı olarak siler (handle'ın diğer varyantlarına dokunmadan).
+// Ozon'a zaten gönderilmiş bir varyantı da silebiliyoruz — bu durumda önce Ozon'da arşive
+// alıyoruz (silinemiyor, sadece arşivlenebiliyor — bkz. ürün listesi "Archive" bölümü),
+// sonra kendi tarafımızda kalıcı olarak siliyoruz. Ozon tarafı başarısız olsa bile (örn. ürün
+// zaten orada yoksa) yerel silme işlemine devam ediyoruz ki kullanıcı takılıp kalmasın.
 export async function deleteVariant(offerId: string) {
   const product = await prisma.product.findUnique({ where: { offerId } });
-  if (!product || product.status !== "draft") return false;
+  if (!product) return false;
+
+  if (product.ozonProductId) {
+    try {
+      await archiveProducts([Number(product.ozonProductId)]);
+    } catch {
+      // Ozon'da zaten yok/arşivlenemedi — yerel silmeye yine de devam et
+    }
+  }
 
   await prisma.excludedOfferId.upsert({ where: { offerId }, create: { offerId }, update: {} });
   await prisma.product.delete({ where: { offerId } });

@@ -348,15 +348,38 @@ export async function unlinkHandleFromModelGroup(handle: string) {
   await prisma.product.updateMany({ where: { shopifyHandle: handle }, data: { modelGroupId: null } });
 }
 
-// Gemini çevirisini bir kez yapıp handle'daki tüm varyantlara cache'ler — aynı ürün için
-// tekrar tekrar token harcamamak için (kullanıcı isterse elle düzeltebilir).
+// Gemini çevirisini handle başına bir kez yapıp tüm varyantlara cache'ler — ama varyantların
+// kendi özgün isimleri olabiliyor (örn. "1 Piece" vs "1 Display - 16 Pieces x 29g" gibi farklı
+// paket/adet varyantları aynı handle'ı paylaşıyor). Eskiden İLK varyantın çevrilmiş ismi TÜM
+// varyantlara kopyalanıyordu — bu, "1 Piece" varyantının Rusça adının yanlışlıkla "16 штук"
+// (16'lık kutunun ismi) olmasına yol açtı (2026-07-31'de canlıda tespit edildi). Artık her
+// BENZERSİZ isim için ayrı çeviri yapılıyor (aynı isimli varyantlar arasında tekrar token
+// harcanmıyor), açıklama ise (genelde tüm varyantlarda aynı olduğu için) tek seferlik
+// sonuçtan paylaşılıyor.
 export async function translateHandle(handle: string) {
-  const first = await prisma.product.findFirst({ where: { shopifyHandle: handle } });
-  if (!first) throw new Error("Handle bulunamadı");
+  const variants = await prisma.product.findMany({
+    where: { shopifyHandle: handle },
+    orderBy: { variantPosition: "asc" },
+  });
+  if (variants.length === 0) throw new Error("Handle bulunamadı");
 
-  const { nameRu, descriptionRu } = await translateToRussian(first.name, first.descriptionHtml ?? "", first.shopifyVendor);
-  await prisma.product.updateMany({ where: { shopifyHandle: handle }, data: { nameRu, descriptionRu } });
-  return { nameRu, descriptionRu };
+  const first = variants[0];
+  const firstResult = await translateToRussian(first.name, first.descriptionHtml ?? "", first.shopifyVendor);
+  const descriptionRu = firstResult.descriptionRu;
+  const nameRuByName = new Map<string, string>([[first.name, firstResult.nameRu]]);
+
+  for (const variant of variants) {
+    if (!nameRuByName.has(variant.name)) {
+      const { nameRu } = await translateToRussian(variant.name, variant.descriptionHtml ?? "", variant.shopifyVendor);
+      nameRuByName.set(variant.name, nameRu);
+    }
+    await prisma.product.update({
+      where: { offerId: variant.offerId },
+      data: { nameRu: nameRuByName.get(variant.name), descriptionRu },
+    });
+  }
+
+  return { nameRu: nameRuByName.get(first.name)!, descriptionRu };
 }
 
 export interface SubmitHandleInput {

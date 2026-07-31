@@ -11,6 +11,7 @@ import {
 } from "../../products/new/CategoryAttributeForm";
 import { suggestAttributeValue } from "@/import/attribute-mapping";
 import { computeSalePrice } from "@/pricing/formula";
+import { buildRichContentJson } from "@/ozon/rich-content";
 import { PriceCalculatorModal } from "../../products/[offerId]/PriceCalculatorModal";
 
 const MODEL_NAME_ATTRIBUTE_ID = 9048;
@@ -65,6 +66,8 @@ export function HandleEditor({ handle }: { handle: string }) {
 
   const [translating, setTranslating] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
+  const [richContentJson, setRichContentJson] = useState<string | null>(null);
+  const [richContentCopied, setRichContentCopied] = useState(false);
 
   const [sloganProductName, setSloganProductName] = useState("");
   const [sloganLoading, setSloganLoading] = useState(false);
@@ -554,6 +557,41 @@ export function HandleEditor({ handle }: { handle: string }) {
               Ozon'un ürün açıklaması genellikle kategoriye özel bir attribute (örn. "Аннотация") üzerinden gönderiliyor
               — aşağıdaki attribute formunda o alana bu metni yapıştırabilirsiniz.
             </div>
+
+            <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <label style={{ margin: 0 }}>Rich Content JSON</label>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  const v = variants[0];
+                  setRichContentJson(buildRichContentJson(v.descriptionRu ?? "", v.nameRu ?? v.name));
+                  setRichContentCopied(false);
+                }}
+              >
+                Oluştur
+              </button>
+            </div>
+            {richContentJson && (
+              <>
+                <textarea readOnly rows={6} value={richContentJson} style={{ fontFamily: "monospace", fontSize: 12 }} />
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ marginTop: 6 }}
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(richContentJson);
+                    setRichContentCopied(true);
+                  }}
+                >
+                  {richContentCopied ? "Kopyalandı ✓" : "Kopyala"}
+                </button>
+                <div className="hint" style={{ marginTop: 6 }}>
+                  Ozon'da ürünü açtıktan sonra "Rich content design tool" → sağ üstteki kod/JSON düzenleme
+                  seçeneğine bu metni yapıştırın.
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

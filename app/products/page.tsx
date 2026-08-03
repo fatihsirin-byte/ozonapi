@@ -13,6 +13,9 @@ export default async function ProductsPage() {
         <h1>Ürünler</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
           <ImportProductForm />
+          <Link href="/orders">
+            <button className="btn-secondary">Siparişler</button>
+          </Link>
           <Link href="/import">
             <button className="btn-secondary">Shopify'dan İçe Aktar</button>
           </Link>

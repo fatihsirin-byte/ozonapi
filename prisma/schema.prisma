@@ -91,7 +91,6 @@ model Order {
   updatedAt     DateTime @updatedAt
 
   items        OrderItem[]
-  transactions FinanceTransaction[]
 }
 
 model OrderItem {
@@ -103,13 +102,21 @@ model OrderItem {
   offerId   String
   quantity  Int
   price     String
+
+  // Aynı sipariş senkronize edilirken kalemler silinip yeniden oluşturuluyor (bkz. syncFbsOrders),
+  // bu yüzden id yerine bu ikili üzerinden idempotentlik garanti edilmiyor ama tekilliği sağlıyor.
+  @@unique([orderId, offerId])
 }
 
 // posting_number bazında finans/kesinti verisi (komisyon, kargo, diğer kesintiler).
+// postingNumber kasıtlı olarak Order'a FK ile bağlı DEĞİL — finans işlemleri (iade, servis
+// bedeli, FBO vb.) sipariş senkronizasyon penceremizin dışındaki veya hiç Order'a düşmeyen
+// posting'lere referans verebiliyor; FK zorunlu olsaydı bu satırlar sync'i patlatırdı.
+// Order ile ilişki uygulama katmanında postingNumber üzerinden manuel join edilir (bkz. getOrderDetail).
 model FinanceTransaction {
   id             String   @id @default(cuid())
-  order          Order?   @relation(fields: [postingNumber], references: [postingNumber])
   postingNumber  String
+  operationId    BigInt   @unique // Ozon'un operation_id'si — yeniden senkronizasyonda tekrar satır oluşmasını (upsert) engellemek için
   operationType  String
   operationDate  DateTime
   amount         Float

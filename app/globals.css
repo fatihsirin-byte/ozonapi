@@ -281,6 +281,11 @@ button {
   color: var(--text);
 }
 
+.btn-secondary.active {
+  border-color: var(--accent);
+  color: var(--accent-hover);
+}
+
 .btn-secondary:hover {
   border-color: var(--muted);
 }

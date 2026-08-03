@@ -1,19 +1,21 @@
 // Fiyat formülü (2026-07-29, kullanıcıdan alınan gerçek parametreler).
 
 // Ürün özelliklerindeki ağırlık paketleme/kutu ağırlığını içermiyor — kargo hesabında
-// gerçek gönderi ağırlığını hafife almamak için %20 pay ekliyoruz.
-const PACKAGING_WEIGHT_BUFFER = 1.2;
+// gerçek gönderi ağırlığını hafife almamak için %35 pay + 10g sabit paketleme ağırlığı ekliyoruz
+// (2026-08-03 itibarıyla %20'den %35 + 10g'a yükseltildi, kullanıcı talebiyle).
+const PACKAGING_WEIGHT_BUFFER = 1.35;
+const PACKAGING_WEIGHT_EXTRA_GRAMS = 10;
 
 // ASE'nin PDF tarifesinde: kenarların toplamı ≤90cm ise fiziksel ağırlık, >90cm ise fiziksel
 // veya hacimsel ağırlıktan HANGİSİ BÜYÜKSE o kullanılır. Hacimsel ağırlık formülü: en×boy×
-// yükseklik (cm) ÷ 5000 = kg. Fiziksel ağırlığa önce %20 paketleme payı ekleniyor.
+// yükseklik (cm) ÷ 5000 = kg. Fiziksel ağırlığa önce %35 paketleme payı + 10g ekleniyor.
 export function computeBillingWeightGrams(
   weightGrams: number,
   widthCm?: number | null,
   heightCm?: number | null,
   depthCm?: number | null,
 ): number {
-  const bufferedWeight = weightGrams * PACKAGING_WEIGHT_BUFFER;
+  const bufferedWeight = weightGrams * PACKAGING_WEIGHT_BUFFER + PACKAGING_WEIGHT_EXTRA_GRAMS;
   if (!widthCm || !heightCm || !depthCm) return bufferedWeight;
 
   const sumOfSides = widthCm + heightCm + depthCm;

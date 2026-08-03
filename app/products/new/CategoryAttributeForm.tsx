@@ -145,6 +145,14 @@ export function AttributeValuePicker({
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // answer.displayValue mount'tan SONRA (örn. sunucudan asenkron gelen bir taslak) dolarsa
+  // yukarıdaki useState initializer'ı bunu kaçırıyordu — input boş görünüyordu, halbuki
+  // arka planda dictionaryValueId zaten doğruydu (gönderim çalışırdı ama görünmüyordu).
+  useEffect(() => {
+    if (answer?.displayValue) setQuery(answer.displayValue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answer?.displayValue]);
+
   useEffect(() => {
     if (!open) return;
     fetch(

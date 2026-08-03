@@ -43,7 +43,7 @@ interface Variant {
   typeId: number | null;
   draftAttributes: {
     category: CategoryOption;
-    attributes: { id: number; value?: string; dictionaryValueId?: number }[];
+    attributes: { id: number; value?: string; dictionaryValueId?: number; displayValue?: string }[];
   } | null;
   modelGroup: { id: string; name: string | null; products: { offerId: string }[] } | null;
 }
@@ -331,9 +331,13 @@ export function HandleEditor({ handle }: { handle: string }) {
       const serverDraft = variants[0]?.draftAttributes;
       if (serverDraft) {
         setCategory(serverDraft.category);
-        const answers: Record<number, { value?: string; dictionaryValueId?: number }> = {};
+        const answers: Record<number, { value?: string; dictionaryValueId?: number; displayValue?: string }> = {};
         for (const attr of serverDraft.attributes) {
-          answers[attr.id] = { value: attr.value, dictionaryValueId: attr.dictionaryValueId };
+          answers[attr.id] = {
+            value: attr.value,
+            dictionaryValueId: attr.dictionaryValueId,
+            displayValue: attr.displayValue ?? attr.value,
+          };
         }
         setAttributeAnswers(answers as never);
       }

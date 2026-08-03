@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ImageReplaceGrid } from "../ImageReplaceGrid";
 import {
   CategoryPicker,
@@ -60,7 +61,133 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? (value as string[]) : [];
 }
 
+// Bir üründen bir sonrakine/öncekine geçmek için — StagingList'teki aktif filtre/sayfa
+// bağlamını (q/vendor/type/status/page) korur ki "sıradaki ürüne geç" listedeki gerçek
+// komşu ürüne gitsin, filtreden bağımsız rastgele bir ürüne değil.
+interface NavContext {
+  q: string;
+  vendor: string;
+  type: string;
+  status: string;
+  page: number;
+}
+
+function buildListParams(ctx: NavContext, page: number) {
+  const params = new URLSearchParams({ page: String(page), pageSize: "25" });
+  if (ctx.q) params.set("q", ctx.q);
+  if (ctx.vendor) params.set("vendor", ctx.vendor);
+  if (ctx.type) params.set("type", ctx.type);
+  if (ctx.status) params.set("status", ctx.status);
+  return params;
+}
+
+function buildHandleHref(targetHandle: string, ctx: NavContext, page: number) {
+  const params = new URLSearchParams();
+  if (ctx.q) params.set("q", ctx.q);
+  if (ctx.vendor) params.set("vendor", ctx.vendor);
+  if (ctx.type) params.set("type", ctx.type);
+  if (ctx.status) params.set("status", ctx.status);
+  if (page > 1) params.set("page", String(page));
+  const queryString = params.toString();
+  return `/import/${encodeURIComponent(targetHandle)}${queryString ? `?${queryString}` : ""}`;
+}
+
 export function HandleEditor({ handle }: { handle: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const navContext: NavContext = useMemo(
+    () => ({
+      q: searchParams.get("q") ?? "",
+      vendor: searchParams.get("vendor") ?? "",
+      type: searchParams.get("type") ?? "",
+      status: searchParams.get("status") ?? "",
+      page: Number(searchParams.get("page")) || 1,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searchParams.toString()],
+  );
+
+  const [pageItems, setPageItems] = useState<{ handle: string }[]>([]);
+  const [prevBoundaryHandle, setPrevBoundaryHandle] = useState<string | null>(null);
+  const [nextBoundaryHandle, setNextBoundaryHandle] = useState<string | null>(null);
+  const [autoAdvancing, setAutoAdvancing] = useState(false);
+  const [autoAdvanceProgress, setAutoAdvanceProgress] = useState(0);
+  const autoAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoAdvanceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Aktif filtre/sayfadaki ürün listesini çekip bu handle'ın listedeki konumunu buluyoruz.
+  useEffect(() => {
+    const params = buildListParams(navContext, navContext.page);
+    fetch(`/api/import/products?${params.toString()}`)
+      .then((r) => r.json())
+      .then((data) => setPageItems(data.items ?? []));
+    setPrevBoundaryHandle(null);
+    setNextBoundaryHandle(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navContext, handle]);
+
+  const currentIndex = pageItems.findIndex((i) => i.handle === handle);
+
+  // Sayfanın başındaysak bir önceki sayfanın son ürününü, sonundaysak bir sonraki
+  // sayfanın ilk ürününü arka planda çekiyoruz ki ok butonları sayfa sınırında da çalışsın.
+  useEffect(() => {
+    if (pageItems.length === 0 || currentIndex === -1) return;
+    if (currentIndex === 0 && navContext.page > 1) {
+      const params = buildListParams(navContext, navContext.page - 1);
+      fetch(`/api/import/products?${params.toString()}`)
+        .then((r) => r.json())
+        .then((data) => {
+          const prevPageItems = data.items ?? [];
+          setPrevBoundaryHandle(prevPageItems[prevPageItems.length - 1]?.handle ?? null);
+        });
+    }
+    if (currentIndex === pageItems.length - 1) {
+      const params = buildListParams(navContext, navContext.page + 1);
+      fetch(`/api/import/products?${params.toString()}`)
+        .then((r) => r.json())
+        .then((data) => setNextBoundaryHandle((data.items ?? [])[0]?.handle ?? null));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageItems, currentIndex, navContext]);
+
+  const prevHandle = currentIndex > 0 ? pageItems[currentIndex - 1].handle : prevBoundaryHandle;
+  const prevPage = currentIndex > 0 ? navContext.page : navContext.page - 1;
+  const nextHandle = currentIndex !== -1 && currentIndex < pageItems.length - 1 ? pageItems[currentIndex + 1].handle : nextBoundaryHandle;
+  const nextPage = currentIndex !== -1 && currentIndex < pageItems.length - 1 ? navContext.page : navContext.page + 1;
+
+  function goToHandle(targetHandle: string, targetPage: number) {
+    router.push(buildHandleHref(targetHandle, navContext, targetPage));
+  }
+
+  function cancelAutoAdvance() {
+    if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
+    if (autoAdvanceIntervalRef.current) clearInterval(autoAdvanceIntervalRef.current);
+    setAutoAdvancing(false);
+    setAutoAdvanceProgress(0);
+  }
+
+  function startAutoAdvance() {
+    if (!nextHandle) return;
+    setAutoAdvancing(true);
+    setAutoAdvanceProgress(0);
+    const durationMs = 3000;
+    const startedAt = Date.now();
+    autoAdvanceIntervalRef.current = setInterval(() => {
+      setAutoAdvanceProgress(Math.min(100, ((Date.now() - startedAt) / durationMs) * 100));
+    }, 50);
+    autoAdvanceTimerRef.current = setTimeout(() => {
+      if (autoAdvanceIntervalRef.current) clearInterval(autoAdvanceIntervalRef.current);
+      goToHandle(nextHandle, nextPage);
+    }, durationMs);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
+      if (autoAdvanceIntervalRef.current) clearInterval(autoAdvanceIntervalRef.current);
+    };
+  }, []);
+
   const [variants, setVariants] = useState<Variant[] | null>(null);
   const [images, setImages] = useState<string[]>([]);
   const [savingImages, setSavingImages] = useState(false);
@@ -438,6 +565,7 @@ export function HandleEditor({ handle }: { handle: string }) {
         } catch {
           // önemli değil, taslak bir sonraki gönderimde zaten üzerine yazılır
         }
+        startAutoAdvance();
       }
     } finally {
       setSubmitting(false);
@@ -462,11 +590,52 @@ export function HandleEditor({ handle }: { handle: string }) {
   return (
     <div className="page-wide">
       <div className="topbar">
-        <h1>{variants[0]?.name ?? handle}</h1>
-        <Link href="/import">
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={!prevHandle}
+            onClick={() => prevHandle && goToHandle(prevHandle, prevPage)}
+            title="Önceki ürün"
+          >
+            ←
+          </button>
+          <h1 style={{ margin: 0 }}>{variants[0]?.name ?? handle}</h1>
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={!nextHandle}
+            onClick={() => nextHandle && goToHandle(nextHandle, nextPage)}
+            title="Sonraki ürün"
+          >
+            →
+          </button>
+        </div>
+        <Link href={`/import?${searchParams.toString()}`}>
           <button className="btn-secondary">← Listeye dön</button>
         </Link>
       </div>
+
+      {autoAdvancing && (
+        <div className="card" style={{ marginBottom: 16, background: "var(--accent-bg, #16321f)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <span>Sonraki ürüne geçiliyor…</span>
+            <button type="button" className="btn-secondary" onClick={cancelAutoAdvance}>
+              Durdur
+            </button>
+          </div>
+          <div style={{ height: 4, background: "var(--border)", borderRadius: 2, overflow: "hidden" }}>
+            <div
+              style={{
+                height: "100%",
+                width: `${autoAdvanceProgress}%`,
+                background: "var(--accent)",
+                transition: "width 50ms linear",
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 16 }}>
         <label>Görseller</label>

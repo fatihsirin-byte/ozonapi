@@ -274,7 +274,19 @@ export function StagingList() {
                     )}
                   </td>
                   <td>
-                    <Link href={`/import/${encodeURIComponent(item.handle)}`}>{item.title}</Link>
+                    <Link
+                      href={`/import/${encodeURIComponent(item.handle)}?${(() => {
+                        const params = new URLSearchParams();
+                        if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
+                        if (vendor) params.set("vendor", vendor);
+                        if (type) params.set("type", type);
+                        if (status) params.set("status", status);
+                        if (page > 1) params.set("page", String(page));
+                        return params.toString();
+                      })()}`}
+                    >
+                      {item.title}
+                    </Link>
                     <div className="hint" style={{ margin: 0 }}>
                       {item.handle}
                     </div>

@@ -527,15 +527,23 @@ export function HandleEditor({ handle }: { handle: string }) {
       const data = await res.json();
       if (data.status !== "pending") {
         clearInterval(interval);
-        setSubmitResults((prev) =>
-          prev
-            ? prev.map((r) =>
-                r.offerId === offerId
-                  ? { ...r, status: data.status, ozonProductId: data.ozonProductId, error: data.error }
-                  : r,
-              )
-            : prev,
-        );
+        setSubmitResults((prev) => {
+          if (!prev) return prev;
+          const next = prev.map((r) =>
+            r.offerId === offerId
+              ? { ...r, status: data.status, ozonProductId: data.ozonProductId, error: data.error }
+              : r,
+          );
+          // Gerçek sonuç (Ozon moderasyonu/oluşturma) belli olduğunda — "pending" kalan
+          // yok ve en az biri başarıyla oluştuysa — otomatik geçişi ancak o zaman başlat.
+          // Önceden /submit isteği döner dönmez başlatılıyordu, bu da henüz gerçek
+          // sonuç belli olmadan sıradaki ürüne geçilmiş gibi hissettiriyordu.
+          const allResolved = next.every((r) => r.status !== "pending");
+          if (allResolved && next.some((r) => r.status === "imported")) {
+            startAutoAdvance();
+          }
+          return next;
+        });
         load();
       }
     }, 3000);
@@ -589,7 +597,8 @@ export function HandleEditor({ handle }: { handle: string }) {
         } catch {
           // önemli değil, taslak bir sonraki gönderimde zaten üzerine yazılır
         }
-        startAutoAdvance();
+        // Otomatik geçiş burada DEĞİL, pollSubmittedVariant içinde gerçek sonuç (Ozon
+        // moderasyonu tamamlanınca) belli olduğunda başlatılıyor.
       }
     } finally {
       setSubmitting(false);
@@ -643,7 +652,7 @@ export function HandleEditor({ handle }: { handle: string }) {
       {autoAdvancing && (
         <div className="card" style={{ marginBottom: 16, background: "var(--accent-bg, #16321f)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <span>Sonraki ürüne geçiliyor…</span>
+            <span>✓ Başarıyla gönderildi — sonraki ürüne geçiliyor…</span>
             <button type="button" className="btn-secondary" onClick={cancelAutoAdvance}>
               Durdur
             </button>

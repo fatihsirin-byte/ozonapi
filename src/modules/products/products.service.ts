@@ -18,6 +18,7 @@ const MODEL_NAME_ATTRIBUTE_ID = 9048;
 // kategori bu attribute'ları tanımıyorsa (id kategori şemasında yoksa) hiç göndermiyoruz.
 const ANNOTATION_ATTRIBUTE_ID = 4191;
 const WEIGHT_GRAMS_ATTRIBUTE_ID = 4383;
+const PACKED_WEIGHT_GRAMS_ATTRIBUTE_ID = 4497;
 // "Rich content" (kategori formunda hiç gösterilmiyor, içerik puanının büyük kısmını
 // belirliyor) — kullanıcının Rich content design tool'da oluşturup kaydettiği gerçek JSON
 // çıktısından şema alınıp descriptionRu'dan otomatik üretiliyor (bkz. ozon/rich-content.ts).
@@ -53,30 +54,43 @@ async function applyContentAttributeFixes(
 ): Promise<ProductAttributeInput[]> {
   const existingIds = new Set(attributes.map((a) => a.id));
   const needsAnnotation = !existingIds.has(ANNOTATION_ATTRIBUTE_ID) && !!data.descriptionRu;
-  const needsWeight = !existingIds.has(WEIGHT_GRAMS_ATTRIBUTE_ID) && !!data.weightGrams;
   const needsRichContent = !existingIds.has(RICH_CONTENT_ATTRIBUTE_ID) && !!data.descriptionRu;
   const hasHashtagCandidate = attributes.some(
     (a) => typeof a.value === "string" && a.value.trim() && !/^#\S+(\s+#\S+)*$/.test(a.value.trim()),
   );
-  if (!needsAnnotation && !needsWeight && !needsRichContent && !hasHashtagCandidate) return attributes;
+  if (!needsAnnotation && !needsRichContent && !hasHashtagCandidate && !data.weightGrams) return attributes;
 
   try {
     const { result } = await getCategoryAttributes({ descriptionCategoryId, typeId });
     const byId = new Map(result.map((a) => [a.id, a]));
 
-    const fixed = attributes.map((attr) => {
-      const schema = byId.get(attr.id);
-      if (schema && HASHTAG_NAME_PATTERN.test(schema.name) && typeof attr.value === "string" && attr.value.trim()) {
-        return { ...attr, value: normalizeHashtagValue(attr.value) };
+    // Ağırlık attribute'larını (4383/4497) her zaman GÜNCEL DB ağırlığıyla senkronluyoruz —
+    // sadece eksikse eklemek yetmiyordu: bir varyantın ağırlığı sonradan değişince (örn.
+    // "1 adet" ile "6 adet" varyantları) eski/yanlış değer Ozon'da kalıcı olarak duruyordu.
+    // Bu da Ozon'un varyant birleştirme kuralını (en az bir attribute'un farklı olması)
+    // bozup aynı üründeki varyantların ayrı kartlara düşmesine yol açıyordu
+    // (2026-08-03'te canlıda tespit edildi: iki varyant da ağırlık=77 gösteriyordu).
+    const fixed = attributes
+      .filter((attr) => !data.weightGrams || (attr.id !== WEIGHT_GRAMS_ATTRIBUTE_ID && attr.id !== PACKED_WEIGHT_GRAMS_ATTRIBUTE_ID))
+      .map((attr) => {
+        const schema = byId.get(attr.id);
+        if (schema && HASHTAG_NAME_PATTERN.test(schema.name) && typeof attr.value === "string" && attr.value.trim()) {
+          return { ...attr, value: normalizeHashtagValue(attr.value) };
+        }
+        return attr;
+      });
+
+    if (data.weightGrams) {
+      if (byId.has(WEIGHT_GRAMS_ATTRIBUTE_ID)) {
+        fixed.push({ id: WEIGHT_GRAMS_ATTRIBUTE_ID, value: String(data.weightGrams) });
       }
-      return attr;
-    });
+      if (byId.has(PACKED_WEIGHT_GRAMS_ATTRIBUTE_ID)) {
+        fixed.push({ id: PACKED_WEIGHT_GRAMS_ATTRIBUTE_ID, value: String(data.weightGrams) });
+      }
+    }
 
     if (needsAnnotation && byId.has(ANNOTATION_ATTRIBUTE_ID)) {
       fixed.push({ id: ANNOTATION_ATTRIBUTE_ID, value: data.descriptionRu! });
-    }
-    if (needsWeight && byId.has(WEIGHT_GRAMS_ATTRIBUTE_ID)) {
-      fixed.push({ id: WEIGHT_GRAMS_ATTRIBUTE_ID, value: String(data.weightGrams) });
     }
     if (needsRichContent && byId.has(RICH_CONTENT_ATTRIBUTE_ID)) {
       fixed.push({

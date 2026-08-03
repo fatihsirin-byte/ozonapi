@@ -188,7 +188,7 @@ export function StagingList() {
         <div className="filter-bar">
           <input
             type="text"
-            placeholder="Ürün adı veya handle ara..."
+            placeholder="Ürün adı, handle veya SKU ara..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />

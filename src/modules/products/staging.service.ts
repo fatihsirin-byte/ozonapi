@@ -106,6 +106,7 @@ async function buildHandleWhere(filters: HandlePageFilters, omit?: keyof HandleP
           OR: [
             { name: { contains: filters.search, mode: "insensitive" as const } },
             { shopifyHandle: { contains: filters.search, mode: "insensitive" as const } },
+            { offerId: { contains: filters.search, mode: "insensitive" as const } },
           ],
         }
       : {}),

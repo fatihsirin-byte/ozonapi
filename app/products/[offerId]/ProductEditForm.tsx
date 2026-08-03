@@ -20,6 +20,7 @@ interface ProductData {
   widthCm: number | null;
   heightCm: number | null;
   depthCm: number | null;
+  packagingExtraGrams: number | null;
 }
 
 interface CloneAttribute {
@@ -36,6 +37,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
   const [tab, setTab] = useState<Tab>("Genel");
   const [costPrice, setCostPrice] = useState(product.costPrice ?? "");
   const [priceOverride, setPriceOverride] = useState<string | null>(null);
+  const [packagingExtraGrams, setPackagingExtraGrams] = useState(product.packagingExtraGrams?.toString() ?? "");
   const [showCalculator, setShowCalculator] = useState(false);
   const [images, setImages] = useState<string[]>(Array.isArray(product.images) ? (product.images as string[]) : []);
   const [saving, setSaving] = useState(false);
@@ -146,7 +148,11 @@ export function ProductEditForm({ product }: { product: ProductData }) {
       const res = await fetch(`/api/products/${product.offerId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ costPrice, priceOverride: override }),
+        body: JSON.stringify({
+          costPrice,
+          priceOverride: override,
+          packagingExtraGrams: packagingExtraGrams.trim() === "" ? null : Number(packagingExtraGrams),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -227,9 +233,15 @@ export function ProductEditForm({ product }: { product: ProductData }) {
               <>
                 {product.weightGrams}g · {product.widthCm}×{product.heightCm}×{product.depthCm}cm
                 <div className="hint">
-                  Kargoda kullanılan ağırlık (+%20 paketleme payı, gerekirse hacimsel):{" "}
+                  Kargoda kullanılan ağırlık (paketleme payı dahil, gerekirse hacimsel):{" "}
                   {Math.round(
-                    computeBillingWeightGrams(product.weightGrams, product.widthCm, product.heightCm, product.depthCm),
+                    computeBillingWeightGrams(
+                      product.weightGrams,
+                      product.widthCm,
+                      product.heightCm,
+                      product.depthCm,
+                      packagingExtraGrams.trim() === "" ? null : Number(packagingExtraGrams),
+                    ),
                   )}
                   g
                 </div>
@@ -262,14 +274,26 @@ export function ProductEditForm({ product }: { product: ProductData }) {
                 type="text"
                 value={
                   priceOverride ||
-                  computeSalePrice(costPrice, product.weightGrams, {
-                    widthCm: product.widthCm,
-                    heightCm: product.heightCm,
-                    depthCm: product.depthCm,
-                  }) ||
+                  computeSalePrice(
+                    costPrice,
+                    product.weightGrams,
+                    { widthCm: product.widthCm, heightCm: product.heightCm, depthCm: product.depthCm },
+                    packagingExtraGrams.trim() === "" ? null : Number(packagingExtraGrams),
+                  ) ||
                   product.price
                 }
                 disabled
+              />
+            </div>
+            <div className="field">
+              <label title="Standart 10g paketleme payını override eder — metal kutu/ağır ambalaj gibi standart dışı ürünlerde kullanılır, boş = varsayılan 10g">
+                Paket Payı (g) — varsayılan 10g
+              </label>
+              <input
+                type="number"
+                placeholder="10"
+                value={packagingExtraGrams}
+                onChange={(e) => setPackagingExtraGrams(e.target.value)}
               />
             </div>
           </div>
@@ -277,11 +301,23 @@ export function ProductEditForm({ product }: { product: ProductData }) {
             <div className="hint" style={{ marginBottom: 12 }}>
               Kargo maliyeti ASE&GBS tarifesine göre hesaplanıp fiyata dahil edildi (
               {Math.round(
-                computeBillingWeightGrams(product.weightGrams, product.widthCm, product.heightCm, product.depthCm),
+                computeBillingWeightGrams(
+                  product.weightGrams,
+                  product.widthCm,
+                  product.heightCm,
+                  product.depthCm,
+                  packagingExtraGrams.trim() === "" ? null : Number(packagingExtraGrams),
+                ),
               )}
               g için ~$
               {estimateShippingCostUsd(
-                computeBillingWeightGrams(product.weightGrams, product.widthCm, product.heightCm, product.depthCm),
+                computeBillingWeightGrams(
+                  product.weightGrams,
+                  product.widthCm,
+                  product.heightCm,
+                  product.depthCm,
+                  packagingExtraGrams.trim() === "" ? null : Number(packagingExtraGrams),
+                ),
               ).toFixed(2)}
               ).
             </div>
@@ -302,6 +338,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
               widthCm={product.widthCm}
               heightCm={product.heightCm}
               depthCm={product.depthCm}
+              packagingExtraGrams={packagingExtraGrams.trim() === "" ? null : Number(packagingExtraGrams)}
               currentPrice={priceOverride || product.price}
               onClose={() => setShowCalculator(false)}
               onApply={(priceUsd) => {

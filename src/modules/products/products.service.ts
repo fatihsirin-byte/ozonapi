@@ -135,6 +135,7 @@ export interface CreateProductInput {
   heightCm: number;
   depthCm: number;
   unitsInPack?: number | null;
+  packagingExtraGrams?: number | null;
   attributes: ProductAttributeInput[];
   // Farklı Shopify handle'larını (ModelGroup) tek Ozon kartında birleştirirken 9048 attribute'una
   // grubun tüm üyeleri için aynı değeri yazmak için — verilmezse offerId kullanılır (mevcut davranış).
@@ -143,11 +144,12 @@ export interface CreateProductInput {
 }
 
 export async function createProduct(input: CreateProductInput) {
-  const price = computeSalePrice(input.costPrice, input.weightGrams, {
-    widthCm: input.widthCm,
-    heightCm: input.heightCm,
-    depthCm: input.depthCm,
-  });
+  const price = computeSalePrice(
+    input.costPrice,
+    input.weightGrams,
+    { widthCm: input.widthCm, heightCm: input.heightCm, depthCm: input.depthCm },
+    input.packagingExtraGrams,
+  );
   const oldPrice = computeOldPrice(price);
 
   await prisma.product.upsert({
@@ -161,6 +163,7 @@ export async function createProduct(input: CreateProductInput) {
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
       unitsInPack: input.unitsInPack,
+      packagingExtraGrams: input.packagingExtraGrams,
       widthCm: input.widthCm,
       heightCm: input.heightCm,
       depthCm: input.depthCm,
@@ -178,6 +181,7 @@ export async function createProduct(input: CreateProductInput) {
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
       unitsInPack: input.unitsInPack,
+      packagingExtraGrams: input.packagingExtraGrams,
       widthCm: input.widthCm,
       heightCm: input.heightCm,
       depthCm: input.depthCm,
@@ -342,11 +346,12 @@ export async function updateProductPrice(offerId: string, costPrice: string, pri
   const existing = await prisma.product.findUnique({ where: { offerId } });
   const price =
     priceOverride ||
-    computeSalePrice(costPrice, existing?.weightGrams, {
-      widthCm: existing?.widthCm,
-      heightCm: existing?.heightCm,
-      depthCm: existing?.depthCm,
-    });
+    computeSalePrice(
+      costPrice,
+      existing?.weightGrams,
+      { widthCm: existing?.widthCm, heightCm: existing?.heightCm, depthCm: existing?.depthCm },
+      existing?.packagingExtraGrams,
+    );
 
   const oldPrice = computeOldPrice(price);
   const { result } = await updatePrices([{ offerId, price, oldPrice }]);
@@ -357,6 +362,19 @@ export async function updateProductPrice(offerId: string, costPrice: string, pri
 
   await prisma.product.update({ where: { offerId }, data: { costPrice, price, oldPrice } });
   return { price };
+}
+
+// Metal kutu/ağır ambalaj gibi standart dışı ürünlerde paketleme payını (varsayılan 10g) override
+// eder ve fiyatı bu yeni ağırlık varsayımıyla yeniden hesaplayıp Ozon'a gönderir.
+export async function updateProductPackagingExtraGrams(offerId: string, packagingExtraGrams: number | null) {
+  const existing = await prisma.product.findUnique({ where: { offerId } });
+  if (!existing?.costPrice) {
+    await prisma.product.update({ where: { offerId }, data: { packagingExtraGrams } });
+    return { price: null };
+  }
+
+  await prisma.product.update({ where: { offerId }, data: { packagingExtraGrams } });
+  return updateProductPrice(offerId, existing.costPrice);
 }
 
 // ÖNEMLİ: Ozon'un /v3/product/import'u attribute'lar için MERGE değil, TAM REPLACE yapıyor —

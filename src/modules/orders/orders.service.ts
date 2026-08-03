@@ -68,6 +68,18 @@ export function computeOrderAmount(items: Array<{ price: string; quantity: numbe
   return items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
 }
 
+// Alış fiyatı (costPrice) olmadan kâr hesaplanamaz — ürün eşleşmemişse (product null) ya da
+// costPrice hiç girilmemişse null döner (0 değil, "bilinmiyor" ile "kâr sıfır" karışmasın diye).
+export function computeOrderCost(items: Array<{ quantity: number; product: { costPrice: string | null } | null }>): number | null {
+  let total = 0;
+  for (const item of items) {
+    const cost = item.product?.costPrice;
+    if (cost == null) return null;
+    total += Number(cost) * item.quantity;
+  }
+  return total;
+}
+
 export async function listOrders(params: { status?: string; scheme?: string; since?: Date; to?: Date; skip?: number; take?: number }) {
   const where = {
     ...(params.status ? { status: params.status } : {}),

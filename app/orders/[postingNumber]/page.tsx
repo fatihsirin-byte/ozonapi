@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getOrderDetail, computeOrderAmount } from "@/modules/orders/orders.service";
+import { getOrderDetail, computeOrderAmount, computeOrderCost } from "@/modules/orders/orders.service";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +37,8 @@ export default async function OrderDetailPage({
   const raw = order.rawPayload as OrderRawPayload | null;
   const city = raw?.customer?.address?.city;
   const region = raw?.customer?.address?.region;
+  const orderCost = computeOrderCost(order.items);
+  const orderAmount = computeOrderAmount(order.items);
 
   return (
     <div className="page-wide">
@@ -62,8 +64,20 @@ export default async function OrderDetailPage({
         </div>
         <div>
           <div className="hint">Sipariş Tutarı</div>
-          <div className="value">{formatMoney(computeOrderAmount(order.items))}</div>
+          <div className="value">{formatMoney(orderAmount)}</div>
         </div>
+        <div>
+          <div className="hint">Alış Maliyeti</div>
+          <div className="value" style={{ color: "var(--danger)" }}>
+            {orderCost == null ? <span className="hint">yok</span> : formatMoney(orderCost)}
+          </div>
+        </div>
+        {orderCost != null && (
+          <div>
+            <div className="hint">Brüt Kâr</div>
+            <div className="value" style={{ color: "var(--success)" }}>{formatMoney(orderAmount - orderCost)}</div>
+          </div>
+        )}
         {raw?.shipment_date && (
           <div>
             <div className="hint">Kargo Tarihi</div>
@@ -96,12 +110,15 @@ export default async function OrderDetailPage({
                 <th>Offer ID</th>
                 <th>Ürün</th>
                 <th>Adet</th>
-                <th>Fiyat</th>
+                <th>Satış Fiyatı</th>
+                <th>Alış Fiyatı</th>
+                <th>Brüt Kâr</th>
               </tr>
             </thead>
             <tbody>
               {order.items.map((item) => {
                 const thumbnail = Array.isArray(item.product?.images) ? (item.product?.images as string[])[0] : null;
+                const unitCost = item.product?.costPrice ? Number(item.product.costPrice) : null;
                 return (
                   <tr key={item.id}>
                     <td>
@@ -125,6 +142,12 @@ export default async function OrderDetailPage({
                     <td>{item.product?.name ?? "-"}</td>
                     <td>{item.quantity}</td>
                     <td>${item.price}</td>
+                    <td>{unitCost != null ? formatMoney(unitCost) : <span className="hint">yok</span>}</td>
+                    <td>
+                      {unitCost != null
+                        ? formatMoney(Number(item.price) * item.quantity - unitCost * item.quantity)
+                        : "-"}
+                    </td>
                   </tr>
                 );
               })}

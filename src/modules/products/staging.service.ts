@@ -277,12 +277,13 @@ export async function updateHandleImages(handle: string, images: string[], resen
 // güncelle" diye ayrı bir uç yok).
 export async function updateDraftVariant(
   offerId: string,
-  data: { weightGrams?: number; costPrice?: string; unitsInPack?: number; name?: string }
+  data: { weightGrams?: number; costPrice?: string; unitsInPack?: number; name?: string; packagingExtraGrams?: number | null }
 ) {
   const existing = await prisma.product.findUnique({ where: { offerId } });
   const weightGrams = data.weightGrams ?? existing?.weightGrams ?? undefined;
   const costPrice = data.costPrice ?? existing?.costPrice ?? undefined;
-  const price = costPrice ? computeSalePrice(costPrice, weightGrams) : existing?.price;
+  const packagingExtraGrams = data.packagingExtraGrams !== undefined ? data.packagingExtraGrams : existing?.packagingExtraGrams;
+  const price = costPrice ? computeSalePrice(costPrice, weightGrams, undefined, packagingExtraGrams) : existing?.price;
   const finalPrice = price || existing?.price;
   const oldPrice = finalPrice && finalPrice !== existing?.price ? computeOldPrice(finalPrice) : existing?.oldPrice;
 
@@ -478,6 +479,7 @@ export async function submitHandleToOzon(input: SubmitHandleInput) {
         modelNameOverride,
         descriptionRu: variant.descriptionRu,
         unitsInPack: variant.unitsInPack,
+        packagingExtraGrams: variant.packagingExtraGrams,
       });
       if (taskId) {
         // Bilerek await edilmiyor — import'un bitmesini beklemek saniyeler sürebiliyor,

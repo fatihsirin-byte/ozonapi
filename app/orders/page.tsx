@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listOrders, computeOrderAmount } from "@/modules/orders/orders.service";
+import { listOrders, computeOrderAmount, computeOrderCost } from "@/modules/orders/orders.service";
 import { getPnlSummary } from "@/modules/finance/finance.service";
 import { OrdersToolbar } from "./OrdersToolbar";
 
@@ -31,10 +31,16 @@ export default async function OrdersPage({
   const page = Number(params.page ?? "1");
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  const [{ orders, total }, pnl] = await Promise.all([
+  const [{ orders, total }, pnl, { orders: recentOrders }] = await Promise.all([
     listOrders({ status: params.status, skip: (page - 1) * 50, take: 50 }),
     getPnlSummary({ since }),
+    listOrders({ since, take: 1000 }),
   ]);
+
+  const grossRevenue = recentOrders.reduce((sum, o) => sum + computeOrderAmount(o.items), 0);
+  const costs = recentOrders.map((o) => computeOrderCost(o.items));
+  const grossCost = costs.reduce((sum: number, c) => sum + (c ?? 0), 0);
+  const missingCostCount = costs.filter((c) => c == null).length;
 
   const hasSettledData = pnl.byOperationType.some(
     (t) => !/redistribution|acquiring/i.test(t.operationType),
@@ -45,6 +51,29 @@ export default async function OrdersPage({
       <div className="topbar">
         <h1>Siparişler</h1>
         <OrdersToolbar />
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3 style={{ marginTop: 0 }}>Son 30 Gün Brüt Kâr (ürün bazlı — komisyon/kargo kesintisi hariç)</h3>
+        <div className="hint" style={{ marginBottom: 16 }}>
+          Bu kâr sipariş anında hesaplanıyor, Ozon'un komisyon/kargo muhasebeleştirmesini
+          beklemiyor — alış fiyatı × adet, satış tutarından düşülüyor.
+          {missingCostCount > 0 && ` ${missingCostCount} siparişte alış fiyatı eksik, hesaba dahil edilmedi.`}
+        </div>
+        <div className="summary-grid">
+          <div>
+            <div className="hint">Satış Tutarı</div>
+            <div className="value">{formatMoney(grossRevenue)}</div>
+          </div>
+          <div>
+            <div className="hint">Alış Maliyeti</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(grossCost)}</div>
+          </div>
+          <div>
+            <div className="hint">Brüt Kâr</div>
+            <div className="value" style={{ color: "var(--success)" }}>{formatMoney(grossRevenue - grossCost)}</div>
+          </div>
+        </div>
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
@@ -127,6 +156,9 @@ export default async function OrdersPage({
                 <th style={{ whiteSpace: "nowrap" }}>Kargo Tarihi</th>
                 <th style={{ whiteSpace: "nowrap" }}>Ürün</th>
                 <th style={{ whiteSpace: "nowrap" }}>Tutar</th>
+                <th style={{ whiteSpace: "nowrap" }} title="Satış tutarı - alış maliyeti (Ozon komisyon/kargo kesintileri hariç)">
+                  Brüt Kâr
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -162,13 +194,25 @@ export default async function OrdersPage({
                             )}
                             <div>
                               <div>{item.quantity} adet, {item.offerId} — {formatMoney(Number(item.price))}</div>
-                              <div className="hint">{item.product?.name ?? "-"}</div>
+                              <div className="hint">
+                                {item.product?.name ?? "-"}
+                                {item.product?.costPrice && (
+                                  <> · alış {formatMoney(Number(item.product.costPrice))}</>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
                       </div>
                     </td>
                     <td>{formatMoney(computeOrderAmount(o.items))}</td>
+                    <td>
+                      {(() => {
+                        const cost = computeOrderCost(o.items);
+                        if (cost == null) return <span className="hint">alış fiyatı yok</span>;
+                        return formatMoney(computeOrderAmount(o.items) - cost);
+                      })()}
+                    </td>
                   </tr>
                 );
               })}

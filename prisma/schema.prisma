@@ -19,6 +19,7 @@ model Product {
   currencyCode          String    @default("USD")
   weightGrams           Int?
   unitsInPack           Int?      // Kutu/paket içindeki adet — varyanttan varyanta farklı olabiliyor (örn. "1 adet" / "6 adet"), weightGrams gibi ürüne özel; Ozon'un "Birimler tek bir üründe" (id 8962) attribute'una otomatik senkronlanır
+  packagingExtraGrams   Int?      // Standart paketleme payını (10g) override eder — metal kutu/ağır ambalaj gibi standart dışı ürünlerde kargo hesabı gerçek ağırlığı yansıtsın diye (bkz. src/pricing/formula.ts computeBillingWeightGrams), boşsa varsayılan 10g kullanılır
   widthCm               Int?
   heightCm              Int?
   depthCm               Int?

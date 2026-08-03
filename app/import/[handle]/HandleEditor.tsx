@@ -25,6 +25,7 @@ interface Variant {
   costPrice: string | null;
   weightGrams: number | null;
   unitsInPack: number | null;
+  packagingExtraGrams: number | null;
   widthCm: number | null;
   heightCm: number | null;
   depthCm: number | null;
@@ -428,6 +429,20 @@ export function HandleEditor({ handle }: { handle: string }) {
     });
   }
 
+  // packagingExtraGrams boş bırakılırsa null (varsayılan 10g kullanılır) gönderiliyor — diğer
+  // sayısal alanlardan farklı olarak 0'a düşürmüyoruz, 0 ile "varsayılanı kullan" farklı anlamlar.
+  async function updateVariantPackagingExtraGrams(offerId: string, value: string) {
+    const packagingExtraGrams = value.trim() === "" ? null : Number(value);
+    setVariants((prev) =>
+      prev ? prev.map((v) => (v.offerId === offerId ? { ...v, packagingExtraGrams } : v)) : prev,
+    );
+    await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ packagingExtraGrams }),
+    });
+  }
+
   async function toggleVariantExcluded(offerId: string, excluded: boolean) {
     setVariants((prev) =>
       prev ? prev.map((v) => (v.offerId === offerId ? { ...v, excludedFromSubmit: excluded } : v)) : prev,
@@ -818,20 +833,24 @@ export function HandleEditor({ handle }: { handle: string }) {
         </div>
         <table style={{ tableLayout: "fixed", wordBreak: "break-word" }}>
           <colgroup>
-            <col style={{ width: "13%" }} />
-            <col style={{ width: "25%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "21%" }} />
+            <col style={{ width: "8%" }} />
             <col style={{ width: "9%" }} />
             <col style={{ width: "7%" }} />
-            <col style={{ width: "11%" }} />
+            <col style={{ width: "10%" }} />
             <col style={{ width: "9%" }} />
             <col style={{ width: "9%" }} />
-            <col style={{ width: "17%" }} />
+            <col style={{ width: "15%" }} />
           </colgroup>
           <thead>
             <tr>
               <th>SKU</th>
               <th>Ad</th>
               <th>Ağırlık (g)</th>
+              <th title="Standart 10g paketleme payını override eder — metal kutu/ağır ambalaj gibi standart dışı ürünlerde kullanılır, boş = varsayılan 10g">
+                Paket Payı (g)
+              </th>
               <th title="Kutu/paket içindeki adet — Ozon'un varyant birleştirme kuralı için farklı varyantlarda gerçekten farklı olmalı">
                 Adet
               </th>
@@ -864,6 +883,15 @@ export function HandleEditor({ handle }: { handle: string }) {
                 <td>
                   <input
                     type="number"
+                    style={{ width: 70 }}
+                    defaultValue={v.packagingExtraGrams ?? ""}
+                    placeholder="10"
+                    onBlur={(e) => updateVariantPackagingExtraGrams(v.offerId, e.target.value)}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
                     style={{ width: 60 }}
                     defaultValue={v.unitsInPack ?? ""}
                     placeholder="1"
@@ -879,7 +907,7 @@ export function HandleEditor({ handle }: { handle: string }) {
                   />
                 </td>
                 <td>
-                  {computeSalePrice(v.costPrice ?? "0", v.weightGrams) || v.price}
+                  {computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.packagingExtraGrams) || v.price}
                   {v.ozonProductId && (
                     <button
                       type="button"
@@ -931,7 +959,8 @@ export function HandleEditor({ handle }: { handle: string }) {
               widthCm={v.widthCm}
               heightCm={v.heightCm}
               depthCm={v.depthCm}
-              currentPrice={computeSalePrice(v.costPrice ?? "0", v.weightGrams) || v.price}
+              packagingExtraGrams={v.packagingExtraGrams}
+              currentPrice={computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.packagingExtraGrams) || v.price}
               onClose={() => setPriceCalcOfferId(null)}
               onApply={(priceUsd) => applyPriceOverride(v.offerId, v.costPrice ?? "0", priceUsd)}
             />

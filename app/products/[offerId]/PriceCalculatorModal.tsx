@@ -9,6 +9,7 @@ interface Props {
   widthCm: number | null;
   heightCm: number | null;
   depthCm: number | null;
+  packagingExtraGrams?: number | null;
   currentPrice: string;
   onClose(): void;
   onApply(priceUsd: string): void;
@@ -27,15 +28,16 @@ export function PriceCalculatorModal({
   widthCm,
   heightCm,
   depthCm,
+  packagingExtraGrams,
   currentPrice,
   onClose,
   onApply,
 }: Props) {
   const dims = { widthCm, heightCm, depthCm };
-  const recommended = computePriceBreakdown(costPrice, weightGrams, dims);
+  const recommended = computePriceBreakdown(costPrice, weightGrams, dims, undefined, packagingExtraGrams);
   const [priceInput, setPriceInput] = useState(currentPrice || recommended?.recommendedPriceUsd.toFixed(2) || "");
 
-  const breakdown = computePriceBreakdown(costPrice, weightGrams, dims, Number(priceInput) || undefined);
+  const breakdown = computePriceBreakdown(costPrice, weightGrams, dims, Number(priceInput) || undefined, packagingExtraGrams);
 
   const deltaPct =
     breakdown && recommended && recommended.recommendedPriceUsd

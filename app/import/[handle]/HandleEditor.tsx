@@ -481,9 +481,10 @@ export function HandleEditor({ handle }: { handle: string }) {
       const data = await res.json();
       if (!res.ok) {
         setTranslateError(data.error ?? "Çeviri başarısız");
-        return;
+        return false;
       }
       await load();
+      return true;
     } finally {
       setTranslating(false);
     }
@@ -545,6 +546,14 @@ export function HandleEditor({ handle }: { handle: string }) {
     setSubmitting(true);
     setSubmitResults(null);
     try {
+      // Rusça çeviri unutulmuş olabiliyor — göndermeden önce sessizce (uyarı vermeden)
+      // otomatik çeviriyoruz, aksi halde Ozon Latin harfli ismi "critical" hata olarak
+      // reddediyor. "Çevriliyor..." durumu translate() zaten gösteriyor.
+      if (variants?.some((v) => !v.nameRu)) {
+        const translated = await translate();
+        if (!translated) return;
+      }
+
       const res = await fetch(`/api/import/products/${encodeURIComponent(handle)}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

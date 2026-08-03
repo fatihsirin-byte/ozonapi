@@ -62,6 +62,12 @@ export async function syncFbsOrders(params: { since: string; to: string; status?
   return synced;
 }
 
+// Ozon'un komisyon/kargo kesintilerini muhasebeleştirmesini beklemeye gerek yok — satış fiyatı
+// zaten posting.products[].price içinde sipariş anında geliyor, bunu OrderItem'da saklıyoruz.
+export function computeOrderAmount(items: Array<{ price: string; quantity: number }>): number {
+  return items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
+}
+
 export async function listOrders(params: { status?: string; scheme?: string; since?: Date; to?: Date; skip?: number; take?: number }) {
   const where = {
     ...(params.status ? { status: params.status } : {}),
@@ -74,7 +80,7 @@ export async function listOrders(params: { status?: string; scheme?: string; sin
   const [orders, total] = await Promise.all([
     prisma.order.findMany({
       where,
-      include: { items: true },
+      include: { items: { include: { product: true } } },
       orderBy: { orderDate: "desc" },
       skip: params.skip ?? 0,
       take: params.take ?? 50,
@@ -83,6 +89,17 @@ export async function listOrders(params: { status?: string; scheme?: string; sin
   ]);
 
   return { orders, total };
+}
+
+// Toast bildirimleri için — bu tarihten SONRA bizim DB'ye düşen (createdAt, yani sync'in yeni
+// fark ettiği) siparişleri kalem+ürün bilgisiyle döner. orderDate değil createdAt kullanılıyor
+// çünkü amaç "gerçek sipariş anı" değil "panelin yeni fark ettiği an".
+export async function getRecentOrders(since: Date) {
+  return prisma.order.findMany({
+    where: { createdAt: { gt: since } },
+    include: { items: { include: { product: true } } },
+    orderBy: { createdAt: "asc" },
+  });
 }
 
 export async function getOrderDetail(postingNumber: string) {

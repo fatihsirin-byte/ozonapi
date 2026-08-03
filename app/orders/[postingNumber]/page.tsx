@@ -1,11 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getOrderDetail } from "@/modules/orders/orders.service";
+import { getOrderDetail, computeOrderAmount } from "@/modules/orders/orders.service";
 
 export const dynamic = "force-dynamic";
 
 function formatMoney(n: number) {
   return n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+interface OrderRawPayload {
+  shipment_date?: string;
+  customer?: { address?: { city?: string; region?: string } };
+  analytics_data?: { warehouse?: string; tpl_provider?: string };
 }
 
 export default async function OrderDetailPage({
@@ -28,6 +34,9 @@ export default async function OrderDetailPage({
     { amount: 0, commission: 0, delivery: 0, other: 0 },
   );
   const net = totals.amount + totals.commission + totals.delivery + totals.other;
+  const raw = order.rawPayload as OrderRawPayload | null;
+  const city = raw?.customer?.address?.city;
+  const region = raw?.customer?.address?.region;
 
   return (
     <div className="page-wide">
@@ -51,6 +60,28 @@ export default async function OrderDetailPage({
           <div className="hint">Sipariş Tarihi</div>
           <div className="value" style={{ fontSize: 15 }}>{order.orderDate ? new Date(order.orderDate).toLocaleString("tr-TR") : "-"}</div>
         </div>
+        <div>
+          <div className="hint">Sipariş Tutarı</div>
+          <div className="value">{formatMoney(computeOrderAmount(order.items))}</div>
+        </div>
+        {raw?.shipment_date && (
+          <div>
+            <div className="hint">Kargo Tarihi</div>
+            <div className="value" style={{ fontSize: 15 }}>{new Date(raw.shipment_date).toLocaleDateString("tr-TR")}</div>
+          </div>
+        )}
+        {(city || region) && (
+          <div>
+            <div className="hint">Teslimat Yeri</div>
+            <div className="value" style={{ fontSize: 15 }}>{[city, region].filter(Boolean).join(", ")}</div>
+          </div>
+        )}
+        {raw?.analytics_data?.tpl_provider && (
+          <div>
+            <div className="hint">Kargo Sağlayıcı</div>
+            <div className="value" style={{ fontSize: 15 }}>{raw.analytics_data.tpl_provider}</div>
+          </div>
+        )}
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
@@ -61,6 +92,7 @@ export default async function OrderDetailPage({
           <table>
             <thead>
               <tr>
+                <th></th>
                 <th>Offer ID</th>
                 <th>Ürün</th>
                 <th>Adet</th>
@@ -68,16 +100,33 @@ export default async function OrderDetailPage({
               </tr>
             </thead>
             <tbody>
-              {order.items.map((item) => (
-                <tr key={item.id}>
-                  <td>
-                    {item.product ? <Link href={`/products/${item.offerId}`}>{item.offerId}</Link> : item.offerId}
-                  </td>
-                  <td>{item.product?.name ?? "-"}</td>
-                  <td>{item.quantity}</td>
-                  <td>{item.price}</td>
-                </tr>
-              ))}
+              {order.items.map((item) => {
+                const thumbnail = Array.isArray(item.product?.images) ? (item.product?.images as string[])[0] : null;
+                return (
+                  <tr key={item.id}>
+                    <td>
+                      {thumbnail ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={thumbnail}
+                          alt=""
+                          width={48}
+                          height={48}
+                          style={{ objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }}
+                        />
+                      ) : (
+                        <div style={{ width: 48, height: 48, borderRadius: 6, background: "var(--border)" }} />
+                      )}
+                    </td>
+                    <td>
+                      {item.product ? <Link href={`/products/${item.offerId}`}>{item.offerId}</Link> : item.offerId}
+                    </td>
+                    <td>{item.product?.name ?? "-"}</td>
+                    <td>{item.quantity}</td>
+                    <td>{item.price}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

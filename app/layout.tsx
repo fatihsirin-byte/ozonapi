@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Nav } from "./Nav";
+import { OrderNotifications } from "./OrderNotifications";
 
 export const metadata: Metadata = {
   title: "Ozon Ürün Yönetimi",
@@ -13,6 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <Nav />
         {children}
+        <OrderNotifications />
       </body>
     </html>
   );

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listOrders } from "@/modules/orders/orders.service";
+import { listOrders, computeOrderAmount } from "@/modules/orders/orders.service";
 import { getPnlSummary } from "@/modules/finance/finance.service";
 import { OrdersToolbar } from "./OrdersToolbar";
 
@@ -15,6 +15,11 @@ const STATUS_OPTIONS = [
 
 function formatMoney(n: number) {
   return n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function getShipmentDate(rawPayload: unknown): string | null {
+  const date = (rawPayload as { shipment_date?: string } | null)?.shipment_date;
+  return date ?? null;
 }
 
 export default async function OrdersPage({
@@ -117,26 +122,55 @@ export default async function OrdersPage({
             <thead>
               <tr>
                 <th>Posting No</th>
-                <th>Tarih</th>
                 <th>Durum</th>
-                <th>Kalem Sayısı</th>
-                <th>Şema</th>
+                <th>Kabul Tarihi</th>
+                <th>Kargo Tarihi</th>
+                <th>Ürün</th>
+                <th>Tutar</th>
               </tr>
             </thead>
             <tbody>
-              {orders.map((o) => (
-                <tr key={o.id}>
-                  <td>
-                    <Link href={`/orders/${o.postingNumber}`}>{o.postingNumber}</Link>
-                  </td>
-                  <td>{o.orderDate ? new Date(o.orderDate).toLocaleString("tr-TR") : "-"}</td>
-                  <td>
-                    <span className="badge pending">{o.status}</span>
-                  </td>
-                  <td>{o.items.length}</td>
-                  <td>{o.scheme}</td>
-                </tr>
-              ))}
+              {orders.map((o) => {
+                const shipmentDate = getShipmentDate(o.rawPayload);
+                return (
+                  <tr key={o.id}>
+                    <td>
+                      <Link href={`/orders/${o.postingNumber}`}>{o.postingNumber}</Link>
+                      <div className="hint">{o.scheme}</div>
+                    </td>
+                    <td>
+                      <span className="badge pending">{o.status}</span>
+                    </td>
+                    <td>{o.orderDate ? new Date(o.orderDate).toLocaleString("tr-TR") : "-"}</td>
+                    <td>{shipmentDate ? new Date(shipmentDate).toLocaleDateString("tr-TR") : "-"}</td>
+                    <td>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {o.items.map((item) => (
+                          <div key={item.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            {item.product?.images && Array.isArray(item.product.images) && (item.product.images as string[])[0] ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={(item.product.images as string[])[0]}
+                                alt=""
+                                width={40}
+                                height={40}
+                                style={{ objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)", flexShrink: 0 }}
+                              />
+                            ) : (
+                              <div style={{ width: 40, height: 40, borderRadius: 6, background: "var(--border)", flexShrink: 0 }} />
+                            )}
+                            <div>
+                              <div>{item.quantity} adet, {item.offerId}</div>
+                              <div className="hint">{item.product?.name ?? "-"}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td>{formatMoney(computeOrderAmount(o.items))}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

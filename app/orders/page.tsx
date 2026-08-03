@@ -161,7 +161,7 @@ export default async function OrdersPage({
                               <div style={{ width: 40, height: 40, borderRadius: 6, background: "var(--border)", flexShrink: 0 }} />
                             )}
                             <div>
-                              <div>{item.quantity} adet, {item.offerId}</div>
+                              <div>{item.quantity} adet, {item.offerId} — {formatMoney(Number(item.price))}</div>
                               <div className="hint">{item.product?.name ?? "-"}</div>
                             </div>
                           </div>

@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 interface RecentOrderItem {
   offerId: string;
   quantity: number;
+  price: string;
   name: string;
   thumbnail: string | null;
 }
@@ -25,7 +26,7 @@ interface Toast extends RecentOrder {
 const POLL_INTERVAL_MS = 20_000;
 
 function formatMoney(n: number) {
-  return n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `$${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export function OrderNotifications() {
@@ -104,7 +105,7 @@ export function OrderNotifications() {
               )}
               <div>
                 <div className="toast-item-name">{item.name}</div>
-                <div className="hint">{item.quantity} adet</div>
+                <div className="hint">{item.quantity} adet — {formatMoney(Number(item.price))}</div>
               </div>
             </div>
           ))}

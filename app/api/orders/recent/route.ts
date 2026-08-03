@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
     items: o.items.map((item) => ({
       offerId: item.offerId,
       quantity: item.quantity,
+      price: item.price,
       name: item.product?.name ?? item.offerId,
       thumbnail: Array.isArray(item.product?.images) ? (item.product?.images as string[])[0] ?? null : null,
     })),

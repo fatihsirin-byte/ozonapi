@@ -159,6 +159,21 @@ export function HandleEditor({ handle }: { handle: string }) {
     router.push(buildHandleHref(targetHandle, navContext, targetPage));
   }
 
+  // Sağ/sol ok tuşlarıyla da gezinme — input/textarea/select içinde yazarken tuşu
+  // yakalamıyoruz ki metin düzenlerken imleci hareket ettirmek istediğinizde sayfa değişmesin.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+      if (e.key === "ArrowLeft" && prevHandle) goToHandle(prevHandle, prevPage);
+      if (e.key === "ArrowRight" && nextHandle) goToHandle(nextHandle, nextPage);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prevHandle, nextHandle, prevPage, nextPage]);
+
   function cancelAutoAdvance() {
     if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
     if (autoAdvanceIntervalRef.current) clearInterval(autoAdvanceIntervalRef.current);

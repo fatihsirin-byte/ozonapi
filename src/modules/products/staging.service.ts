@@ -154,6 +154,38 @@ export async function listDraftHandlesPage(
   return { items, total, page, pageSize };
 }
 
+// Ürün kartındaki sağ/sol ok gezinmesi için — aynı filtreyle tüm handle'ları tek seferde
+// (sayfalama olmadan) alfabetik sıraya diziyor ve verilen handle'ın komşularını buluyor.
+// Önceden istemci tarafında sayfa sayfa gezip sınırlarda ek istek atan kırılgan bir mantık
+// vardı (handle o an çekilen sayfada bulunamazsa sessizce hiç çalışmıyordu) — bu, filtreyle
+// eşleşmeyen bir bağlamdan gelindiğinde (ör. eski bir link) komşu bulamayıp özelliğin hiç
+// tetiklenmemesine yol açıyordu. Tek sorgu + index hesabıyla bu belirsizlik ortadan kalkıyor.
+export async function getAdjacentHandles(
+  handle: string,
+  filters: HandlePageFilters,
+  pageSize = 25,
+): Promise<{ prevHandle: string | null; prevPage: number; nextHandle: string | null; nextPage: number }> {
+  const where = await buildHandleWhere(filters);
+  const grouped = await prisma.product.groupBy({
+    by: ["shopifyHandle"],
+    where,
+    orderBy: { shopifyHandle: "asc" },
+  });
+  const handles = grouped.map((g) => g.shopifyHandle as string);
+  const index = handles.indexOf(handle);
+  if (index === -1) {
+    return { prevHandle: null, prevPage: 1, nextHandle: null, nextPage: 1 };
+  }
+  const prevHandle = index > 0 ? handles[index - 1] : null;
+  const nextHandle = index < handles.length - 1 ? handles[index + 1] : null;
+  return {
+    prevHandle,
+    prevPage: Math.floor((index - 1) / pageSize) + 1,
+    nextHandle,
+    nextPage: Math.floor((index + 1) / pageSize) + 1,
+  };
+}
+
 export interface FacetOption {
   value: string;
   count: number;

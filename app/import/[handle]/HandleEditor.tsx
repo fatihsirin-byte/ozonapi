@@ -72,15 +72,6 @@ interface NavContext {
   page: number;
 }
 
-function buildListParams(ctx: NavContext, page: number) {
-  const params = new URLSearchParams({ page: String(page), pageSize: "25" });
-  if (ctx.q) params.set("q", ctx.q);
-  if (ctx.vendor) params.set("vendor", ctx.vendor);
-  if (ctx.type) params.set("type", ctx.type);
-  if (ctx.status) params.set("status", ctx.status);
-  return params;
-}
-
 function buildHandleHref(targetHandle: string, ctx: NavContext, page: number) {
   const params = new URLSearchParams();
   if (ctx.q) params.set("q", ctx.q);
@@ -107,53 +98,33 @@ export function HandleEditor({ handle }: { handle: string }) {
     [searchParams.toString()],
   );
 
-  const [pageItems, setPageItems] = useState<{ handle: string }[]>([]);
-  const [prevBoundaryHandle, setPrevBoundaryHandle] = useState<string | null>(null);
-  const [nextBoundaryHandle, setNextBoundaryHandle] = useState<string | null>(null);
+  const [prevHandle, setPrevHandle] = useState<string | null>(null);
+  const [prevPage, setPrevPage] = useState(1);
+  const [nextHandle, setNextHandle] = useState<string | null>(null);
+  const [nextPage, setNextPage] = useState(1);
   const [autoAdvancing, setAutoAdvancing] = useState(false);
   const [autoAdvanceProgress, setAutoAdvanceProgress] = useState(0);
   const autoAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoAdvanceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Aktif filtre/sayfadaki ürün listesini çekip bu handle'ın listedeki konumunu buluyoruz.
+  // Komşu (önceki/sonraki) handle'ları tek bir backend sorgusuyla buluyoruz — böylece bu
+  // ürüne hangi bağlamdan gelinirse gelinsin (filtreyle eşleşen bir sayfadan gelinmese
+  // bile) doğru sonuç dönüyor.
   useEffect(() => {
-    const params = buildListParams(navContext, navContext.page);
-    fetch(`/api/import/products?${params.toString()}`)
+    const params = new URLSearchParams();
+    if (navContext.q) params.set("q", navContext.q);
+    if (navContext.vendor) params.set("vendor", navContext.vendor);
+    if (navContext.type) params.set("type", navContext.type);
+    if (navContext.status) params.set("status", navContext.status);
+    fetch(`/api/import/products/${encodeURIComponent(handle)}/adjacent?${params.toString()}`)
       .then((r) => r.json())
-      .then((data) => setPageItems(data.items ?? []));
-    setPrevBoundaryHandle(null);
-    setNextBoundaryHandle(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      .then((data) => {
+        setPrevHandle(data.prevHandle ?? null);
+        setPrevPage(data.prevPage ?? 1);
+        setNextHandle(data.nextHandle ?? null);
+        setNextPage(data.nextPage ?? 1);
+      });
   }, [navContext, handle]);
-
-  const currentIndex = pageItems.findIndex((i) => i.handle === handle);
-
-  // Sayfanın başındaysak bir önceki sayfanın son ürününü, sonundaysak bir sonraki
-  // sayfanın ilk ürününü arka planda çekiyoruz ki ok butonları sayfa sınırında da çalışsın.
-  useEffect(() => {
-    if (pageItems.length === 0 || currentIndex === -1) return;
-    if (currentIndex === 0 && navContext.page > 1) {
-      const params = buildListParams(navContext, navContext.page - 1);
-      fetch(`/api/import/products?${params.toString()}`)
-        .then((r) => r.json())
-        .then((data) => {
-          const prevPageItems = data.items ?? [];
-          setPrevBoundaryHandle(prevPageItems[prevPageItems.length - 1]?.handle ?? null);
-        });
-    }
-    if (currentIndex === pageItems.length - 1) {
-      const params = buildListParams(navContext, navContext.page + 1);
-      fetch(`/api/import/products?${params.toString()}`)
-        .then((r) => r.json())
-        .then((data) => setNextBoundaryHandle((data.items ?? [])[0]?.handle ?? null));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageItems, currentIndex, navContext]);
-
-  const prevHandle = currentIndex > 0 ? pageItems[currentIndex - 1].handle : prevBoundaryHandle;
-  const prevPage = currentIndex > 0 ? navContext.page : navContext.page - 1;
-  const nextHandle = currentIndex !== -1 && currentIndex < pageItems.length - 1 ? pageItems[currentIndex + 1].handle : nextBoundaryHandle;
-  const nextPage = currentIndex !== -1 && currentIndex < pageItems.length - 1 ? navContext.page : navContext.page + 1;
 
   function goToHandle(targetHandle: string, targetPage: number) {
     router.push(buildHandleHref(targetHandle, navContext, targetPage));
@@ -1031,7 +1002,7 @@ export function HandleEditor({ handle }: { handle: string }) {
         )}
 
         <button className="btn-primary" disabled={!canSubmit || submitting} onClick={submit} style={{ marginTop: 12 }}>
-          {submitting ? "Gönderiliyor..." : "Ozon'a Gönder"}
+          {submitting && translating ? "Rusça'ya çevriliyor..." : submitting ? "Gönderiliyor..." : "Ozon'a Gönder"}
         </button>
 
         {submitResults && (

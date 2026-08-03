@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CsvDropzone } from "./CsvDropzone";
 
 interface HandleItem {
@@ -31,7 +32,14 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 }
 
 export function StagingList() {
-  const [page, setPage] = useState(1);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // Filtre/sayfa durumu URL'e yazılıyor ki bir ürüne girip geri dönünce (tarayıcı geri
+  // tuşu) kaldığınız filtre/sayfada kalasınız — önceden bu state sadece component
+  // içindeydi, geri dönünce sayfa 1'e ve varsayılan filtrelere sıfırlanıyordu.
+  const [page, setPage] = useState(() => Number(searchParams.get("page")) || 1);
   const [items, setItems] = useState<HandleItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -40,11 +48,13 @@ export function StagingList() {
   const [settingStock, setSettingStock] = useState(false);
   const [stockResult, setStockResult] = useState<string | null>(null);
 
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const debouncedSearch = useDebouncedValue(search, 300);
-  const [vendor, setVendor] = useState("");
-  const [type, setType] = useState("");
-  const [status, setStatus] = useState<"" | "draft" | "submitted">("draft");
+  const [vendor, setVendor] = useState(() => searchParams.get("vendor") ?? "");
+  const [type, setType] = useState(() => searchParams.get("type") ?? "");
+  const [status, setStatus] = useState<"" | "draft" | "submitted">(
+    () => (searchParams.get("status") as "" | "draft" | "submitted") ?? "draft",
+  );
   const [vendors, setVendors] = useState<FacetOption[]>([]);
   const [types, setTypes] = useState<FacetOption[]>([]);
 
@@ -77,18 +87,43 @@ export function StagingList() {
   }, []);
 
   // Filtreler değiştiğinde: hem liste hem de facet'ler (cascading — diğer filtrelerle
-  // eşleşen vendor/type seçenekleri) yeniden çekilir.
+  // eşleşen vendor/type seçenekleri) yeniden çekilir. İlk render'da (URL'den gelen
+  // sayfayı sıfırlamamak için) page'i 1'e zorlamıyoruz — sadece kullanıcı gerçekten bir
+  // filtreyi DEĞİŞTİRDİĞİNDE sayfa 1'e dönüyor.
+  const skipFilterResetRef = useRef(true);
   useEffect(() => {
+    if (skipFilterResetRef.current) {
+      skipFilterResetRef.current = false;
+      load(page, debouncedSearch, vendor, type, status);
+      refreshFacets(debouncedSearch, vendor, type, status);
+      return;
+    }
     setPage(1);
     load(1, debouncedSearch, vendor, type, status);
     refreshFacets(debouncedSearch, vendor, type, status);
-  }, [debouncedSearch, vendor, type, status, load, refreshFacets]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, vendor, type, status]);
 
   useEffect(() => {
     if (page === 1) return;
     load(page, debouncedSearch, vendor, type, status);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
+
+  // Mevcut filtre/sayfa durumunu URL'e yazar — tarayıcı geri tuşuyla dönüldüğünde
+  // (Next.js bu URL'i history'den okuyup component'i bu state'le yeniden mount ediyor)
+  // kaldığınız yerde kalınsın diye.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (page > 1) params.set("page", String(page));
+    if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
+    if (vendor) params.set("vendor", vendor);
+    if (type) params.set("type", type);
+    if (status) params.set("status", status);
+    const queryString = params.toString();
+    router.replace(queryString ? `${pathname}?${queryString}` : pathname, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, debouncedSearch, vendor, type, status]);
 
   function toggle(handle: string) {
     setSelected((prev) => {

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { StagingList } from "./StagingList";
 
@@ -10,7 +11,9 @@ export default function ImportPage() {
           <button className="btn-secondary">← Ürünlere dön</button>
         </Link>
       </div>
-      <StagingList />
+      <Suspense>
+        <StagingList />
+      </Suspense>
     </div>
   );
 }

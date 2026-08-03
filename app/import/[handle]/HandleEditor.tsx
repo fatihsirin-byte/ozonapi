@@ -33,6 +33,7 @@ interface Variant {
   shopifyType: string | null;
   nameRu: string | null;
   descriptionRu: string | null;
+  descriptionHtml: string | null;
   status: string;
   excludedFromSubmit: boolean;
   ozonProductId: string | null;
@@ -537,6 +538,17 @@ export function HandleEditor({ handle }: { handle: string }) {
           </div>
         )}
       </div>
+
+      {variants[0]?.descriptionHtml && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <label>Orijinal Shopify Açıklaması</label>
+          <div
+            className="hint"
+            style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, padding: 10 }}
+            dangerouslySetInnerHTML={{ __html: variants[0].descriptionHtml }}
+          />
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>

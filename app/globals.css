@@ -401,3 +401,69 @@ th {
   color: var(--muted);
   padding: 40px 0;
 }
+
+.global-nav {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.global-nav-inner {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.global-nav-brand {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.global-nav-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.global-nav-link {
+  color: var(--muted);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.global-nav-link:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.global-nav-link.active {
+  color: var(--text);
+  background: rgba(79, 140, 255, 0.15);
+}
+
+.summary-grid {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.summary-grid > div {
+  background: #0f1216;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  min-width: 130px;
+}
+
+.summary-grid .hint {
+  margin-bottom: 4px;
+}
+
+.summary-grid .value {
+  font-size: 20px;
+  font-weight: 600;
+}

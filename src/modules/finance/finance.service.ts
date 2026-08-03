@@ -73,9 +73,24 @@ export async function getPnlSummary(params: { since?: Date; to?: Date }) {
     { amount: 0, commission: 0, delivery: 0, other: 0 },
   );
 
+  const byType = new Map<string, { count: number; amount: number }>();
+  for (const r of rows) {
+    const entry = byType.get(r.operationType) ?? { count: 0, amount: 0 };
+    entry.count += 1;
+    entry.amount += r.amount;
+    byType.set(r.operationType, entry);
+  }
+
   return {
     ...totals,
     net: totals.amount + totals.commission + totals.delivery + totals.other,
     transactionCount: rows.length,
+    // Ozon, komisyon/kargo kesintilerini sipariş TESLİM edildikten sonra muhasebeleştiriyor —
+    // henüz teslim edilmemiş siparişlerde sadece küçük "acquiring redistribution" düzeltme
+    // işlemleri görülür, komisyon/kargo/diğer 0 kalır. UI bunu ayırt edebilsin diye tip bazında
+    // döküm de dönülüyor.
+    byOperationType: Array.from(byType.entries())
+      .map(([operationType, v]) => ({ operationType, ...v }))
+      .sort((a, b) => b.count - a.count),
   };
 }

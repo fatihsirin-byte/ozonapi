@@ -30,7 +30,7 @@ export default async function OrderDetailPage({
   const net = totals.amount + totals.commission + totals.delivery + totals.other;
 
   return (
-    <div className="page">
+    <div className="page-wide">
       <div className="topbar">
         <h1>{order.postingNumber}</h1>
         <Link href="/orders">
@@ -38,20 +38,18 @@ export default async function OrderDetailPage({
         </Link>
       </div>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-          <div>
-            <div className="hint">Durum</div>
-            <span className="badge pending">{order.status}</span>
-          </div>
-          <div>
-            <div className="hint">Şema</div>
-            <div>{order.scheme}</div>
-          </div>
-          <div>
-            <div className="hint">Sipariş Tarihi</div>
-            <div>{order.orderDate ? new Date(order.orderDate).toLocaleString("tr-TR") : "-"}</div>
-          </div>
+      <div className="card summary-grid" style={{ marginBottom: 16 }}>
+        <div>
+          <div className="hint">Durum</div>
+          <span className="badge pending">{order.status}</span>
+        </div>
+        <div>
+          <div className="hint">Şema</div>
+          <div className="value">{order.scheme}</div>
+        </div>
+        <div>
+          <div className="hint">Sipariş Tarihi</div>
+          <div className="value" style={{ fontSize: 15 }}>{order.orderDate ? new Date(order.orderDate).toLocaleString("tr-TR") : "-"}</div>
         </div>
       </div>
 
@@ -87,30 +85,32 @@ export default async function OrderDetailPage({
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Finans Kesintileri (PNL)</h3>
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 16 }}>
+        <div className="summary-grid" style={{ marginBottom: 16 }}>
           <div>
-            <div className="hint">Satış Tutarı</div>
-            <div style={{ fontSize: 18 }}>{formatMoney(totals.amount)}</div>
+            <div className="hint">Toplam Tutar</div>
+            <div className="value">{formatMoney(totals.amount)}</div>
           </div>
           <div>
             <div className="hint">Komisyon</div>
-            <div style={{ fontSize: 18, color: "var(--danger)" }}>{formatMoney(totals.commission)}</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(totals.commission)}</div>
           </div>
           <div>
             <div className="hint">Kargo</div>
-            <div style={{ fontSize: 18, color: "var(--danger)" }}>{formatMoney(totals.delivery)}</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(totals.delivery)}</div>
           </div>
           <div>
             <div className="hint">Diğer</div>
-            <div style={{ fontSize: 18, color: "var(--danger)" }}>{formatMoney(totals.other)}</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(totals.other)}</div>
           </div>
           <div>
             <div className="hint">Net</div>
-            <div style={{ fontSize: 18, color: "var(--success)" }}>{formatMoney(net)}</div>
+            <div className="value" style={{ color: "var(--success)" }}>{formatMoney(net)}</div>
           </div>
         </div>
         {order.transactions.length === 0 ? (
-          <div className="empty-state">Henüz finans işlemi senkronize edilmedi</div>
+          <div className="empty-state">
+            Henüz finans işlemi yok — Ozon bunu sipariş teslim edildikten sonra muhasebeleştiriyor.
+          </div>
         ) : (
           <table>
             <thead>

@@ -31,45 +31,72 @@ export default async function OrdersPage({
     getPnlSummary({ since }),
   ]);
 
+  const hasSettledData = pnl.byOperationType.some(
+    (t) => !/redistribution|acquiring/i.test(t.operationType),
+  );
+
   return (
-    <div className="page">
+    <div className="page-wide">
       <div className="topbar">
         <h1>Siparişler</h1>
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-          <Link href="/products">
-            <button className="btn-secondary">Ürünler</button>
-          </Link>
-          <OrdersToolbar />
-        </div>
+        <OrdersToolbar />
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
         <h3 style={{ marginTop: 0 }}>Son 30 Gün PNL (Ozon finans işlemleri)</h3>
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+        {!hasSettledData && (
+          <div className="hint" style={{ marginBottom: 16, color: "var(--muted)" }}>
+            Ozon, komisyon/kargo/diğer kesintileri sipariş <strong>teslim edildikten</strong> sonra
+            muhasebeleştiriyor. Henüz teslim edilmiş/kesinleşmiş bir işlem yok — aşağıdaki tutar
+            sadece ödeme altyapısının küçük düzeltme işlemlerini (aşağıdaki dökümde görülür)
+            yansıtıyor, gerçek satış/komisyon verisi değil.
+          </div>
+        )}
+        <div className="summary-grid" style={{ marginBottom: 16 }}>
           <div>
-            <div className="hint">Satış Tutarı</div>
-            <div style={{ fontSize: 20 }}>{formatMoney(pnl.amount)}</div>
+            <div className="hint">Toplam Tutar</div>
+            <div className="value">{formatMoney(pnl.amount)}</div>
           </div>
           <div>
             <div className="hint">Komisyon</div>
-            <div style={{ fontSize: 20, color: "var(--danger)" }}>{formatMoney(pnl.commission)}</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(pnl.commission)}</div>
           </div>
           <div>
             <div className="hint">Kargo</div>
-            <div style={{ fontSize: 20, color: "var(--danger)" }}>{formatMoney(pnl.delivery)}</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(pnl.delivery)}</div>
           </div>
           <div>
             <div className="hint">Diğer Kesintiler</div>
-            <div style={{ fontSize: 20, color: "var(--danger)" }}>{formatMoney(pnl.other)}</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(pnl.other)}</div>
           </div>
           <div>
             <div className="hint">Net</div>
-            <div style={{ fontSize: 20, color: "var(--success)" }}>{formatMoney(pnl.net)}</div>
+            <div className="value" style={{ color: "var(--success)" }}>{formatMoney(pnl.net)}</div>
           </div>
         </div>
+        {pnl.byOperationType.length > 0 && (
+          <table>
+            <thead>
+              <tr>
+                <th>İşlem Tipi</th>
+                <th>Adet</th>
+                <th>Toplam Tutar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pnl.byOperationType.map((t) => (
+                <tr key={t.operationType}>
+                  <td>{t.operationType}</td>
+                  <td>{t.count}</td>
+                  <td>{formatMoney(t.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
-      <div className="card" style={{ marginBottom: 16, display: "flex", gap: 8 }}>
+      <div className="card" style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
         <Link href="/orders">
           <button className={`btn-secondary${!params.status ? " active" : ""}`}>Tümü</button>
         </Link>

@@ -277,7 +277,7 @@ export async function updateHandleImages(handle: string, images: string[], resen
 // güncelle" diye ayrı bir uç yok).
 export async function updateDraftVariant(
   offerId: string,
-  data: { weightGrams?: number; costPrice?: string }
+  data: { weightGrams?: number; costPrice?: string; unitsInPack?: number }
 ) {
   const existing = await prisma.product.findUnique({ where: { offerId } });
   const weightGrams = data.weightGrams ?? existing?.weightGrams ?? undefined;
@@ -477,6 +477,7 @@ export async function submitHandleToOzon(input: SubmitHandleInput) {
         attributes: input.attributes,
         modelNameOverride,
         descriptionRu: variant.descriptionRu,
+        unitsInPack: variant.unitsInPack,
       });
       if (taskId) {
         // Bilerek await edilmiyor — import'un bitmesini beklemek saniyeler sürebiliyor,

@@ -24,6 +24,7 @@ interface Variant {
   price: string;
   costPrice: string | null;
   weightGrams: number | null;
+  unitsInPack: number | null;
   widthCm: number | null;
   heightCm: number | null;
   depthCm: number | null;
@@ -409,20 +410,21 @@ export function HandleEditor({ handle }: { handle: string }) {
     }
   }
 
-  async function updateVariantField(offerId: string, field: "weightGrams" | "costPrice", value: string) {
+  async function updateVariantField(
+    offerId: string,
+    field: "weightGrams" | "costPrice" | "unitsInPack",
+    value: string,
+  ) {
+    const isNumericField = field === "weightGrams" || field === "unitsInPack";
     setVariants((prev) =>
       prev
-        ? prev.map((v) =>
-            v.offerId === offerId
-              ? { ...v, [field]: field === "weightGrams" ? Number(value) || null : value }
-              : v,
-          )
+        ? prev.map((v) => (v.offerId === offerId ? { ...v, [field]: isNumericField ? Number(value) || null : value } : v))
         : prev,
     );
     await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ [field]: field === "weightGrams" ? Number(value) || 0 : value }),
+      body: JSON.stringify({ [field]: isNumericField ? Number(value) || 0 : value }),
     });
   }
 
@@ -816,11 +818,12 @@ export function HandleEditor({ handle }: { handle: string }) {
         </div>
         <table style={{ tableLayout: "fixed", wordBreak: "break-word" }}>
           <colgroup>
-            <col style={{ width: "14%" }} />
-            <col style={{ width: "28%" }} />
-            <col style={{ width: "10%" }} />
-            <col style={{ width: "12%" }} />
-            <col style={{ width: "10%" }} />
+            <col style={{ width: "13%" }} />
+            <col style={{ width: "25%" }} />
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "7%" }} />
+            <col style={{ width: "11%" }} />
+            <col style={{ width: "9%" }} />
             <col style={{ width: "9%" }} />
             <col style={{ width: "17%" }} />
           </colgroup>
@@ -829,6 +832,9 @@ export function HandleEditor({ handle }: { handle: string }) {
               <th>SKU</th>
               <th>Ad</th>
               <th>Ağırlık (g)</th>
+              <th title="Kutu/paket içindeki adet — Ozon'un varyant birleştirme kuralı için farklı varyantlarda gerçekten farklı olmalı">
+                Adet
+              </th>
               <th>Alış Fiyatı (USD)</th>
               <th>Satış Fiyatı</th>
               <th>Durum</th>
@@ -846,6 +852,15 @@ export function HandleEditor({ handle }: { handle: string }) {
                     style={{ width: 90 }}
                     defaultValue={v.weightGrams ?? ""}
                     onBlur={(e) => updateVariantField(v.offerId, "weightGrams", e.target.value)}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    style={{ width: 60 }}
+                    defaultValue={v.unitsInPack ?? ""}
+                    placeholder="1"
+                    onBlur={(e) => updateVariantField(v.offerId, "unitsInPack", e.target.value)}
                   />
                 </td>
                 <td>

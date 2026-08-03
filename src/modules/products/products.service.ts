@@ -19,6 +19,13 @@ const MODEL_NAME_ATTRIBUTE_ID = 9048;
 const ANNOTATION_ATTRIBUTE_ID = 4191;
 const WEIGHT_GRAMS_ATTRIBUTE_ID = 4383;
 const PACKED_WEIGHT_GRAMS_ATTRIBUTE_ID = 4497;
+// "Birimler tek bir üründe" (kutu/paket içi adet) — ağırlık gibi varyanttan varyanta
+// farklı olabiliyor (örn. "1 adet" / "6 adet") ama kategori formunda TEK bir kere girilip
+// tüm varyantlara aynen kopyalanıyordu. Bu yüzden Ozon'un varyant birleştirme kuralı (en az
+// bir attribute'un farklı olması) sağlanamıyor, aynı üründeki varyantlar ayrı kartlara
+// düşüyordu (2026-08-03'te canlıda tespit edildi). Artık weightGrams gibi Product'ın kendi
+// unitsInPack alanından, her varyant için ayrı ayrı senkronlanıyor.
+const UNITS_IN_PACK_ATTRIBUTE_ID = 8962;
 // "Rich content" (kategori formunda hiç gösterilmiyor, içerik puanının büyük kısmını
 // belirliyor) — kullanıcının Rich content design tool'da oluşturup kaydettiği gerçek JSON
 // çıktısından şema alınıp descriptionRu'dan otomatik üretiliyor (bkz. ozon/rich-content.ts).
@@ -50,7 +57,7 @@ async function applyContentAttributeFixes(
   descriptionCategoryId: number,
   typeId: number,
   attributes: ProductAttributeInput[],
-  data: { descriptionRu?: string | null; weightGrams?: number | null; title?: string | null },
+  data: { descriptionRu?: string | null; weightGrams?: number | null; unitsInPack?: number | null; title?: string | null },
 ): Promise<ProductAttributeInput[]> {
   const existingIds = new Set(attributes.map((a) => a.id));
   const needsAnnotation = !existingIds.has(ANNOTATION_ATTRIBUTE_ID) && !!data.descriptionRu;
@@ -58,20 +65,23 @@ async function applyContentAttributeFixes(
   const hasHashtagCandidate = attributes.some(
     (a) => typeof a.value === "string" && a.value.trim() && !/^#\S+(\s+#\S+)*$/.test(a.value.trim()),
   );
-  if (!needsAnnotation && !needsRichContent && !hasHashtagCandidate && !data.weightGrams) return attributes;
+  if (!needsAnnotation && !needsRichContent && !hasHashtagCandidate && !data.weightGrams && !data.unitsInPack) {
+    return attributes;
+  }
 
   try {
     const { result } = await getCategoryAttributes({ descriptionCategoryId, typeId });
     const byId = new Map(result.map((a) => [a.id, a]));
 
-    // Ağırlık attribute'larını (4383/4497) her zaman GÜNCEL DB ağırlığıyla senkronluyoruz —
-    // sadece eksikse eklemek yetmiyordu: bir varyantın ağırlığı sonradan değişince (örn.
-    // "1 adet" ile "6 adet" varyantları) eski/yanlış değer Ozon'da kalıcı olarak duruyordu.
-    // Bu da Ozon'un varyant birleştirme kuralını (en az bir attribute'un farklı olması)
-    // bozup aynı üründeki varyantların ayrı kartlara düşmesine yol açıyordu
-    // (2026-08-03'te canlıda tespit edildi: iki varyant da ağırlık=77 gösteriyordu).
+    // Ağırlık (4383/4497) ve kutu-içi-adet (8962) attribute'larını her zaman GÜNCEL DB
+    // değerleriyle senkronluyoruz — sadece eksikse eklemek yetmiyordu: bir varyantın
+    // ağırlığı/adedi sonradan değişince (örn. "1 adet" ile "6 adet" varyantları) eski/yanlış
+    // değer Ozon'da kalıcı olarak duruyordu. Bu da Ozon'un varyant birleştirme kuralını
+    // (en az bir attribute'un farklı olması) bozup aynı üründeki varyantların ayrı
+    // kartlara düşmesine yol açıyordu (2026-08-03'te canlıda tespit edildi).
     const fixed = attributes
       .filter((attr) => !data.weightGrams || (attr.id !== WEIGHT_GRAMS_ATTRIBUTE_ID && attr.id !== PACKED_WEIGHT_GRAMS_ATTRIBUTE_ID))
+      .filter((attr) => !data.unitsInPack || attr.id !== UNITS_IN_PACK_ATTRIBUTE_ID)
       .map((attr) => {
         const schema = byId.get(attr.id);
         if (schema && HASHTAG_NAME_PATTERN.test(schema.name) && typeof attr.value === "string" && attr.value.trim()) {
@@ -87,6 +97,9 @@ async function applyContentAttributeFixes(
       if (byId.has(PACKED_WEIGHT_GRAMS_ATTRIBUTE_ID)) {
         fixed.push({ id: PACKED_WEIGHT_GRAMS_ATTRIBUTE_ID, value: String(data.weightGrams) });
       }
+    }
+    if (data.unitsInPack && byId.has(UNITS_IN_PACK_ATTRIBUTE_ID)) {
+      fixed.push({ id: UNITS_IN_PACK_ATTRIBUTE_ID, value: String(data.unitsInPack) });
     }
 
     if (needsAnnotation && byId.has(ANNOTATION_ATTRIBUTE_ID)) {
@@ -121,6 +134,7 @@ export interface CreateProductInput {
   widthCm: number;
   heightCm: number;
   depthCm: number;
+  unitsInPack?: number | null;
   attributes: ProductAttributeInput[];
   // Farklı Shopify handle'larını (ModelGroup) tek Ozon kartında birleştirirken 9048 attribute'una
   // grubun tüm üyeleri için aynı değeri yazmak için — verilmezse offerId kullanılır (mevcut davranış).
@@ -146,6 +160,7 @@ export async function createProduct(input: CreateProductInput) {
       costPrice: input.costPrice,
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
+      unitsInPack: input.unitsInPack,
       widthCm: input.widthCm,
       heightCm: input.heightCm,
       depthCm: input.depthCm,
@@ -162,6 +177,7 @@ export async function createProduct(input: CreateProductInput) {
       costPrice: input.costPrice,
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
+      unitsInPack: input.unitsInPack,
       widthCm: input.widthCm,
       heightCm: input.heightCm,
       depthCm: input.depthCm,
@@ -177,7 +193,12 @@ export async function createProduct(input: CreateProductInput) {
     input.descriptionCategoryId,
     input.typeId,
     input.attributes.filter((attr) => attr.id !== MODEL_NAME_ATTRIBUTE_ID),
-    { descriptionRu: input.descriptionRu, weightGrams: input.weightGrams, title: input.name },
+    {
+      descriptionRu: input.descriptionRu,
+      weightGrams: input.weightGrams,
+      unitsInPack: input.unitsInPack,
+      title: input.name,
+    },
   );
 
   const { result } = await importProducts([
@@ -395,7 +416,12 @@ export async function updateProductImages(offerId: string, images: string[]) {
     product.descriptionCategoryId,
     product.typeId,
     await getLiveOzonAttributes(offerId),
-    { descriptionRu: product.descriptionRu, weightGrams: product.weightGrams, title: product.nameRu ?? product.name },
+    {
+      descriptionRu: product.descriptionRu,
+      weightGrams: product.weightGrams,
+      unitsInPack: product.unitsInPack,
+      title: product.nameRu ?? product.name,
+    },
   );
   const resendOldPrice = product.oldPrice ?? computeOldPrice(product.price);
 
@@ -467,7 +493,12 @@ export async function updateProductCategoryAttributes(
     input.descriptionCategoryId,
     input.typeId,
     Array.from(merged.values()),
-    { descriptionRu: product.descriptionRu, weightGrams: product.weightGrams, title: product.nameRu ?? product.name },
+    {
+      descriptionRu: product.descriptionRu,
+      weightGrams: product.weightGrams,
+      unitsInPack: product.unitsInPack,
+      title: product.nameRu ?? product.name,
+    },
   );
   const resendOldPrice = product.oldPrice ?? computeOldPrice(product.price);
 

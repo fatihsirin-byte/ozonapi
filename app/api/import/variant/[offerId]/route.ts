@@ -14,7 +14,12 @@ function serialize(product: { importTaskId: bigint | null } & Record<string, unk
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ offerId: string }> }) {
   const { offerId } = await params;
-  const body = (await request.json()) as { weightGrams?: number; costPrice?: string; excludedFromSubmit?: boolean };
+  const body = (await request.json()) as {
+    weightGrams?: number;
+    costPrice?: string;
+    unitsInPack?: number;
+    excludedFromSubmit?: boolean;
+  };
 
   if (body.excludedFromSubmit !== undefined) {
     const product = await setVariantExcludedFromSubmit(decodeURIComponent(offerId), body.excludedFromSubmit);

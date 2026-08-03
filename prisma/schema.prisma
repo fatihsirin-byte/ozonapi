@@ -18,6 +18,7 @@ model Product {
   oldPrice              String?
   currencyCode          String    @default("USD")
   weightGrams           Int?
+  unitsInPack           Int?      // Kutu/paket içindeki adet — varyanttan varyanta farklı olabiliyor (örn. "1 adet" / "6 adet"), weightGrams gibi ürüne özel; Ozon'un "Birimler tek bir üründe" (id 8962) attribute'una otomatik senkronlanır
   widthCm               Int?
   heightCm              Int?
   depthCm               Int?

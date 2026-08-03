@@ -38,6 +38,15 @@ export function estimateShippingCostUsd(weightGrams: number): number {
 }
 
 const MARGIN_RATE = 0.4; // alış fiyatı üzerine %40 marj
+// Alış fiyatı $1'ın altındaki ürünlerde %40 marj mutlak olarak çok küçük kalıyor (örn. $0.29
+// alışta ~$0.10 kâr) — bir iade/hasar/ekstra kesinti tek işlemde bunu sıfırlıyor. Bu yüzden
+// düşük alış fiyatlı ürünlerde marjı %65'e çıkarıyoruz (2026-08-03, kullanıcı talebi).
+const LOW_COST_MARGIN_RATE = 0.65;
+const LOW_COST_THRESHOLD_USD = 1;
+
+function marginRateForCost(cost: number): number {
+  return cost < LOW_COST_THRESHOLD_USD ? LOW_COST_MARGIN_RATE : MARGIN_RATE;
+}
 const COMMISSION_RATE = 0.05; // Ozon komisyonu
 const LOGISTICS_SERVICE_RATE = 0.02; // lojistik hizmet bedeli
 const LOGISTICS_SERVICE_CAP_RUB = 200; // lojistik hizmet bedeli tavanı
@@ -72,7 +81,7 @@ export function computeSalePrice(
     ? computeBillingWeightGrams(weightGrams, dimsCm?.widthCm, dimsCm?.heightCm, dimsCm?.depthCm)
     : 0;
   const shipping = billingWeight ? estimateShippingCostUsd(billingWeight) : 0;
-  const target = cost * (1 + MARGIN_RATE) + shipping;
+  const target = cost * (1 + marginRateForCost(cost)) + shipping;
 
   // Lojistik hizmet bedeli tavanlı olduğu için oran fiyata bağlı — bir kere kabaca hesaplayıp,
   // bulunan fiyatla oranı yeniden hesaplayarak (tavan dahil) düzeltiyoruz.

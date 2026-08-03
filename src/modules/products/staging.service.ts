@@ -277,7 +277,7 @@ export async function updateHandleImages(handle: string, images: string[], resen
 // güncelle" diye ayrı bir uç yok).
 export async function updateDraftVariant(
   offerId: string,
-  data: { weightGrams?: number; costPrice?: string; unitsInPack?: number }
+  data: { weightGrams?: number; costPrice?: string; unitsInPack?: number; name?: string }
 ) {
   const existing = await prisma.product.findUnique({ where: { offerId } });
   const weightGrams = data.weightGrams ?? existing?.weightGrams ?? undefined;

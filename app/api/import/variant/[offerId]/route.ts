@@ -18,6 +18,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     weightGrams?: number;
     costPrice?: string;
     unitsInPack?: number;
+    name?: string;
     excludedFromSubmit?: boolean;
   };
 

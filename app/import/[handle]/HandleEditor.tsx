@@ -412,7 +412,7 @@ export function HandleEditor({ handle }: { handle: string }) {
 
   async function updateVariantField(
     offerId: string,
-    field: "weightGrams" | "costPrice" | "unitsInPack",
+    field: "weightGrams" | "costPrice" | "unitsInPack" | "name",
     value: string,
   ) {
     const isNumericField = field === "weightGrams" || field === "unitsInPack";
@@ -845,7 +845,14 @@ export function HandleEditor({ handle }: { handle: string }) {
             {variants.map((v) => (
               <tr key={v.id} style={v.excludedFromSubmit ? { opacity: 0.5 } : undefined}>
                 <td>{v.offerId}</td>
-                <td>{v.name}</td>
+                <td>
+                  <input
+                    type="text"
+                    style={{ width: "100%" }}
+                    defaultValue={v.name}
+                    onBlur={(e) => updateVariantField(v.offerId, "name", e.target.value)}
+                  />
+                </td>
                 <td>
                   <input
                     type="number"

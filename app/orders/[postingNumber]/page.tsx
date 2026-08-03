@@ -5,7 +5,7 @@ import { getOrderDetail, computeOrderAmount } from "@/modules/orders/orders.serv
 export const dynamic = "force-dynamic";
 
 function formatMoney(n: number) {
-  return n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `$${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 interface OrderRawPayload {
@@ -112,6 +112,7 @@ export default async function OrderDetailPage({
                           alt=""
                           width={48}
                           height={48}
+                          className="zoom-thumb-5x"
                           style={{ objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }}
                         />
                       ) : (
@@ -123,7 +124,7 @@ export default async function OrderDetailPage({
                     </td>
                     <td>{item.product?.name ?? "-"}</td>
                     <td>{item.quantity}</td>
-                    <td>{item.price}</td>
+                    <td>${item.price}</td>
                   </tr>
                 );
               })}

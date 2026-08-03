@@ -111,6 +111,19 @@ a {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
 }
 
+/* Sipariş listesi/detayındaki küçük ürün görselleri için — 3x yeterince büyük değildi, siparişlerde 5x kullanılıyor. */
+.zoom-thumb-5x {
+  transition: transform 0.2s ease;
+  position: relative;
+  z-index: 1;
+  cursor: zoom-in;
+}
+.zoom-thumb-5x:hover {
+  transform: scale(5);
+  z-index: 50;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
 .filter-bar select {
   background: #0f1216;
   border: 1px solid var(--border);

@@ -14,7 +14,7 @@ const STATUS_OPTIONS = [
 ];
 
 function formatMoney(n: number) {
-  return n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `$${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function getShipmentDate(rawPayload: unknown): string | null {
@@ -121,12 +121,12 @@ export default async function OrdersPage({
           <table>
             <thead>
               <tr>
-                <th>Posting No</th>
-                <th>Durum</th>
-                <th>Kabul Tarihi</th>
-                <th>Kargo Tarihi</th>
-                <th>Ürün</th>
-                <th>Tutar</th>
+                <th style={{ whiteSpace: "nowrap" }}>Posting No</th>
+                <th style={{ whiteSpace: "nowrap" }}>Durum</th>
+                <th style={{ whiteSpace: "nowrap" }}>Kabul Tarihi</th>
+                <th style={{ whiteSpace: "nowrap" }}>Kargo Tarihi</th>
+                <th style={{ whiteSpace: "nowrap" }}>Ürün</th>
+                <th style={{ whiteSpace: "nowrap" }}>Tutar</th>
               </tr>
             </thead>
             <tbody>
@@ -154,6 +154,7 @@ export default async function OrdersPage({
                                 alt=""
                                 width={40}
                                 height={40}
+                                className="zoom-thumb-5x"
                                 style={{ objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)", flexShrink: 0 }}
                               />
                             ) : (

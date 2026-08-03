@@ -373,7 +373,10 @@ export async function updateProductImages(offerId: string, images: string[]) {
   if (!product?.ozonProductId || !product.descriptionCategoryId || !product.typeId) {
     throw new Error("Bu ürün henüz Ozon'da oluşmamış, görseller güncellenemez");
   }
-  const modelName = product.modelGroup?.name ?? offerId;
+  // Model adı: modelGroup varsa o öncelikli; yoksa handle'ın kendisi kullanılıyor ki bu
+  // resend, aynı handle'ın diğer varyantlarıyla Ozon'da halihazırda birleşmiş kartı
+  // offerId'ye çevirip bozmasın (bkz. submitHandleToOzon'daki aynı düzeltme, 2026-08-03).
+  const modelName = product.modelGroup?.name ?? product.shopifyHandle ?? offerId;
   const liveAttributes = await applyContentAttributeFixes(
     product.descriptionCategoryId,
     product.typeId,
@@ -426,7 +429,10 @@ export async function updateProductCategoryAttributes(
   if (!product?.ozonProductId) {
     throw new Error("Bu ürün henüz Ozon'da oluşmamış, özellikler güncellenemez");
   }
-  const modelName = product.modelGroup?.name ?? offerId;
+  // Model adı: modelGroup varsa o öncelikli; yoksa handle'ın kendisi kullanılıyor ki bu
+  // resend, aynı handle'ın diğer varyantlarıyla Ozon'da halihazırda birleşmiş kartı
+  // offerId'ye çevirip bozmasın (bkz. submitHandleToOzon'daki aynı düzeltme, 2026-08-03).
+  const modelName = product.modelGroup?.name ?? product.shopifyHandle ?? offerId;
   const images = Array.isArray(product.images) ? (product.images as string[]) : [];
 
   // Kategori DEĞİŞMEDİYSE Ozon'daki güncel attribute'ları taban alıp üzerine yeni/değişen

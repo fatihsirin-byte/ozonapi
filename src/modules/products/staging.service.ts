@@ -452,7 +452,13 @@ export async function submitHandleToOzon(input: SubmitHandleInput) {
   const results: { offerId: string; taskId?: string; error?: string }[] = [];
 
   for (const variant of variants) {
-    const modelNameOverride = variant.modelGroup?.name ?? undefined;
+    // ModelGroup varsa (farklı Shopify handle'ları elle birleştirilmişse) onun adı öncelikli.
+    // Yoksa, handle'ın kendi varyantlarının Ozon'da OTOMATİK tek kartta birleşmesi için model
+    // adı olarak handle'ın kendisini kullanıyoruz — önceden buraya offerId düşüyordu, bu da
+    // her varyantın (offerId'ler farklı olduğu için) KENDİ başına ayrı bir kart açmasına yol
+    // açıyordu; aynı üründeki 3 varyant Ozon'da 3 ayrı ürün gibi görünüyordu (2026-08-03'te
+    // canlıda tespit edildi).
+    const modelNameOverride = variant.modelGroup?.name ?? input.handle;
     try {
       // Ozon Rusça olmayan (Latin harfli) ürün adını "critical" hata olarak reddediyor —
       // çeviri yapıldıysa (nameRu) onu kullan, yoksa orijinal (İngilizce) adı gönder.

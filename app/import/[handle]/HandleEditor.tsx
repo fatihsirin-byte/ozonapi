@@ -39,6 +39,12 @@ interface Variant {
   excludedFromSubmit: boolean;
   ozonProductId: string | null;
   importTaskId: string | null;
+  descriptionCategoryId: number | null;
+  typeId: number | null;
+  draftAttributes: {
+    category: CategoryOption;
+    attributes: { id: number; value?: string; dictionaryValueId?: number }[];
+  } | null;
   modelGroup: { id: string; name: string | null; products: { offerId: string }[] } | null;
 }
 
@@ -307,6 +313,8 @@ export function HandleEditor({ handle }: { handle: string }) {
   // Henüz Ozon'a hiç gönderilmemiş bir handle için, önceki oturumdan kalan taslak
   // kategori/attribute seçimi varsa geri yükle (yukarıdaki clone-data zaten gönderilmiş
   // ürünler için gerçek veriyi çekiyor — bu sadece o durum geçerli değilken çalışır).
+  // Öncelik: bu tarayıcıdaki localStorage taslağı > sunucuda (bulk/toplu doldurma ile)
+  // kaydedilmiş draftAttributes — ikincisi ekip arkadaşları farklı tarayıcıdan da görsün diye.
   useEffect(() => {
     if (!variants || draftRestoredRef.current) return;
     const alreadySubmitted = variants.some((v) => v.ozonProductId);
@@ -314,10 +322,21 @@ export function HandleEditor({ handle }: { handle: string }) {
     if (alreadySubmitted) return;
     try {
       const raw = localStorage.getItem(draftKey);
-      if (!raw) return;
-      const draft = JSON.parse(raw) as { category?: CategoryOption; attributeAnswers?: Record<number, unknown> };
-      if (draft.category) setCategory(draft.category);
-      if (draft.attributeAnswers) setAttributeAnswers(draft.attributeAnswers as never);
+      if (raw) {
+        const draft = JSON.parse(raw) as { category?: CategoryOption; attributeAnswers?: Record<number, unknown> };
+        if (draft.category) setCategory(draft.category);
+        if (draft.attributeAnswers) setAttributeAnswers(draft.attributeAnswers as never);
+        return;
+      }
+      const serverDraft = variants[0]?.draftAttributes;
+      if (serverDraft) {
+        setCategory(serverDraft.category);
+        const answers: Record<number, { value?: string; dictionaryValueId?: number }> = {};
+        for (const attr of serverDraft.attributes) {
+          answers[attr.id] = { value: attr.value, dictionaryValueId: attr.dictionaryValueId };
+        }
+        setAttributeAnswers(answers as never);
+      }
     } catch {
       // bozuk/eski taslak — yok say
     }

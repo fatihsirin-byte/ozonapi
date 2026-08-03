@@ -23,6 +23,7 @@ model Product {
   depthCm               Int?
   descriptionCategoryId Int?
   typeId                Int?
+  draftAttributes       Json? // Ozon'a gönderilmeden önce toplu/elle önceden doldurulmuş attribute cevapları (id/value/dictionaryValueId) — ürün açıldığında forma otomatik yükleniyor
   images                Json?
   status                String    @default("draft") // draft | ready | pending | imported | failed
   stockQuantity         Int?      // Ozon'a en son gönderilen stok adedi (rFBS depo: Çekmeköy)

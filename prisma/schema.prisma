@@ -19,7 +19,12 @@ model Product {
   currencyCode          String    @default("USD")
   weightGrams           Int?
   unitsInPack           Int?      // Kutu/paket içindeki adet — varyanttan varyanta farklı olabiliyor (örn. "1 adet" / "6 adet"), weightGrams gibi ürüne özel; Ozon'un "Birimler tek bir üründe" (id 8962) attribute'una otomatik senkronlanır
-  heavyPackaging        Boolean   @default(false) // Metal kutu/ağır ambalaj gibi ürünlerde işaretlenir — paketleme yüzdesi (normalde %35) 2.5 katına çıkar (bkz. src/pricing/formula.ts HEAVY_PACKAGING_MULTIPLIER)
+  heavyPackaging        Boolean   @default(false) // Metal kutu/ağır ambalaj gibi ürünlerde işaretlenir — paketleme payı (normalde %35) %65'e çıkar (bkz. src/pricing/formula.ts HEAVY_PACKAGING_BUFFER)
+  // Bu varyantın maliyet/ağırlığının "kaça katlanarak" hesaplandığı taban varyant (örn. 6'lı
+  // Display varyantı, tekil "1 Piece" varyantının offerId'sine işaret eder) — costPrice/weightGrams
+  // = taban.costPrice/weightGrams × unitsInPack olarak "Yeniden Hesapla" ile senkronlanabilir.
+  // Kutu/Display gibi toplu varyantları restore ederken kullanılıyor (bkz. src/scripts/restore-bulk-pack-variants.ts).
+  packBaseOfferId       String?
   widthCm               Int?
   heightCm              Int?
   depthCm               Int?

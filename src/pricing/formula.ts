@@ -16,13 +16,19 @@ const PACKAGING_WEIGHT_EXTRA_GRAMS = 10;
 // arttıkça pay da büyümüyor, gerçeğe daha yakın (2026-08-03, kullanıcı talebi).
 const PACKAGING_WEIGHT_THRESHOLD_GRAMS = 300;
 
-// Metal kutu/ağır ambalaj gibi standart dışı ürünlerde sabit 10g payı gerçek dışı kalıyor —
-// ürün bazında bu payı override edebiliyoruz (Product.packagingExtraGrams, UI'dan ayarlanabilir,
-// varsayılan yine 10g). 2026-08-03, kullanıcı talebi.
-export const DEFAULT_PACKAGING_EXTRA_GRAMS = 10;
+// Metal kutu/ağır ambalaj gibi standart dışı ürünlerde normal paketleme yüzdesi (%35) yetersiz
+// kalıyor — ürün "ağır ambalaj" olarak işaretlenirse bu yüzde 2.5 katına çıkarılıyor (yani %35
+// yerine ~%87.5 pay). Sabit 10g'lık ek pay bundan etkilenmiyor, sadece yüzdesel kısım büyüyor.
+// (2026-08-04, kullanıcı talebi — önceki gram bazlı override yerine bu geldi.)
+const HEAVY_PACKAGING_MULTIPLIER = 2.5;
 
-function extraGramsAtThreshold(extraGrams: number): number {
-  return PACKAGING_WEIGHT_THRESHOLD_GRAMS * (PACKAGING_WEIGHT_BUFFER - 1) + extraGrams;
+function packagingBufferRate(heavyPackaging: boolean): number {
+  const normalRate = PACKAGING_WEIGHT_BUFFER - 1;
+  return heavyPackaging ? 1 + normalRate * HEAVY_PACKAGING_MULTIPLIER : PACKAGING_WEIGHT_BUFFER;
+}
+
+function extraGramsAtThreshold(bufferRate: number): number {
+  return PACKAGING_WEIGHT_THRESHOLD_GRAMS * (bufferRate - 1) + PACKAGING_WEIGHT_EXTRA_GRAMS;
 }
 
 // ASE'nin PDF tarifesinde: kenarların toplamı ≤90cm ise fiziksel ağırlık, >90cm ise fiziksel
@@ -33,13 +39,13 @@ export function computeBillingWeightGrams(
   widthCm?: number | null,
   heightCm?: number | null,
   depthCm?: number | null,
-  packagingExtraGrams?: number | null,
+  heavyPackaging?: boolean,
 ): number {
-  const extraGrams = packagingExtraGrams ?? DEFAULT_PACKAGING_EXTRA_GRAMS;
+  const bufferRate = packagingBufferRate(!!heavyPackaging);
   const bufferedWeight =
     weightGrams <= PACKAGING_WEIGHT_THRESHOLD_GRAMS
-      ? weightGrams * PACKAGING_WEIGHT_BUFFER + extraGrams
-      : weightGrams + extraGramsAtThreshold(extraGrams);
+      ? weightGrams * bufferRate + PACKAGING_WEIGHT_EXTRA_GRAMS
+      : weightGrams + extraGramsAtThreshold(bufferRate);
   if (!widthCm || !heightCm || !depthCm) return bufferedWeight;
 
   const sumOfSides = widthCm + heightCm + depthCm;
@@ -97,13 +103,13 @@ export function computeSalePrice(
   costPrice: string | number,
   weightGrams?: number | null,
   dimsCm?: { widthCm?: number | null; heightCm?: number | null; depthCm?: number | null },
-  packagingExtraGrams?: number | null,
+  heavyPackaging?: boolean,
 ): string {
   const cost = Number(costPrice);
   if (!cost || Number.isNaN(cost)) return "";
 
   const billingWeight = weightGrams
-    ? computeBillingWeightGrams(weightGrams, dimsCm?.widthCm, dimsCm?.heightCm, dimsCm?.depthCm, packagingExtraGrams)
+    ? computeBillingWeightGrams(weightGrams, dimsCm?.widthCm, dimsCm?.heightCm, dimsCm?.depthCm, heavyPackaging)
     : 0;
   const shipping = billingWeight ? estimateShippingCostUsd(billingWeight) : 0;
   const target = cost * (1 + marginRateForCost(cost)) + shipping;
@@ -147,17 +153,17 @@ export function computePriceBreakdown(
   weightGrams?: number | null,
   dimsCm?: { widthCm?: number | null; heightCm?: number | null; depthCm?: number | null },
   actualPriceOverrideUsd?: number,
-  packagingExtraGrams?: number | null,
+  heavyPackaging?: boolean,
 ): PriceBreakdown | null {
   const cost = Number(costPrice);
   if (!cost || Number.isNaN(cost)) return null;
 
   const billingWeight = weightGrams
-    ? computeBillingWeightGrams(weightGrams, dimsCm?.widthCm, dimsCm?.heightCm, dimsCm?.depthCm, packagingExtraGrams)
+    ? computeBillingWeightGrams(weightGrams, dimsCm?.widthCm, dimsCm?.heightCm, dimsCm?.depthCm, heavyPackaging)
     : 0;
   const shippingUsd = billingWeight ? estimateShippingCostUsd(billingWeight) : 0;
 
-  const recommendedStr = computeSalePrice(costPrice, weightGrams, dimsCm, packagingExtraGrams);
+  const recommendedStr = computeSalePrice(costPrice, weightGrams, dimsCm, heavyPackaging);
   const recommendedPriceUsd = recommendedStr ? Number(recommendedStr) : 0;
 
   const actualPriceUsd = actualPriceOverrideUsd ?? recommendedPriceUsd;

@@ -277,13 +277,13 @@ export async function updateHandleImages(handle: string, images: string[], resen
 // güncelle" diye ayrı bir uç yok).
 export async function updateDraftVariant(
   offerId: string,
-  data: { weightGrams?: number; costPrice?: string; unitsInPack?: number; name?: string; packagingExtraGrams?: number | null }
+  data: { weightGrams?: number; costPrice?: string; unitsInPack?: number; name?: string; heavyPackaging?: boolean }
 ) {
   const existing = await prisma.product.findUnique({ where: { offerId } });
   const weightGrams = data.weightGrams ?? existing?.weightGrams ?? undefined;
   const costPrice = data.costPrice ?? existing?.costPrice ?? undefined;
-  const packagingExtraGrams = data.packagingExtraGrams !== undefined ? data.packagingExtraGrams : existing?.packagingExtraGrams;
-  const price = costPrice ? computeSalePrice(costPrice, weightGrams, undefined, packagingExtraGrams) : existing?.price;
+  const heavyPackaging = data.heavyPackaging !== undefined ? data.heavyPackaging : existing?.heavyPackaging;
+  const price = costPrice ? computeSalePrice(costPrice, weightGrams, undefined, heavyPackaging) : existing?.price;
   const finalPrice = price || existing?.price;
   const oldPrice = finalPrice && finalPrice !== existing?.price ? computeOldPrice(finalPrice) : existing?.oldPrice;
 
@@ -479,7 +479,7 @@ export async function submitHandleToOzon(input: SubmitHandleInput) {
         modelNameOverride,
         descriptionRu: variant.descriptionRu,
         unitsInPack: variant.unitsInPack,
-        packagingExtraGrams: variant.packagingExtraGrams,
+        heavyPackaging: variant.heavyPackaging,
       });
       if (taskId) {
         // Bilerek await edilmiyor — import'un bitmesini beklemek saniyeler sürebiliyor,

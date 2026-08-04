@@ -4,7 +4,7 @@ import {
   updateProductPrice,
   updateProductImages,
   updateProductCategoryAttributes,
-  updateProductPackagingExtraGrams,
+  updateProductHeavyPackaging,
   type ProductAttributeInput,
 } from "@/modules/products/products.service";
 import { OzonApiError } from "@/ozon/client";
@@ -28,15 +28,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const body = (await request.json()) as {
     costPrice?: string;
     priceOverride?: string;
-    packagingExtraGrams?: number | null;
+    heavyPackaging?: boolean;
     images?: string[];
     category?: { descriptionCategoryId: number; typeId: number };
     attributes?: ProductAttributeInput[];
   };
 
   try {
-    if (body.packagingExtraGrams !== undefined) {
-      await updateProductPackagingExtraGrams(offerId, body.packagingExtraGrams);
+    if (body.heavyPackaging !== undefined) {
+      await updateProductHeavyPackaging(offerId, body.heavyPackaging);
     }
     if (body.costPrice !== undefined) {
       await updateProductPrice(offerId, body.costPrice, body.priceOverride);

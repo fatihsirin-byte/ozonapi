@@ -25,7 +25,7 @@ interface Variant {
   costPrice: string | null;
   weightGrams: number | null;
   unitsInPack: number | null;
-  packagingExtraGrams: number | null;
+  heavyPackaging: boolean;
   widthCm: number | null;
   heightCm: number | null;
   depthCm: number | null;
@@ -429,17 +429,14 @@ export function HandleEditor({ handle }: { handle: string }) {
     });
   }
 
-  // packagingExtraGrams boş bırakılırsa null (varsayılan 10g kullanılır) gönderiliyor — diğer
-  // sayısal alanlardan farklı olarak 0'a düşürmüyoruz, 0 ile "varsayılanı kullan" farklı anlamlar.
-  async function updateVariantPackagingExtraGrams(offerId: string, value: string) {
-    const packagingExtraGrams = value.trim() === "" ? null : Number(value);
+  async function updateVariantHeavyPackaging(offerId: string, heavyPackaging: boolean) {
     setVariants((prev) =>
-      prev ? prev.map((v) => (v.offerId === offerId ? { ...v, packagingExtraGrams } : v)) : prev,
+      prev ? prev.map((v) => (v.offerId === offerId ? { ...v, heavyPackaging } : v)) : prev,
     );
     await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ packagingExtraGrams }),
+      body: JSON.stringify({ heavyPackaging }),
     });
   }
 
@@ -848,8 +845,8 @@ export function HandleEditor({ handle }: { handle: string }) {
               <th>SKU</th>
               <th>Ad</th>
               <th>Ağırlık (g)</th>
-              <th title="Standart 10g paketleme payını override eder — metal kutu/ağır ambalaj gibi standart dışı ürünlerde kullanılır, boş = varsayılan 10g">
-                Paket Payı (g)
+              <th title="Metal kutu/ağır ambalaj gibi standart dışı ürünlerde işaretleyin — paketleme payı 2.5 katına çıkar">
+                Ağır Ambalaj
               </th>
               <th title="Kutu/paket içindeki adet — Ozon'un varyant birleştirme kuralı için farklı varyantlarda gerçekten farklı olmalı">
                 Adet
@@ -880,13 +877,11 @@ export function HandleEditor({ handle }: { handle: string }) {
                     onBlur={(e) => updateVariantField(v.offerId, "weightGrams", e.target.value)}
                   />
                 </td>
-                <td>
+                <td style={{ textAlign: "center" }}>
                   <input
-                    type="number"
-                    style={{ width: 70 }}
-                    defaultValue={v.packagingExtraGrams ?? ""}
-                    placeholder="10"
-                    onBlur={(e) => updateVariantPackagingExtraGrams(v.offerId, e.target.value)}
+                    type="checkbox"
+                    checked={v.heavyPackaging}
+                    onChange={(e) => updateVariantHeavyPackaging(v.offerId, e.target.checked)}
                   />
                 </td>
                 <td>
@@ -907,7 +902,7 @@ export function HandleEditor({ handle }: { handle: string }) {
                   />
                 </td>
                 <td>
-                  {computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.packagingExtraGrams) || v.price}
+                  {computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.heavyPackaging) || v.price}
                   {v.ozonProductId && (
                     <button
                       type="button"
@@ -959,8 +954,8 @@ export function HandleEditor({ handle }: { handle: string }) {
               widthCm={v.widthCm}
               heightCm={v.heightCm}
               depthCm={v.depthCm}
-              packagingExtraGrams={v.packagingExtraGrams}
-              currentPrice={computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.packagingExtraGrams) || v.price}
+              heavyPackaging={v.heavyPackaging}
+              currentPrice={computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.heavyPackaging) || v.price}
               onClose={() => setPriceCalcOfferId(null)}
               onApply={(priceUsd) => applyPriceOverride(v.offerId, v.costPrice ?? "0", priceUsd)}
             />

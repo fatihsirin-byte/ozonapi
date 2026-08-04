@@ -20,7 +20,7 @@ interface ProductData {
   widthCm: number | null;
   heightCm: number | null;
   depthCm: number | null;
-  packagingExtraGrams: number | null;
+  heavyPackaging: boolean;
 }
 
 interface CloneAttribute {
@@ -37,7 +37,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
   const [tab, setTab] = useState<Tab>("Genel");
   const [costPrice, setCostPrice] = useState(product.costPrice ?? "");
   const [priceOverride, setPriceOverride] = useState<string | null>(null);
-  const [packagingExtraGrams, setPackagingExtraGrams] = useState(product.packagingExtraGrams?.toString() ?? "");
+  const [heavyPackaging, setHeavyPackaging] = useState(product.heavyPackaging);
   const [showCalculator, setShowCalculator] = useState(false);
   const [images, setImages] = useState<string[]>(Array.isArray(product.images) ? (product.images as string[]) : []);
   const [saving, setSaving] = useState(false);
@@ -151,7 +151,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
         body: JSON.stringify({
           costPrice,
           priceOverride: override,
-          packagingExtraGrams: packagingExtraGrams.trim() === "" ? null : Number(packagingExtraGrams),
+          heavyPackaging,
         }),
       });
       const data = await res.json();
@@ -240,7 +240,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
                       product.widthCm,
                       product.heightCm,
                       product.depthCm,
-                      packagingExtraGrams.trim() === "" ? null : Number(packagingExtraGrams),
+                      heavyPackaging,
                     ),
                   )}
                   g
@@ -278,7 +278,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
                     costPrice,
                     product.weightGrams,
                     { widthCm: product.widthCm, heightCm: product.heightCm, depthCm: product.depthCm },
-                    packagingExtraGrams.trim() === "" ? null : Number(packagingExtraGrams),
+                    heavyPackaging,
                   ) ||
                   product.price
                 }
@@ -286,15 +286,17 @@ export function ProductEditForm({ product }: { product: ProductData }) {
               />
             </div>
             <div className="field">
-              <label title="Standart 10g paketleme payını override eder — metal kutu/ağır ambalaj gibi standart dışı ürünlerde kullanılır, boş = varsayılan 10g">
-                Paket Payı (g) — varsayılan 10g
+              <label
+                title="Metal kutu/ağır ambalaj gibi standart dışı ürünlerde işaretleyin — paketleme payı (normalde %35) 2.5 katına çıkar"
+                style={{ display: "flex", alignItems: "center", gap: 6 }}
+              >
+                <input
+                  type="checkbox"
+                  checked={heavyPackaging}
+                  onChange={(e) => setHeavyPackaging(e.target.checked)}
+                />
+                Ağır Ambalaj (metal kutu vb.)
               </label>
-              <input
-                type="number"
-                placeholder="10"
-                value={packagingExtraGrams}
-                onChange={(e) => setPackagingExtraGrams(e.target.value)}
-              />
             </div>
           </div>
           {product.weightGrams && (
@@ -306,7 +308,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
                   product.widthCm,
                   product.heightCm,
                   product.depthCm,
-                  packagingExtraGrams.trim() === "" ? null : Number(packagingExtraGrams),
+                  heavyPackaging,
                 ),
               )}
               g için ~$
@@ -316,7 +318,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
                   product.widthCm,
                   product.heightCm,
                   product.depthCm,
-                  packagingExtraGrams.trim() === "" ? null : Number(packagingExtraGrams),
+                  heavyPackaging,
                 ),
               ).toFixed(2)}
               ).
@@ -338,7 +340,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
               widthCm={product.widthCm}
               heightCm={product.heightCm}
               depthCm={product.depthCm}
-              packagingExtraGrams={packagingExtraGrams.trim() === "" ? null : Number(packagingExtraGrams)}
+              heavyPackaging={heavyPackaging}
               currentPrice={priceOverride || product.price}
               onClose={() => setShowCalculator(false)}
               onApply={(priceUsd) => {

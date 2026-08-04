@@ -135,7 +135,7 @@ export interface CreateProductInput {
   heightCm: number;
   depthCm: number;
   unitsInPack?: number | null;
-  packagingExtraGrams?: number | null;
+  heavyPackaging?: boolean;
   attributes: ProductAttributeInput[];
   // Farklı Shopify handle'larını (ModelGroup) tek Ozon kartında birleştirirken 9048 attribute'una
   // grubun tüm üyeleri için aynı değeri yazmak için — verilmezse offerId kullanılır (mevcut davranış).
@@ -148,7 +148,7 @@ export async function createProduct(input: CreateProductInput) {
     input.costPrice,
     input.weightGrams,
     { widthCm: input.widthCm, heightCm: input.heightCm, depthCm: input.depthCm },
-    input.packagingExtraGrams,
+    input.heavyPackaging,
   );
   const oldPrice = computeOldPrice(price);
 
@@ -163,7 +163,7 @@ export async function createProduct(input: CreateProductInput) {
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
       unitsInPack: input.unitsInPack,
-      packagingExtraGrams: input.packagingExtraGrams,
+      heavyPackaging: input.heavyPackaging,
       widthCm: input.widthCm,
       heightCm: input.heightCm,
       depthCm: input.depthCm,
@@ -181,7 +181,7 @@ export async function createProduct(input: CreateProductInput) {
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
       unitsInPack: input.unitsInPack,
-      packagingExtraGrams: input.packagingExtraGrams,
+      heavyPackaging: input.heavyPackaging,
       widthCm: input.widthCm,
       heightCm: input.heightCm,
       depthCm: input.depthCm,
@@ -350,7 +350,7 @@ export async function updateProductPrice(offerId: string, costPrice: string, pri
       costPrice,
       existing?.weightGrams,
       { widthCm: existing?.widthCm, heightCm: existing?.heightCm, depthCm: existing?.depthCm },
-      existing?.packagingExtraGrams,
+      existing?.heavyPackaging,
     );
 
   const oldPrice = computeOldPrice(price);
@@ -364,16 +364,16 @@ export async function updateProductPrice(offerId: string, costPrice: string, pri
   return { price };
 }
 
-// Metal kutu/ağır ambalaj gibi standart dışı ürünlerde paketleme payını (varsayılan 10g) override
-// eder ve fiyatı bu yeni ağırlık varsayımıyla yeniden hesaplayıp Ozon'a gönderir.
-export async function updateProductPackagingExtraGrams(offerId: string, packagingExtraGrams: number | null) {
+// Metal kutu/ağır ambalaj gibi standart dışı ürünlerde "ağır ambalaj" işaretini günceller ve
+// fiyatı bu yeni ağırlık varsayımıyla (paketleme yüzdesi 2.5 katına çıkar) yeniden hesaplayıp Ozon'a gönderir.
+export async function updateProductHeavyPackaging(offerId: string, heavyPackaging: boolean) {
   const existing = await prisma.product.findUnique({ where: { offerId } });
   if (!existing?.costPrice) {
-    await prisma.product.update({ where: { offerId }, data: { packagingExtraGrams } });
+    await prisma.product.update({ where: { offerId }, data: { heavyPackaging } });
     return { price: null };
   }
 
-  await prisma.product.update({ where: { offerId }, data: { packagingExtraGrams } });
+  await prisma.product.update({ where: { offerId }, data: { heavyPackaging } });
   return updateProductPrice(offerId, existing.costPrice);
 }
 

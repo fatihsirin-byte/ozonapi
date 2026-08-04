@@ -76,7 +76,15 @@ Hangi kelimenin gerçekten marka/model olduğuna karar verirken şu ayrımı kul
    kalarak çevir, farklı bir ürün türüne dönüştürme.
 6. EMOJİ KULLANMA: nameRu ve descriptionRu içinde hiçbir emoji, sembol ikon (✨🔥💧⭐ vb.)
    veya özel dekoratif karakter olmayacak — sadece düz metin. Bu bir pazaryeri ürün kartı,
-   sosyal medya gönderisi değil.${vendorRule}
+   sosyal medya gönderisi değil.
+7. AĞIRLIK/ADET TEKRARINI TEMİZLE: Shopify başlıkları genelde varyant bilgisini (gram, adet,
+   "X Pieces", "X Box", "X pcs each") başlığın İÇİNE gömülü, bazen AYNI bilgiyi birden fazla
+   parantez içinde tekrar tekrar yazar (örn. "37gr (6pcs) - 10 Box (6pcs x 37gr Each Box)").
+   Bu bilgi zaten Ozon'da ayrı yapısal alanlarda (Ürün ağırlığı, Birimler tek bir üründe)
+   gösteriliyor — başlıkta tekrar tekrar yazılması sipariş görünümünde saçma/karmaşık
+   duruyor. nameRu'da gram/adet bilgisini EN FAZLA BİR KERE, kısa ve sade şekilde geçir
+   (örn. sadece toplam adet VEYA sadece tekil ağırlık, ikisi birden gerekmiyorsa); aynı
+   sayıyı birden fazla parantez/tekrar içinde farklı şekillerde yeniden yazma.${vendorRule}
 
 Sadece şu JSON formatında cevap ver, başka hiçbir şey yazma: {"nameRu": "...", "descriptionRu": "..."}
 

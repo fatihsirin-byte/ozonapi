@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getOrderDetail, computeOrderAmount, computeOrderCost } from "@/modules/orders/orders.service";
+import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
+import { OzonInvoicePanel } from "./OzonInvoicePanel";
 
 export const dynamic = "force-dynamic";
 
@@ -96,6 +98,9 @@ export default async function OrderDetailPage({
             <div className="value" style={{ fontSize: 15 }}>{raw.analytics_data.tpl_provider}</div>
           </div>
         )}
+        <div>
+          <PurchaseInvoiceField postingNumber={order.postingNumber} initialValue={order.purchaseInvoiceNumber} />
+        </div>
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
@@ -154,6 +159,15 @@ export default async function OrderDetailPage({
             </tbody>
           </table>
         )}
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3 style={{ marginTop: 0 }}>Ozon Faturası (Proforma / KDV İadesi)</h3>
+        <OzonInvoicePanel
+          postingNumber={order.postingNumber}
+          items={order.items.map((item) => ({ offerId: item.offerId, name: item.product?.name ?? item.offerId }))}
+          defaultPrice={orderAmount}
+        />
       </div>
 
       <div className="card">

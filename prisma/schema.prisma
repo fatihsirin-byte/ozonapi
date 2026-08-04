@@ -93,6 +93,7 @@ model Order {
   scheme        String // fbs | fbo
   orderDate     DateTime?
   rawPayload    Json?
+  purchaseInvoiceNumber String? // Bizim kendi takibimiz için — tedarikçiden aldığımız alış faturasının numarası (Ozon'a gönderilmez)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

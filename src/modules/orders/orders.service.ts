@@ -1,5 +1,17 @@
 import { prisma } from "../../db/prisma";
 import { listFbsPostings, type OzonFbsPosting } from "../../ozon/orders";
+import { getProductAttributes } from "../../ozon/products";
+import {
+  uploadInvoiceFile,
+  createOrUpdateInvoice,
+  getInvoice,
+  deleteInvoice,
+  type OzonHsCode,
+} from "../../ozon/invoices";
+
+// Ozon'un kategori attribute şemasındaki "GTİP Kodu" (free-text, serbest metin) — ayrı bir alan
+// icat etmek yerine ürünün zaten kategori formunda doldurabildiği bu attribute'u kullanıyoruz.
+const GTIP_ATTRIBUTE_ID = 22992;
 
 // Ozon'daki siparişleri (ve kalemlerini) çekip local DB'ye upsert eder, durum/PNL takibi için kullanılır.
 export async function syncFbsOrders(params: { since: string; to: string; status?: string }) {
@@ -128,4 +140,84 @@ export async function getOrderDetail(postingNumber: string) {
   });
 
   return { ...order, transactions };
+}
+
+// Bizim kendi takibimiz için — tedarikçiden aldığımız alış faturasının numarası, Ozon'a gitmiyor.
+export async function updatePurchaseInvoiceNumber(postingNumber: string, purchaseInvoiceNumber: string | null) {
+  return prisma.order.update({ where: { postingNumber }, data: { purchaseInvoiceNumber } });
+}
+
+// Sipariş kalemlerindeki ürünlerin GTİP kodunu (varsa) önerir — draftAttributes'ta yoksa ve
+// ürün zaten Ozon'a gönderilmişse canlı attribute'lardan çeker. Fatura yükleme formunu
+// otomatik doldurmak için; kullanıcı isterse üzerine yazabilir.
+export async function suggestHsCodesForOrder(postingNumber: string): Promise<Record<string, string>> {
+  const order = await getOrderDetail(postingNumber);
+  if (!order) return {};
+
+  const suggestions: Record<string, string> = {};
+  const needLiveFetch: string[] = [];
+
+  for (const item of order.items) {
+    const draft = item.product?.draftAttributes as { attributes?: Array<{ id: number; value?: string }> } | null;
+    const draftGtip = draft?.attributes?.find((a) => a.id === GTIP_ATTRIBUTE_ID)?.value;
+    if (draftGtip) {
+      suggestions[item.offerId] = draftGtip;
+    } else if (item.product?.ozonProductId) {
+      needLiveFetch.push(item.offerId);
+    }
+  }
+
+  if (needLiveFetch.length > 0) {
+    try {
+      const { result } = await getProductAttributes(needLiveFetch);
+      for (const entry of result) {
+        const gtip = entry.attributes.find((a: { id: number }) => a.id === GTIP_ATTRIBUTE_ID);
+        const value = gtip?.values?.[0]?.value;
+        if (value) suggestions[entry.offer_id] = value;
+      }
+    } catch {
+      // canlıdan çekilemedi — kullanıcı elle girer
+    }
+  }
+
+  return suggestions;
+}
+
+export interface SubmitOzonInvoiceParams {
+  postingNumber: string;
+  fileBase64: string;
+  number: string;
+  date: string;
+  price: number;
+  priceCurrency: string;
+  hsCodes: OzonHsCode[];
+}
+
+// Ozon'un TR→RU KDV iadesi/gümrük "proforma fatura" akışı — önce dosyayı yükleyip url alıyoruz,
+// sonra bu url'i fatura bilgileriyle (no/tarih/tutar/GTİP) siparişe bağlıyoruz.
+export async function submitOzonInvoice(params: SubmitOzonInvoiceParams) {
+  const { url } = await uploadInvoiceFile({ postingNumber: params.postingNumber, base64Content: params.fileBase64 });
+  await createOrUpdateInvoice({
+    postingNumber: params.postingNumber,
+    url,
+    hsCodes: params.hsCodes,
+    date: params.date,
+    number: params.number,
+    price: params.price,
+    priceCurrency: params.priceCurrency,
+  });
+  return { url };
+}
+
+export async function fetchOzonInvoice(postingNumber: string) {
+  try {
+    const { result } = await getInvoice(postingNumber);
+    return result;
+  } catch {
+    return null; // henüz fatura yüklenmemiş
+  }
+}
+
+export async function removeOzonInvoice(postingNumber: string) {
+  await deleteInvoice(postingNumber);
 }

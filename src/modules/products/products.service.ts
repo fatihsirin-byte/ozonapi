@@ -46,11 +46,41 @@ const HASHTAG_NAME_PATTERN = /hashtag|хештег/i;
 // (madde listeleri başlamadan önceki tanıtım metni) kısaltılmış hali yeterli.
 const ANNOTATION_MAX_LENGTH = 500;
 
-function extractShortAnnotation(descriptionRu: string): string {
-  const firstParagraph = descriptionRu.split(/\n\s*\n/)[0]?.trim() || descriptionRu.trim();
-  if (firstParagraph.length <= ANNOTATION_MAX_LENGTH) return firstParagraph;
+// Bazı ürünlerde (özellikle çeviri paragraf arası boşluk bırakmadan tek blok üretmişse)
+// "Ингредиенты:", "Предупреждение об аллергенах:" gibi bölüm başlıkları hiç \n\n ile ayrılmadan
+// asıl tanıtım cümlesiyle AYNI paragrafta geliyor — bu durumda "ilk paragrafı al" mantığı
+// malzeme listesini de (virgülle art arda dizilmiş kelimeler) Annotation'a taşıyordu, Ozon bunu
+// "kelime listesi, tutarlı açıklama değil" diye reddediyordu (2026-08-04'te canlıda, gerçek
+// zamanlı — önceki "stale moderasyon" varsayımım YANLIŞTI, bu bir kerelik değil süregelen bir
+// üretim hatasıydı). Artık bu bölüm başlıklarından biri ilk paragrafın İÇİNDE de geçse, oradan
+// itibaren kesiliyor.
+const LIST_SECTION_MARKERS = [
+  "Ингредиенты:",
+  "Особенности продукта:",
+  "Характеристики продукта:",
+  "Предупреждение об аллергенах:",
+  "Хранение:",
+  "Срок годности:",
+  "Упаковка:",
+];
 
-  const truncated = firstParagraph.slice(0, ANNOTATION_MAX_LENGTH);
+function extractShortAnnotation(descriptionRu: string): string {
+  let text = descriptionRu.split(/\n\s*\n/)[0]?.trim() || descriptionRu.trim();
+
+  let earliestMarkerIndex = -1;
+  for (const marker of LIST_SECTION_MARKERS) {
+    const idx = text.indexOf(marker);
+    if (idx !== -1 && (earliestMarkerIndex === -1 || idx < earliestMarkerIndex)) {
+      earliestMarkerIndex = idx;
+    }
+  }
+  if (earliestMarkerIndex !== -1) {
+    text = text.slice(0, earliestMarkerIndex).trim();
+  }
+
+  if (text.length <= ANNOTATION_MAX_LENGTH) return text;
+
+  const truncated = text.slice(0, ANNOTATION_MAX_LENGTH);
   const lastSentenceEnd = Math.max(truncated.lastIndexOf(". "), truncated.lastIndexOf("! "), truncated.lastIndexOf("? "));
   return lastSentenceEnd > ANNOTATION_MAX_LENGTH * 0.5 ? truncated.slice(0, lastSentenceEnd + 1) : `${truncated.trim()}...`;
 }

@@ -37,6 +37,24 @@ const RICH_CONTENT_ATTRIBUTE_ID = 11254;
 // bir uyarı olarak işaretliyor — burada göndermeden önce otomatik düzeltiyoruz.
 const HASHTAG_NAME_PATTERN = /hashtag|хештег/i;
 
+// "Kısa bilgi" (Annotation, 4191) gerçekten KISA olmalı — tam descriptionRu'yu (madde madde
+// özellikler/karakteristikler/içindekiler/alerjen uyarısı dahil, genelde 2000+ karakter) olduğu
+// gibi bu alana bassak Ozon satır sonlarını yok sayıp hepsini tek bloğa yapıştırıyor; ortaya
+// "*" işaretli kısa parçaların üst üste bindiği bir yığın çıkıyor ve Ozon'un moderasyonu bunu
+// "aynı tür sayılarla aşırı yüklü" diye reddediyor (2026-08-04'te canlıda tespit edildi). Tam
+// metin zaten Rich Content'te (11254, formatlı) duruyor — Annotation'a sadece ilk paragrafın
+// (madde listeleri başlamadan önceki tanıtım metni) kısaltılmış hali yeterli.
+const ANNOTATION_MAX_LENGTH = 500;
+
+function extractShortAnnotation(descriptionRu: string): string {
+  const firstParagraph = descriptionRu.split(/\n\s*\n/)[0]?.trim() || descriptionRu.trim();
+  if (firstParagraph.length <= ANNOTATION_MAX_LENGTH) return firstParagraph;
+
+  const truncated = firstParagraph.slice(0, ANNOTATION_MAX_LENGTH);
+  const lastSentenceEnd = Math.max(truncated.lastIndexOf(". "), truncated.lastIndexOf("! "), truncated.lastIndexOf("? "));
+  return lastSentenceEnd > ANNOTATION_MAX_LENGTH * 0.5 ? truncated.slice(0, lastSentenceEnd + 1) : `${truncated.trim()}...`;
+}
+
 function normalizeHashtagValue(value: string): string {
   return value
     .split(/\s+/)
@@ -60,12 +78,11 @@ async function applyContentAttributeFixes(
   data: { descriptionRu?: string | null; weightGrams?: number | null; unitsInPack?: number | null; title?: string | null },
 ): Promise<ProductAttributeInput[]> {
   const existingIds = new Set(attributes.map((a) => a.id));
-  const needsAnnotation = !existingIds.has(ANNOTATION_ATTRIBUTE_ID) && !!data.descriptionRu;
   const needsRichContent = !existingIds.has(RICH_CONTENT_ATTRIBUTE_ID) && !!data.descriptionRu;
   const hasHashtagCandidate = attributes.some(
     (a) => typeof a.value === "string" && a.value.trim() && !/^#\S+(\s+#\S+)*$/.test(a.value.trim()),
   );
-  if (!needsAnnotation && !needsRichContent && !hasHashtagCandidate && !data.weightGrams && !data.unitsInPack) {
+  if (!data.descriptionRu && !needsRichContent && !hasHashtagCandidate && !data.weightGrams && !data.unitsInPack) {
     return attributes;
   }
 
@@ -82,6 +99,7 @@ async function applyContentAttributeFixes(
     const fixed = attributes
       .filter((attr) => !data.weightGrams || (attr.id !== WEIGHT_GRAMS_ATTRIBUTE_ID && attr.id !== PACKED_WEIGHT_GRAMS_ATTRIBUTE_ID))
       .filter((attr) => !data.unitsInPack || attr.id !== UNITS_IN_PACK_ATTRIBUTE_ID)
+      .filter((attr) => !data.descriptionRu || attr.id !== ANNOTATION_ATTRIBUTE_ID)
       .map((attr) => {
         const schema = byId.get(attr.id);
         if (schema && HASHTAG_NAME_PATTERN.test(schema.name) && typeof attr.value === "string" && attr.value.trim()) {
@@ -102,8 +120,8 @@ async function applyContentAttributeFixes(
       fixed.push({ id: UNITS_IN_PACK_ATTRIBUTE_ID, value: String(data.unitsInPack) });
     }
 
-    if (needsAnnotation && byId.has(ANNOTATION_ATTRIBUTE_ID)) {
-      fixed.push({ id: ANNOTATION_ATTRIBUTE_ID, value: data.descriptionRu! });
+    if (data.descriptionRu && byId.has(ANNOTATION_ATTRIBUTE_ID)) {
+      fixed.push({ id: ANNOTATION_ATTRIBUTE_ID, value: extractShortAnnotation(data.descriptionRu) });
     }
     if (needsRichContent && byId.has(RICH_CONTENT_ATTRIBUTE_ID)) {
       fixed.push({

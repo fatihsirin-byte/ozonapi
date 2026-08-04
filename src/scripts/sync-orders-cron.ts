@@ -1,6 +1,9 @@
 import cron from "node-cron";
 import { syncFbsOrders } from "../modules/orders/orders.service";
 import { syncTransactionsForDateRange } from "../modules/finance/finance.service";
+import { backfillMissingStock } from "../modules/products/products.service";
+
+const DEFAULT_STOCK = 100;
 
 // PM2 altında ayrı bir process olarak sürekli çalışır (bkz. ecosystem.config.cjs "ozon-sync-cron"),
 // her 15 dakikada bir son 2 günün sipariş + finans verisini çeker (Ozon tarafındaki gecikmeli
@@ -15,6 +18,15 @@ async function runSync() {
     console.log(`[sync-orders-cron] ${new Date().toISOString()} — ${orders.length} sipariş, ${txCount} finans işlemi senkronize edildi`);
   } catch (error) {
     console.error(`[sync-orders-cron] ${new Date().toISOString()} — hata:`, error);
+  }
+
+  try {
+    const { total, updated } = await backfillMissingStock(DEFAULT_STOCK);
+    if (total > 0) {
+      console.log(`[sync-orders-cron] ${new Date().toISOString()} — stok eksik ${total} ürün bulundu, ${updated} tanesi düzeltildi`);
+    }
+  } catch (error) {
+    console.error(`[sync-orders-cron] ${new Date().toISOString()} — stok backfill hatası:`, error);
   }
 }
 

@@ -357,6 +357,46 @@ export async function setStockForAllConnectedProducts(stock: number) {
   return { total: products.length, updated: updatedOfferIds.length, results };
 }
 
+// waitForImportThenPushStock (staging.service.ts) fire-and-forget çalışıyor — birden fazla
+// ürün art arda ("sonraki ürüne otomatik geç") gönderilince aynı anda birden fazla stok push
+// zinciri üst üste biniyor, bazılarında tüm backoff denemeleri (toplam ~4 dakika) tükenip
+// stockQuantity null kalabiliyor — bu durumda ürün Ozon'da "Satışa hazır" görünüp gerçekte
+// satışa açılmıyor ("Depoda yok"). Bu fonksiyon periyodik cron'da bu "unutulmuş" ürünleri
+// bulup stok göndermeyi tekrar dener (2026-08-04'te canlıda tespit edildi).
+export async function backfillMissingStock(stock: number) {
+  const products = await prisma.product.findMany({
+    where: { ozonProductId: { not: null }, stockQuantity: null },
+    select: { offerId: true, weightGrams: true, widthCm: true, heightCm: true, depthCm: true },
+  });
+  if (products.length === 0) return { total: 0, updated: 0, results: [] };
+
+  const results: { offerId: string; updated: boolean; error?: string }[] = [];
+  for (let i = 0; i < products.length; i += STOCK_BATCH_SIZE) {
+    const batch = products.slice(i, i + STOCK_BATCH_SIZE);
+    const { result } = await updateStocks(
+      batch.map((p) => ({
+        offerId: p.offerId,
+        stock,
+        warehouseId: selectWarehouseId(p.weightGrams ?? 100, p.widthCm, p.heightCm, p.depthCm),
+      })),
+    );
+    for (const entry of result) {
+      results.push({
+        offerId: entry.offer_id,
+        updated: entry.updated,
+        error: entry.updated ? undefined : entry.errors.map((e) => e.message).join("; "),
+      });
+    }
+  }
+
+  const updatedOfferIds = results.filter((r) => r.updated).map((r) => r.offerId);
+  if (updatedOfferIds.length > 0) {
+    await prisma.product.updateMany({ where: { offerId: { in: updatedOfferIds } }, data: { stockQuantity: stock } });
+  }
+
+  return { total: products.length, updated: updatedOfferIds.length, results };
+}
+
 // priceOverride verilirse (Fiyat Hesaplayıcı modalında elle girilen satış fiyatı) formülü
 // yeniden hesaplamadan doğrudan o fiyat Ozon'a gönderilir — aksi halde costPrice'tan
 // formülle hesaplanan önerilen fiyat kullanılır (mevcut davranış).

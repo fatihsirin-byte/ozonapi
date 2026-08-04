@@ -957,6 +957,7 @@ export function HandleEditor({ handle }: { handle: string }) {
                 </td>
                 <td>
                   <input
+                    key={`${v.offerId}-weight-${v.weightGrams}`}
                     type="number"
                     style={{ width: 90 }}
                     defaultValue={v.weightGrams ?? ""}
@@ -972,6 +973,7 @@ export function HandleEditor({ handle }: { handle: string }) {
                 </td>
                 <td>
                   <input
+                    key={`${v.offerId}-units-${v.unitsInPack}`}
                     type="number"
                     style={{ width: 60 }}
                     defaultValue={v.unitsInPack ?? ""}
@@ -981,6 +983,7 @@ export function HandleEditor({ handle }: { handle: string }) {
                 </td>
                 <td>
                   <input
+                    key={`${v.offerId}-cost-${v.costPrice}`}
                     type="number"
                     style={{ width: 90 }}
                     defaultValue={v.costPrice ?? ""}

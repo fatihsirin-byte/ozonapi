@@ -3,6 +3,7 @@ import {
   updateDraftVariant,
   deleteVariant,
   setVariantExcludedFromSubmit,
+  recalculateFromBase,
 } from "@/modules/products/staging.service";
 
 // importTaskId BigInt — JSON.stringify edilemiyor (ürün Ozon'a gönderilmişse dolu oluyor).
@@ -21,11 +22,22 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     name?: string;
     heavyPackaging?: boolean;
     excludedFromSubmit?: boolean;
+    recalculateFromBase?: boolean;
   };
 
   if (body.excludedFromSubmit !== undefined) {
     const product = await setVariantExcludedFromSubmit(decodeURIComponent(offerId), body.excludedFromSubmit);
     return NextResponse.json({ product: serialize(product) });
+  }
+
+  if (body.recalculateFromBase) {
+    try {
+      const product = await recalculateFromBase(decodeURIComponent(offerId));
+      return NextResponse.json({ product: serialize(product) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Yeniden hesaplanamadı";
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
   }
 
   const product = await updateDraftVariant(decodeURIComponent(offerId), body);

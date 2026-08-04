@@ -25,6 +25,7 @@ interface Variant {
   costPrice: string | null;
   weightGrams: number | null;
   unitsInPack: number | null;
+  packBaseOfferId: string | null;
   heavyPackaging: boolean;
   widthCm: number | null;
   heightCm: number | null;
@@ -438,6 +439,64 @@ export function HandleEditor({ handle }: { handle: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ heavyPackaging }),
     });
+  }
+
+  const [recalculating, setRecalculating] = useState<string | null>(null);
+  const [newVariantBaseOfferId, setNewVariantBaseOfferId] = useState("");
+  const [newVariantQty, setNewVariantQty] = useState("");
+  const [newVariantName, setNewVariantName] = useState("");
+  const [addingVariant, setAddingVariant] = useState(false);
+
+  // Bir taban varyanttan yeni bir toplu paket (Box/Display) varyantı türetir — costPrice/
+  // weightGrams taban × adet olarak otomatik hesaplanır (cascade sistemi).
+  async function addCascadeVariant() {
+    if (!newVariantBaseOfferId || !newVariantQty) return;
+    setAddingVariant(true);
+    try {
+      const res = await fetch("/api/import/variant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseOfferId: newVariantBaseOfferId,
+          unitsInPack: Number(newVariantQty),
+          name: newVariantName.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error ?? "Varyant eklenemedi");
+        return;
+      }
+      setNewVariantBaseOfferId("");
+      setNewVariantQty("");
+      setNewVariantName("");
+      await load();
+    } finally {
+      setAddingVariant(false);
+    }
+  }
+
+  // Toplu paket (Box/Display) varyantları için — taban varyantın GÜNCEL alış fiyatı/ağırlığı ×
+  // adet olarak costPrice/weightGrams'ı yeniden hesaplayıp kaydeder (bkz. Product.packBaseOfferId).
+  async function recalculateVariantFromBase(offerId: string) {
+    setRecalculating(offerId);
+    try {
+      const res = await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recalculateFromBase: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error ?? "Yeniden hesaplanamadı");
+        return;
+      }
+      setVariants((prev) =>
+        prev ? prev.map((v) => (v.offerId === offerId ? { ...v, costPrice: data.product.costPrice, weightGrams: data.product.weightGrams, price: data.product.price } : v)) : prev,
+      );
+    } finally {
+      setRecalculating(null);
+    }
   }
 
   async function toggleVariantExcluded(offerId: string, excluded: boolean) {
@@ -900,6 +959,20 @@ export function HandleEditor({ handle }: { handle: string }) {
                     defaultValue={v.costPrice ?? ""}
                     onBlur={(e) => updateVariantField(v.offerId, "costPrice", e.target.value)}
                   />
+                  {v.packBaseOfferId && (
+                    <div className="hint" style={{ marginTop: 4 }}>
+                      = {v.packBaseOfferId} × {v.unitsInPack ?? "?"}
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ marginLeft: 6, fontSize: 11, padding: "1px 5px" }}
+                        disabled={recalculating === v.offerId}
+                        onClick={() => recalculateVariantFromBase(v.offerId)}
+                      >
+                        {recalculating === v.offerId ? "..." : "Yeniden Hesapla"}
+                      </button>
+                    </div>
+                  )}
                 </td>
                 <td>
                   {computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.heavyPackaging) || v.price}
@@ -941,6 +1014,53 @@ export function HandleEditor({ handle }: { handle: string }) {
             ))}
           </tbody>
         </table>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
+          <div>
+            <label className="hint" style={{ display: "block", marginBottom: 4 }}>Taban Varyant</label>
+            <select
+              value={newVariantBaseOfferId}
+              onChange={(e) => setNewVariantBaseOfferId(e.target.value)}
+              style={{ minWidth: 200 }}
+            >
+              <option value="">Seç...</option>
+              {variants
+                .filter((v) => !v.packBaseOfferId)
+                .map((v) => (
+                  <option key={v.offerId} value={v.offerId}>
+                    {v.offerId} ({v.costPrice ? `$${v.costPrice}` : "alışsız"})
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div>
+            <label className="hint" style={{ display: "block", marginBottom: 4 }}>Adet</label>
+            <input
+              type="number"
+              style={{ width: 70 }}
+              placeholder="6"
+              value={newVariantQty}
+              onChange={(e) => setNewVariantQty(e.target.value)}
+            />
+          </div>
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <label className="hint" style={{ display: "block", marginBottom: 4 }}>Ad (boş = otomatik)</label>
+            <input
+              type="text"
+              style={{ width: "100%" }}
+              value={newVariantName}
+              onChange={(e) => setNewVariantName(e.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={!newVariantBaseOfferId || !newVariantQty || addingVariant}
+            onClick={addCascadeVariant}
+          >
+            {addingVariant ? "Ekleniyor..." : "+ Varyant Ekle"}
+          </button>
+        </div>
       </div>
 
       {priceCalcOfferId &&

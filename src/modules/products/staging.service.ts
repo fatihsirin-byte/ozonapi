@@ -305,6 +305,72 @@ export async function updateDraftVariant(
   return updated;
 }
 
+// Toplu paket (Box/Display) varyantlarında costPrice/weightGrams = taban varyantın değeri ×
+// unitsInPack olarak hesaplanır (bkz. Product.packBaseOfferId, restore-bulk-pack-variants.ts).
+// Restore sırasında hatalı çıkan (örn. taban ağırlığı yanlışsa) ya da kullanıcının unitsInPack'i
+// UI'dan düzelttiği durumlarda bu fonksiyon tabandan yeniden hesaplayıp Ozon'a gönderir.
+export async function recalculateFromBase(offerId: string) {
+  const variant = await prisma.product.findUnique({ where: { offerId } });
+  if (!variant?.packBaseOfferId || !variant.unitsInPack) {
+    throw new Error("Bu varyantın taban varyantı veya adedi tanımlı değil");
+  }
+  const base = await prisma.product.findUnique({ where: { offerId: variant.packBaseOfferId } });
+  if (!base?.costPrice) {
+    throw new Error("Taban varyant bulunamadı veya alış fiyatı yok");
+  }
+
+  const costPrice = (Number(base.costPrice) * variant.unitsInPack).toFixed(2);
+  const weightGrams = base.weightGrams ? base.weightGrams * variant.unitsInPack : null;
+  return updateDraftVariant(offerId, { costPrice, weightGrams: weightGrams ?? undefined });
+}
+
+// Bir taban varyanttan yeni bir "toplu paket" (Box/Display) varyantı türetir — costPrice/
+// weightGrams taban × unitsInPack olarak otomatik hesaplanır (bkz. recalculateFromBase).
+// offerId taban offerId'sine "-xN" eklenerek üretilir, çakışırsa sona sayaç eklenir.
+export async function createCascadeVariant(params: { baseOfferId: string; unitsInPack: number; name?: string }) {
+  const base = await prisma.product.findUnique({ where: { offerId: params.baseOfferId } });
+  if (!base) throw new Error("Taban varyant bulunamadı");
+  if (!base.costPrice) throw new Error("Taban varyantın alış fiyatı yok");
+
+  let offerId = `${params.baseOfferId}-x${params.unitsInPack}`;
+  let suffix = 2;
+  while (await prisma.product.findUnique({ where: { offerId } })) {
+    offerId = `${params.baseOfferId}-x${params.unitsInPack}-${suffix}`;
+    suffix++;
+  }
+
+  const costPrice = (Number(base.costPrice) * params.unitsInPack).toFixed(2);
+  const weightGrams = base.weightGrams ? base.weightGrams * params.unitsInPack : null;
+  const price = computeSalePrice(costPrice, weightGrams, undefined, base.heavyPackaging) || "0";
+  const name = params.name?.trim() || `${base.name} - ${params.unitsInPack} Pieces`;
+
+  return prisma.product.create({
+    data: {
+      offerId,
+      name,
+      price,
+      costPrice,
+      weightGrams,
+      unitsInPack: params.unitsInPack,
+      packBaseOfferId: base.offerId,
+      heavyPackaging: base.heavyPackaging,
+      widthCm: base.widthCm,
+      heightCm: base.heightCm,
+      depthCm: base.depthCm,
+      images: base.images ?? undefined,
+      originalImages: base.originalImages ?? undefined,
+      shopifyHandle: base.shopifyHandle,
+      shopifyVariantId: offerId,
+      shopifyVendor: base.shopifyVendor,
+      shopifyType: base.shopifyType,
+      shopifyMetafields: base.shopifyMetafields ?? undefined,
+      descriptionHtml: base.descriptionHtml,
+      variantPosition: (base.variantPosition ?? 0) + 1,
+      status: "draft",
+    },
+  });
+}
+
 // Silinen offerId'leri ExcludedOfferId'e kaydeder — CSV tekrar import edilirse bu ürünler
 // "yeni satır" sanılıp geri getirilmesin diye (bkz. upsertParsedProducts).
 export async function deleteHandles(handles: string[]) {

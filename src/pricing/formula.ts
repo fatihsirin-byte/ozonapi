@@ -17,14 +17,13 @@ const PACKAGING_WEIGHT_EXTRA_GRAMS = 10;
 const PACKAGING_WEIGHT_THRESHOLD_GRAMS = 300;
 
 // Metal kutu/ağır ambalaj gibi standart dışı ürünlerde normal paketleme yüzdesi (%35) yetersiz
-// kalıyor — ürün "ağır ambalaj" olarak işaretlenirse bu yüzde 2.5 katına çıkarılıyor (yani %35
-// yerine ~%87.5 pay). Sabit 10g'lık ek pay bundan etkilenmiyor, sadece yüzdesel kısım büyüyor.
-// (2026-08-04, kullanıcı talebi — önceki gram bazlı override yerine bu geldi.)
-const HEAVY_PACKAGING_MULTIPLIER = 2.5;
+// kalıyor — ürün "ağır ambalaj" olarak işaretlenirse pay %65'e çıkarılıyor. Sabit 10g'lık ek pay
+// bundan etkilenmiyor, sadece yüzdesel kısım büyüyor.
+// (2026-08-04, kullanıcı talebi — önce 2.5x/%87.5 denendi, sonra %60'a, en son %65'e sabitlendi.)
+const HEAVY_PACKAGING_BUFFER = 1.65;
 
 function packagingBufferRate(heavyPackaging: boolean): number {
-  const normalRate = PACKAGING_WEIGHT_BUFFER - 1;
-  return heavyPackaging ? 1 + normalRate * HEAVY_PACKAGING_MULTIPLIER : PACKAGING_WEIGHT_BUFFER;
+  return heavyPackaging ? HEAVY_PACKAGING_BUFFER : PACKAGING_WEIGHT_BUFFER;
 }
 
 function extraGramsAtThreshold(bufferRate: number): number {

@@ -845,7 +845,7 @@ export function HandleEditor({ handle }: { handle: string }) {
               <th>SKU</th>
               <th>Ad</th>
               <th>Ağırlık (g)</th>
-              <th title="Metal kutu/ağır ambalaj gibi standart dışı ürünlerde işaretleyin — paketleme payı 2.5 katına çıkar">
+              <th title="Metal kutu/ağır ambalaj gibi standart dışı ürünlerde işaretleyin — paketleme payı %65'e çıkar (normalde %35)">
                 Ağır Ambalaj
               </th>
               <th title="Kutu/paket içindeki adet — Ozon'un varyant birleştirme kuralı için farklı varyantlarda gerçekten farklı olmalı">

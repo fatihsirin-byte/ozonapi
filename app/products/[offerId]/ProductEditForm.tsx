@@ -287,7 +287,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
             </div>
             <div className="field">
               <label
-                title="Metal kutu/ağır ambalaj gibi standart dışı ürünlerde işaretleyin — paketleme payı (normalde %35) 2.5 katına çıkar"
+                title="Metal kutu/ağır ambalaj gibi standart dışı ürünlerde işaretleyin — paketleme payı %65'e çıkar (normalde %35)"
                 style={{ display: "flex", alignItems: "center", gap: 6 }}
               >
                 <input

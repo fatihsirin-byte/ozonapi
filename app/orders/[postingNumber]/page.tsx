@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getOrderDetail, computeOrderAmount, computeOrderCost } from "@/modules/orders/orders.service";
 import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
 import { OzonInvoicePanel } from "./OzonInvoicePanel";
+import { EtgbInfo } from "./EtgbInfo";
 
 export const dynamic = "force-dynamic";
 
@@ -168,6 +169,10 @@ export default async function OrderDetailPage({
           items={order.items.map((item) => ({ offerId: item.offerId, name: item.product?.name ?? item.offerId }))}
           defaultPrice={orderAmount}
         />
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+          <div className="hint" style={{ marginBottom: 6 }}>ETGB (Türk Gümrük Beyanı — otomatik oluşur, salt okunur)</div>
+          <EtgbInfo postingNumber={order.postingNumber} />
+        </div>
       </div>
 
       <div className="card">

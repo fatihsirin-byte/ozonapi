@@ -6,6 +6,7 @@ import {
   createOrUpdateInvoice,
   getInvoice,
   deleteInvoice,
+  getEtgbDeclarations,
   type OzonHsCode,
 } from "../../ozon/invoices";
 
@@ -231,4 +232,20 @@ export async function fetchOzonInvoice(postingNumber: string) {
 
 export async function removeOzonInvoice(postingNumber: string) {
   await deleteInvoice(postingNumber);
+}
+
+// ETGB salt-okunur — Ozon/kargo firması otomatik oluşturuyor, biz sadece siparişin tarihi
+// etrafında bir aralık verip posting_number'a göre eşleşeni buluyoruz. Henüz oluşmamışsa
+// (kargo süreci tamamlanmadıysa) null döner — bu bir hata değil, zamanla gelir.
+export async function fetchEtgbForOrder(postingNumber: string, orderDate: Date | null) {
+  const anchor = orderDate ?? new Date();
+  const dateFrom = new Date(anchor.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const dateTo = new Date(anchor.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  try {
+    const { result } = await getEtgbDeclarations({ dateFrom, dateTo });
+    return result.find((r) => r.posting_number === postingNumber) ?? null;
+  } catch {
+    return null;
+  }
 }

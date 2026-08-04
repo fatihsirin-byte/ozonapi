@@ -58,3 +58,21 @@ export function getInvoice(postingNumber: string) {
 export function deleteInvoice(postingNumber: string) {
   return ozonPost<{ result: boolean }>("/v1/invoice/delete", { posting_number: postingNumber });
 }
+
+// ETGB (Elektronik Ticaret Gümrük Beyannamesi) — SADECE OKUMA. Ozon/kargo firması (ASE&GBS) bu
+// beyannameyi kargo süreci içinde OTOMATİK oluşturuyor, biz hiçbir şey göndermiyoruz — sadece
+// tarih aralığı vererek posting_number bazında beyanname no/tarih/belge linkini çekiyoruz.
+export interface OzonEtgbDeclaration {
+  posting_number: string;
+  etgb: {
+    number: string;
+    date: string;
+    url: string;
+  };
+}
+
+export function getEtgbDeclarations(params: { dateFrom: string; dateTo: string }) {
+  return ozonPost<{ result: OzonEtgbDeclaration[] }>("/v1/posting/global/etgb", {
+    date: { from: params.dateFrom, to: params.dateTo },
+  });
+}

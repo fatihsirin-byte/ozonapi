@@ -743,27 +743,6 @@ export function HandleEditor({ handle }: { handle: string }) {
         </Link>
       </div>
 
-      {autoAdvancing && (
-        <div className="card" style={{ marginBottom: 16, background: "var(--accent-bg, #16321f)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <span>✓ Başarıyla gönderildi — sonraki ürüne geçiliyor…</span>
-            <button type="button" className="btn-secondary" onClick={cancelAutoAdvance}>
-              Durdur
-            </button>
-          </div>
-          <div style={{ height: 4, background: "var(--border)", borderRadius: 2, overflow: "hidden" }}>
-            <div
-              style={{
-                height: "100%",
-                width: `${autoAdvanceProgress}%`,
-                background: "var(--accent)",
-                transition: "width 50ms linear",
-              }}
-            />
-          </div>
-        </div>
-      )}
-
       <div className="card" style={{ marginBottom: 16 }}>
         <label>Görseller</label>
         <ImageReplaceGrid
@@ -1237,6 +1216,27 @@ export function HandleEditor({ handle }: { handle: string }) {
                 {r.status === "failed" && `Hata: ${r.error ?? "Bilinmeyen hata"}`}
               </div>
             ))}
+          </div>
+        )}
+
+        {autoAdvancing && (
+          <div style={{ marginTop: 16, padding: 12, borderRadius: 8, background: "var(--accent-bg, #16321f)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span>✓ Başarıyla gönderildi — sonraki ürüne geçiliyor…</span>
+              <button type="button" className="btn-secondary" onClick={cancelAutoAdvance}>
+                Durdur
+              </button>
+            </div>
+            <div style={{ height: 4, background: "var(--border)", borderRadius: 2, overflow: "hidden" }}>
+              <div
+                style={{
+                  height: "100%",
+                  width: `${autoAdvanceProgress}%`,
+                  background: "var(--accent)",
+                  transition: "width 50ms linear",
+                }}
+              />
+            </div>
           </div>
         )}
       </div>

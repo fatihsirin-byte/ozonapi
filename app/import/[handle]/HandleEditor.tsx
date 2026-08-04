@@ -997,6 +997,15 @@ export function HandleEditor({ handle }: { handle: string }) {
                 </td>
                 <td>
                   {computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.heavyPackaging) || v.price}
+                  {v.unitsInPack && v.unitsInPack > 1 && (
+                    <div className="hint" style={{ marginTop: 4 }}>
+                      birim: $
+                      {(
+                        Number(computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.heavyPackaging) || v.price) /
+                        v.unitsInPack
+                      ).toFixed(2)}
+                    </div>
+                  )}
                   {v.ozonProductId && (
                     <button
                       type="button"

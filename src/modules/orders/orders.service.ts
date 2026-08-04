@@ -9,9 +9,17 @@ import {
   type OzonHsCode,
 } from "../../ozon/invoices";
 
-// Ozon'un kategori attribute şemasındaki "GTİP Kodu" (free-text, serbest metin) — ayrı bir alan
-// icat etmek yerine ürünün zaten kategori formunda doldurabildiği bu attribute'u kullanıyoruz.
-const GTIP_ATTRIBUTE_ID = 22992;
+// Ozon'un kategori formunda GTİP için İKİ attribute var: 22992 "GTİP Kodu" serbest metin (kullanıcı
+// kodu zaten biliyorsa), 22232 "AEB'nin GTİP kodları" ise GERÇEK aranabilir bir sözlük (Rusça arama
+// terimleriyle, örn. "кондитерские") — kullanıcı kodu bilmiyorsa asıl kullanacağı alan bu. Sözlük
+// değeri "1704901000 - Кондитерские изделия..." formatında geliyor, biz sadece baştaki kodu alıyoruz.
+const GTIP_FREE_TEXT_ATTRIBUTE_ID = 22992;
+const GTIP_DICTIONARY_ATTRIBUTE_ID = 22232;
+
+function extractGtipCode(rawValue: string): string {
+  const match = rawValue.match(/^\d{6,12}/);
+  return match ? match[0] : rawValue.trim();
+}
 
 // Ozon'daki siparişleri (ve kalemlerini) çekip local DB'ye upsert eder, durum/PNL takibi için kullanılır.
 export async function syncFbsOrders(params: { since: string; to: string; status?: string }) {
@@ -159,9 +167,11 @@ export async function suggestHsCodesForOrder(postingNumber: string): Promise<Rec
 
   for (const item of order.items) {
     const draft = item.product?.draftAttributes as { attributes?: Array<{ id: number; value?: string }> } | null;
-    const draftGtip = draft?.attributes?.find((a) => a.id === GTIP_ATTRIBUTE_ID)?.value;
-    if (draftGtip) {
-      suggestions[item.offerId] = draftGtip;
+    const draftDictionary = draft?.attributes?.find((a) => a.id === GTIP_DICTIONARY_ATTRIBUTE_ID)?.value;
+    const draftFreeText = draft?.attributes?.find((a) => a.id === GTIP_FREE_TEXT_ATTRIBUTE_ID)?.value;
+    const draftValue = draftDictionary ?? draftFreeText;
+    if (draftValue) {
+      suggestions[item.offerId] = extractGtipCode(draftValue);
     } else if (item.product?.ozonProductId) {
       needLiveFetch.push(item.offerId);
     }
@@ -171,9 +181,10 @@ export async function suggestHsCodesForOrder(postingNumber: string): Promise<Rec
     try {
       const { result } = await getProductAttributes(needLiveFetch);
       for (const entry of result) {
-        const gtip = entry.attributes.find((a: { id: number }) => a.id === GTIP_ATTRIBUTE_ID);
-        const value = gtip?.values?.[0]?.value;
-        if (value) suggestions[entry.offer_id] = value;
+        const dictionaryAttr = entry.attributes.find((a: { id: number }) => a.id === GTIP_DICTIONARY_ATTRIBUTE_ID);
+        const freeTextAttr = entry.attributes.find((a: { id: number }) => a.id === GTIP_FREE_TEXT_ATTRIBUTE_ID);
+        const value = dictionaryAttr?.values?.[0]?.value ?? freeTextAttr?.values?.[0]?.value;
+        if (value) suggestions[entry.offer_id] = extractGtipCode(value);
       }
     } catch {
       // canlıdan çekilemedi — kullanıcı elle girer

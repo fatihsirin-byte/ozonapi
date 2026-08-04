@@ -428,6 +428,13 @@ export function HandleEditor({ handle }: { handle: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [field]: isNumericField ? Number(value) || 0 : value }),
     });
+
+    // Adet değiştiğinde, bu varyant bir taban varyanta bağlıysa (cascade) alış fiyatı/ağırlığı
+    // otomatik olarak taban × yeni adet ile yeniden hesaplanır — kullanıcının ayrıca bir
+    // "yeniden hesapla" butonuna basmasına gerek yok.
+    if (field === "unitsInPack") {
+      await recalculateVariantFromBase(offerId, true);
+    }
   }
 
   async function updateVariantHeavyPackaging(offerId: string, heavyPackaging: boolean) {
@@ -445,7 +452,21 @@ export function HandleEditor({ handle }: { handle: string }) {
   const [newVariantBaseOfferId, setNewVariantBaseOfferId] = useState("");
   const [newVariantQty, setNewVariantQty] = useState("");
   const [newVariantName, setNewVariantName] = useState("");
+  const [newVariantNameTouched, setNewVariantNameTouched] = useState(false);
   const [addingVariant, setAddingVariant] = useState(false);
+
+  // Taban varyant veya adet seçilince, kullanıcı henüz isim alanını elle değiştirmediyse
+  // gerçek önerilen ismi doğrudan input'a yazıyoruz (placeholder değil) — kullanıcı isterse üzerine yazar.
+  useEffect(() => {
+    if (newVariantNameTouched) return;
+    const base = variants?.find((v) => v.offerId === newVariantBaseOfferId);
+    if (!base || !newVariantQty) {
+      setNewVariantName("");
+      return;
+    }
+    setNewVariantName(`${base.name} - ${newVariantQty} Pieces`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newVariantBaseOfferId, newVariantQty]);
 
   // Bir taban varyanttan yeni bir toplu paket (Box/Display) varyantı türetir — costPrice/
   // weightGrams taban × adet olarak otomatik hesaplanır (cascade sistemi).
@@ -470,6 +491,7 @@ export function HandleEditor({ handle }: { handle: string }) {
       setNewVariantBaseOfferId("");
       setNewVariantQty("");
       setNewVariantName("");
+      setNewVariantNameTouched(false);
       await load();
     } finally {
       setAddingVariant(false);
@@ -478,7 +500,12 @@ export function HandleEditor({ handle }: { handle: string }) {
 
   // Toplu paket (Box/Display) varyantları için — taban varyantın GÜNCEL alış fiyatı/ağırlığı ×
   // adet olarak costPrice/weightGrams'ı yeniden hesaplayıp kaydeder (bkz. Product.packBaseOfferId).
-  async function recalculateVariantFromBase(offerId: string) {
+  // silent: adet değiştiğinde otomatik tetiklenirken (taban bağlantısı olmayan sıradan
+  // varyantlarda "hata" olarak görünmesin diye) hatayı sessizce yutar.
+  async function recalculateVariantFromBase(offerId: string, silent = false) {
+    const variant = variants?.find((v) => v.offerId === offerId);
+    if (silent && !variant?.packBaseOfferId) return;
+
     setRecalculating(offerId);
     try {
       const res = await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
@@ -488,7 +515,7 @@ export function HandleEditor({ handle }: { handle: string }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error ?? "Yeniden hesaplanamadı");
+        if (!silent) alert(data.error ?? "Yeniden hesaplanamadı");
         return;
       }
       setVariants((prev) =>
@@ -960,17 +987,8 @@ export function HandleEditor({ handle }: { handle: string }) {
                     onBlur={(e) => updateVariantField(v.offerId, "costPrice", e.target.value)}
                   />
                   {v.packBaseOfferId && (
-                    <div className="hint" style={{ marginTop: 4 }}>
-                      = {v.packBaseOfferId} × {v.unitsInPack ?? "?"}
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        style={{ marginLeft: 6, fontSize: 11, padding: "1px 5px" }}
-                        disabled={recalculating === v.offerId}
-                        onClick={() => recalculateVariantFromBase(v.offerId)}
-                      >
-                        {recalculating === v.offerId ? "..." : "Yeniden Hesapla"}
-                      </button>
+                    <div className="hint" style={{ marginTop: 4 }} title={`Adet değişince ${v.packBaseOfferId}'nin güncel alış fiyatına göre otomatik yeniden hesaplanır`}>
+                      {recalculating === v.offerId ? "hesaplanıyor..." : `${v.packBaseOfferId} × ${v.unitsInPack ?? "?"}`}
                     </div>
                   )}
                 </td>
@@ -1044,12 +1062,15 @@ export function HandleEditor({ handle }: { handle: string }) {
             />
           </div>
           <div style={{ flex: 1, minWidth: 160 }}>
-            <label className="hint" style={{ display: "block", marginBottom: 4 }}>Ad (boş = otomatik)</label>
+            <label className="hint" style={{ display: "block", marginBottom: 4 }}>Ad</label>
             <input
               type="text"
               style={{ width: "100%" }}
               value={newVariantName}
-              onChange={(e) => setNewVariantName(e.target.value)}
+              onChange={(e) => {
+                setNewVariantNameTouched(true);
+                setNewVariantName(e.target.value);
+              }}
             />
           </div>
           <button

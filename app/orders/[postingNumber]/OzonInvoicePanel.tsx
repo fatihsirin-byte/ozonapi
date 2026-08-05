@@ -33,10 +33,12 @@ export function OzonInvoicePanel({
   postingNumber,
   items,
   defaultPrice,
+  suggestedInvoiceAmount,
 }: {
   postingNumber: string;
   items: OrderItemLite[];
   defaultPrice: number;
+  suggestedInvoiceAmount?: number | null;
 }) {
   const [loading, setLoading] = useState(true);
   const [invoice, setInvoice] = useState<InvoiceResult | null>(null);
@@ -112,6 +114,17 @@ export function OzonInvoicePanel({
 
   return (
     <div>
+      <div style={{ marginBottom: 16 }}>
+        <div className="hint">Fatura Kesilecek Tutar (alış × %40 marj)</div>
+        <div className="value" style={{ fontSize: 15 }}>
+          {suggestedInvoiceAmount == null ? (
+            <span className="hint">alış maliyeti bilinmiyor</span>
+          ) : (
+            `$${suggestedInvoiceAmount.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          )}
+        </div>
+      </div>
+
       {invoice ? (
         <div style={{ marginBottom: 16 }}>
           <div className="hint">Yüklenmiş fatura</div>

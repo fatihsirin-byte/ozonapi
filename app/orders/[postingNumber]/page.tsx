@@ -168,6 +168,7 @@ export default async function OrderDetailPage({
           postingNumber={order.postingNumber}
           items={order.items.map((item) => ({ offerId: item.offerId, name: item.product?.name ?? item.offerId }))}
           defaultPrice={orderAmount}
+          suggestedInvoiceAmount={orderCost == null ? null : orderCost * 1.4}
         />
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
           <div className="hint" style={{ marginBottom: 6 }}>ETGB (Türk Gümrük Beyanı — otomatik oluşur, salt okunur)</div>

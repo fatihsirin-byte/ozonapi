@@ -224,6 +224,11 @@ export async function submitOzonInvoice(params: SubmitOzonInvoiceParams) {
 export async function fetchOzonInvoice(postingNumber: string) {
   try {
     const { result } = await getInvoice(postingNumber);
+    // Ozon, hiç fatura yüklenmemiş olsa bile boş/varsayılan bir obje dönüyor
+    // (file_url: "", date: null, price: 0) — gerçek bir fatura var mı yok mu, file_url'in
+    // dolu olup olmadığına bakarak anlıyoruz, sadece result'un varlığına değil (2026-08-05'te
+    // canlıda tespit edildi — "1.01.1970 — 0" olarak boş bir fatura gösteriliyordu).
+    if (!result?.file_url) return null;
     return result;
   } catch {
     return null; // henüz fatura yüklenmemiş

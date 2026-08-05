@@ -9,6 +9,32 @@ import { computeSalePrice, computeOldPrice } from "../../pricing/formula";
 // sonunda currency_differs_from_contract hatasıyla düşüyor (Faz 1'de keşfedildi).
 const CURRENCY_CODE = "USD";
 
+// Türkçe karakterler (ğ,ş,ı,ö,ü,ç) çeviri katmanında (src/ai/translate.ts) temizleniyor ama
+// isim/attribute manuel girilmiş, draftAttributes'tan gelmiş ya da başka bir yoldan sızmış
+// olabilir — Ozon'a giden HER isteği son bir güvence katmanı olarak burada da temizliyoruz,
+// hiçbir Türkçe karakter Ozon'a gitmesin (2026-08-05, kullanıcı talebi).
+const TURKISH_CHAR_MAP: Record<string, string> = {
+  ğ: "g", Ğ: "G", ş: "s", Ş: "S", ı: "i", İ: "I", ö: "o", Ö: "O", ü: "u", Ü: "U", ç: "c", Ç: "C",
+};
+const TURKISH_CHAR_PATTERN = /[ğĞşŞıİöÖüÜçÇ]/g;
+
+function sanitizeForOzon<T>(value: T): T {
+  if (typeof value === "string") {
+    return value.replace(TURKISH_CHAR_PATTERN, (ch) => TURKISH_CHAR_MAP[ch] ?? ch) as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeForOzon(item)) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value)) {
+      result[key] = sanitizeForOzon(val);
+    }
+    return result as T;
+  }
+  return value;
+}
+
 // Ozon'un varyant gruplama alanı — product.service.ts ve wizard'da aynı sabit kullanılıyor.
 const MODEL_NAME_ATTRIBUTE_ID = 9048;
 
@@ -253,7 +279,7 @@ export async function createProduct(input: CreateProductInput) {
     },
   );
 
-  const { result } = await importProducts([
+  const { result } = await importProducts(sanitizeForOzon([
     {
       offer_id: input.offerId,
       name: input.name,
@@ -285,7 +311,7 @@ export async function createProduct(input: CreateProductInput) {
         { id: MODEL_NAME_ATTRIBUTE_ID, values: [{ value: input.modelNameOverride ?? input.offerId }] },
       ],
     },
-  ]);
+  ]));
 
   // task_id'yi DB'ye kalıcı yazıyoruz — sadece bellekte tutsaydık deploy/restart'ta kaybolurdu.
   await prisma.product.update({
@@ -531,7 +557,7 @@ export async function updateProductImages(offerId: string, images: string[]) {
   );
   const resendOldPrice = product.oldPrice ?? computeOldPrice(product.price);
 
-  const { result } = await importProducts([
+  const { result } = await importProducts(sanitizeForOzon([
     {
       offer_id: offerId,
       // nameRu varsa onu kullan — yoksa Ozon Latin harfli isme "critical" hata verir. Bunu
@@ -555,7 +581,7 @@ export async function updateProductImages(offerId: string, images: string[]) {
       images,
       attributes: buildAttributesPayload(liveAttributes, modelName),
     },
-  ]);
+  ]));
 
   await prisma.product.update({
     where: { offerId },
@@ -608,7 +634,7 @@ export async function updateProductCategoryAttributes(
   );
   const resendOldPrice = product.oldPrice ?? computeOldPrice(product.price);
 
-  const { result } = await importProducts([
+  const { result } = await importProducts(sanitizeForOzon([
     {
       offer_id: offerId,
       name: product.nameRu ?? product.name,
@@ -629,7 +655,7 @@ export async function updateProductCategoryAttributes(
       images,
       attributes: buildAttributesPayload(fixedAttributes, modelName),
     },
-  ]);
+  ]));
 
   await prisma.product.update({
     where: { offerId },

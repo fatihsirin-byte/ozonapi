@@ -25,6 +25,17 @@ function stripEmoji(text: string): string {
     .trim();
 }
 
+// Marka/model adı Latin bırakılırken bazen Türkçe özel karakterler (ğ, ş, ı, ö, ü, ç) de
+// olduğu gibi kalıyor (örn. "Arifoğlu") — Rusça bir pazaryerinde bu karakterler yanlış
+// render olabiliyor/tutarsız görünüyor. Prompt'ta kural olarak istense de kaçabiliyor,
+// emoji gibi ek bir güvence olarak burada da düz Latin'e çeviriyoruz (2026-08-05).
+const TURKISH_CHAR_MAP: Record<string, string> = {
+  ğ: "g", Ğ: "G", ş: "s", Ş: "S", ı: "i", İ: "I", ö: "o", Ö: "O", ü: "u", Ü: "U", ç: "c", Ç: "C",
+};
+function stripTurkishChars(text: string): string {
+  return text.replace(/[ğĞşŞıİöÖüÜçÇ]/g, (ch) => TURKISH_CHAR_MAP[ch] ?? ch);
+}
+
 export async function translateToRussian(
   title: string,
   descriptionHtml: string,
@@ -84,7 +95,11 @@ Hangi kelimenin gerçekten marka/model olduğuna karar verirken şu ayrımı kul
    gösteriliyor — başlıkta tekrar tekrar yazılması sipariş görünümünde saçma/karmaşık
    duruyor. nameRu'da gram/adet bilgisini EN FAZLA BİR KERE, kısa ve sade şekilde geçir
    (örn. sadece toplam adet VEYA sadece tekil ağırlık, ikisi birden gerekmiyorsa); aynı
-   sayıyı birden fazla parantez/tekrar içinde farklı şekillerde yeniden yazma.${vendorRule}
+   sayıyı birden fazla parantez/tekrar içinde farklı şekillerde yeniden yazma.
+8. TÜRKÇE ÖZEL KARAKTER KULLANMA: Latin bırakılan marka/model adlarında bile (ğ, ş, ı, ö, ü, ç,
+   Ğ, Ş, İ, Ö, Ü, Ç) harflerini KULLANMA — düz Latin karşılığını yaz (örn. "Arifoğlu" değil
+   "Arifoglu", "Beşiktaş" değil "Besiktas"). Bu Rusça bir pazaryeri, Türkçe özel karakterler
+   yanlış görünebiliyor/tutarsız render oluyor.${vendorRule}
 
 Sadece şu JSON formatında cevap ver, başka hiçbir şey yazma: {"nameRu": "...", "descriptionRu": "..."}
 
@@ -116,5 +131,8 @@ Açıklama: ${description}`;
   if (!parsed.nameRu || !parsed.descriptionRu) {
     throw new Error("Gemini beklenen alanları döndürmedi");
   }
-  return { nameRu: stripEmoji(parsed.nameRu), descriptionRu: stripEmoji(parsed.descriptionRu) };
+  return {
+    nameRu: stripTurkishChars(stripEmoji(parsed.nameRu)),
+    descriptionRu: stripTurkishChars(stripEmoji(parsed.descriptionRu)),
+  };
 }

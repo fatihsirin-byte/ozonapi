@@ -16,6 +16,11 @@ import { buildRichContentJson } from "@/ozon/rich-content";
 import { PriceCalculatorModal } from "../../products/[offerId]/PriceCalculatorModal";
 
 const MODEL_NAME_ATTRIBUTE_ID = 9048;
+// "Tür" (8229) — Ozon bunu canlı attribute listesinde DÖNMÜYOR (bilgi ürünün type_id alanında
+// duruyor, kaybolmuyor) — ama cloneAttributes'tan prefill boş kalınca zorunlu alan boş görünüp
+// resend'i engelliyordu (2026-08-05'te canlıda tespit edildi). category.typeId/typeName zaten
+// bu seçimin kendisi, oradan otomatik dolduruyoruz.
+const TUR_ATTRIBUTE_ID = 8229;
 
 interface Variant {
   id: string;
@@ -306,6 +311,9 @@ export function HandleEditor({ handle }: { handle: string }) {
           value: cloned.value,
           displayValue: cloned.dictionaryValueId ? "(mevcut değer — değiştirmek için yazın)" : undefined,
         };
+      }
+      if (attr.id === TUR_ATTRIBUTE_ID && category) {
+        return { dictionaryValueId: category.typeId, displayValue: category.typeName };
       }
       const suggested = suggestAttributeValue(attr.name, metafields, vendor);
       return suggested ? { value: suggested, displayValue: suggested } : undefined;

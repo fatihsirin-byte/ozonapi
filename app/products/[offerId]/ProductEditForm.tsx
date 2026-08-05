@@ -30,6 +30,13 @@ interface CloneAttribute {
 }
 
 const MODEL_NAME_ATTRIBUTE_ID = 9048;
+// "Tür" (8229) — Ozon bunu /v4/product/info/attributes'ta attribute olarak DÖNMÜYOR, bilgi
+// aslında ürünün kendi type_id alanında duruyor (kaybolmuyor). Ama bizim formumuz bunu
+// cloneAttributes'tan (canlı attribute listesi) prefill etmeye çalışınca hiç bulamayıp boş
+// bırakıyordu — zorunlu alan boş görününce kullanıcı ürünü resend edemiyordu (2026-08-05'te
+// canlıda tespit edildi). category.typeId/typeName zaten bu seçimin kendisi olduğu için
+// oradan otomatik dolduruyoruz, ayrıca canlıdan çekmeye gerek yok.
+const TUR_ATTRIBUTE_ID = 8229;
 const TABS = ["Genel", "Fiyat", "Görseller", "Kategori & Özellikler"] as const;
 type Tab = (typeof TABS)[number];
 
@@ -54,12 +61,17 @@ export function ProductEditForm({ product }: { product: ProductData }) {
     category,
     (attr) => {
       const cloned = cloneAttributes?.find((a) => a.id === attr.id);
-      if (!cloned) return undefined;
-      return {
-        dictionaryValueId: cloned.dictionaryValueId,
-        value: cloned.value,
-        displayValue: cloned.dictionaryValueId ? "(mevcut değer — değiştirmek için yazın)" : undefined,
-      };
+      if (cloned) {
+        return {
+          dictionaryValueId: cloned.dictionaryValueId,
+          value: cloned.value,
+          displayValue: cloned.dictionaryValueId ? "(mevcut değer — değiştirmek için yazın)" : undefined,
+        };
+      }
+      if (attr.id === TUR_ATTRIBUTE_ID && category) {
+        return { dictionaryValueId: category.typeId, displayValue: category.typeName };
+      }
+      return undefined;
     },
     true,
   );

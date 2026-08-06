@@ -7,7 +7,33 @@ const CYRILLIC_TO_LATIN: Record<string, string> = {
   э: "e", ю: "yu", я: "ya",
 };
 
-export function transliterateRussian(text: string): string {
+// Bilinen büyük şehir/bölge adları harf harf transliterasyon yerine Türkçe'de yerleşik
+// (yaygın kullanılan) adlarıyla yazılır — örn. "Москва" harfi harfine "Moskva" değil "Moskova".
+const KNOWN_PLACE_NAMES: Record<string, string> = {
+  "москва": "Moskova",
+  "санкт-петербург": "Sankt Peterburg",
+  "петербург": "Peterburg",
+  "новосибирск": "Novosibirsk",
+  "екатеринбург": "Yekaterinburg",
+  "казань": "Kazan",
+  "нижний новгород": "Nijniy Novgorod",
+  "челябинск": "Çelyabinsk",
+  "самара": "Samara",
+  "омск": "Omsk",
+  "ростов-на-дону": "Rostov-na-Donu",
+  "уфа": "Ufa",
+  "красноярск": "Krasnoyarsk",
+  "воронеж": "Voronej",
+  "пермь": "Perm",
+  "волгоград": "Volgograd",
+  "краснодар": "Krasnodar",
+  "саратов": "Saratov",
+  "тюмень": "Tümen",
+  "крым": "Kırım",
+  "россия": "Rusya",
+};
+
+function transliterateLetters(text: string): string {
   return text
     .split("")
     .map((ch) => {
@@ -17,4 +43,10 @@ export function transliterateRussian(text: string): string {
       return ch === lower ? mapped : mapped.charAt(0).toUpperCase() + mapped.slice(1);
     })
     .join("");
+}
+
+export function transliterateRussian(text: string): string {
+  const known = KNOWN_PLACE_NAMES[text.trim().toLowerCase()];
+  if (known) return known;
+  return transliterateLetters(text);
 }

@@ -4,6 +4,7 @@ import { getOrderDetail, computeOrderAmount, computeOrderCost } from "@/modules/
 import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
 import { OzonInvoicePanel } from "./OzonInvoicePanel";
 import { EtgbInfo } from "./EtgbInfo";
+import { CopyableField } from "./CopyableField";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,12 @@ function formatMoney(n: number) {
 
 interface OrderRawPayload {
   shipment_date?: string;
-  customer?: { address?: { city?: string; region?: string } };
+  customer?: {
+    name?: string;
+    phone?: string;
+    address?: { city?: string; region?: string; district?: string; address_tail?: string; country?: string };
+  };
+  addressee?: { name?: string; phone?: string };
   analytics_data?: { warehouse?: string; tpl_provider?: string };
 }
 
@@ -40,6 +46,10 @@ export default async function OrderDetailPage({
   const raw = order.rawPayload as OrderRawPayload | null;
   const city = raw?.customer?.address?.city;
   const region = raw?.customer?.address?.region;
+  const customerName = raw?.customer?.name || raw?.addressee?.name;
+  const customerPhone = raw?.customer?.phone || raw?.addressee?.phone;
+  const addressTail = raw?.customer?.address?.address_tail;
+  const district = raw?.customer?.address?.district;
   const orderCost = computeOrderCost(order.items);
   const orderAmount = computeOrderAmount(order.items);
 
@@ -87,12 +97,11 @@ export default async function OrderDetailPage({
             <div className="value" style={{ fontSize: 15 }}>{new Date(raw.shipment_date).toLocaleDateString("tr-TR")}</div>
           </div>
         )}
-        {(city || region) && (
-          <div>
-            <div className="hint">Teslimat Yeri</div>
-            <div className="value" style={{ fontSize: 15 }}>{[city, region].filter(Boolean).join(", ")}</div>
-          </div>
-        )}
+        {customerName && <CopyableField label="Ad Soyad" value={customerName.trim()} />}
+        {customerPhone && <CopyableField label="Telefon" value={customerPhone} />}
+        {city && <CopyableField label="Şehir" value={city} />}
+        {(district || region) && <CopyableField label="İlçe" value={district || region || ""} />}
+        {addressTail && <CopyableField label="Adres" value={addressTail} />}
         {raw?.analytics_data?.tpl_provider && (
           <div>
             <div className="hint">Kargo Sağlayıcı</div>

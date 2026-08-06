@@ -5,6 +5,7 @@ import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
 import { OzonInvoicePanel } from "./OzonInvoicePanel";
 import { EtgbInfo } from "./EtgbInfo";
 import { CopyableField } from "./CopyableField";
+import { transliterateRussian } from "@/utils/transliterate";
 
 export const dynamic = "force-dynamic";
 
@@ -98,10 +99,16 @@ export default async function OrderDetailPage({
           </div>
         )}
         {customerName && <CopyableField label="Ad Soyad" value={customerName.trim()} />}
+        {customerName && <CopyableField label="Ad Soyad (Latin — fatura için)" value={transliterateRussian(customerName.trim())} />}
         {customerPhone && <CopyableField label="Telefon" value={customerPhone} />}
         {city && <CopyableField label="Şehir" value={city} />}
+        {city && <CopyableField label="Şehir (Latin — fatura için)" value={transliterateRussian(city)} />}
         {(district || region) && <CopyableField label="İlçe" value={district || region || ""} />}
+        {(district || region) && (
+          <CopyableField label="İlçe (Latin — fatura için)" value={transliterateRussian(district || region || "")} />
+        )}
         {addressTail && <CopyableField label="Adres" value={addressTail} />}
+        {addressTail && <CopyableField label="Adres (Latin — fatura için)" value={transliterateRussian(addressTail)} />}
         {raw?.analytics_data?.tpl_provider && (
           <div>
             <div className="hint">Kargo Sağlayıcı</div>

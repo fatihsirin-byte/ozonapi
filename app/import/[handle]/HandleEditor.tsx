@@ -919,8 +919,8 @@ export function HandleEditor({ handle }: { handle: string }) {
         <table style={{ tableLayout: "fixed", wordBreak: "break-word" }}>
           <colgroup>
             <col style={{ width: "12%" }} />
-            <col style={{ width: "21%" }} />
-            <col style={{ width: "8%" }} />
+            <col style={{ width: "16%" }} />
+            <col style={{ width: "13%" }} />
             <col style={{ width: "9%" }} />
             <col style={{ width: "7%" }} />
             <col style={{ width: "10%" }} />
@@ -965,21 +965,25 @@ export function HandleEditor({ handle }: { handle: string }) {
                     defaultValue={v.weightGrams ?? ""}
                     onBlur={(e) => updateVariantField(v.offerId, "weightGrams", e.target.value)}
                   />
-                  <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
-                    <span className="hint" title="Kargoda kullanılan (paketleme payı dahil, gerekirse hacimsel) ağırlık — satış fiyatı buna göre hesaplanır, gerekirse elle düzeltebilirsiniz">
-                      kargo:
-                    </span>
+                  <div style={{ marginTop: 4 }}>
+                    <div
+                      className="hint"
+                      style={{ whiteSpace: "nowrap" }}
+                      title="Kargoda kullanılan (paketleme payı dahil, gerekirse hacimsel) ağırlık — satış fiyatı buna göre hesaplanır, gerekirse elle düzeltebilirsiniz"
+                    >
+                      Kargo (g)
+                    </div>
                     <input
                       key={`${v.offerId}-cargo-${v.cargoWeightGrams}`}
                       type="number"
-                      style={{ width: 70 }}
+                      style={{ width: 90 }}
                       defaultValue={v.cargoWeightGrams ?? ""}
                       onBlur={(e) => updateVariantField(v.offerId, "cargoWeightGrams", e.target.value)}
                     />
                     {v.weightConfirmed && (
-                      <span className="hint" style={{ color: "var(--success)" }} title="Gerçek ağırlık sipariş ekranından girildi/teyit edildi">
+                      <div className="hint" style={{ color: "var(--success)", whiteSpace: "nowrap" }} title="Gerçek ağırlık sipariş ekranından girildi/teyit edildi">
                         ✓ teyitli
-                      </span>
+                      </div>
                     )}
                   </div>
                 </td>

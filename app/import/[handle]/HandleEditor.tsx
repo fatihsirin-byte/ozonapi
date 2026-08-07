@@ -29,6 +29,7 @@ interface Variant {
   price: string;
   costPrice: string | null;
   weightGrams: number | null;
+  cargoWeightGrams: number | null;
   unitsInPack: number | null;
   packBaseOfferId: string | null;
   heavyPackaging: boolean;
@@ -950,6 +951,11 @@ export function HandleEditor({ handle }: { handle: string }) {
                     defaultValue={v.weightGrams ?? ""}
                     onBlur={(e) => updateVariantField(v.offerId, "weightGrams", e.target.value)}
                   />
+                  {v.cargoWeightGrams != null && (
+                    <div className="hint" style={{ marginTop: 4 }} title="Kargoda kullanılan (paketleme payı dahil, gerekirse hacimsel) hesaplanmış ağırlık — satış fiyatı buna göre hesaplanır">
+                      kargo: {v.cargoWeightGrams}g
+                    </div>
+                  )}
                 </td>
                 <td style={{ textAlign: "center" }}>
                   <input
@@ -983,13 +989,15 @@ export function HandleEditor({ handle }: { handle: string }) {
                   )}
                 </td>
                 <td>
-                  {computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.heavyPackaging) || v.price}
+                  {computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.heavyPackaging, v.cargoWeightGrams) || v.price}
                   {v.unitsInPack && v.unitsInPack > 1 && (
                     <div className="hint" style={{ marginTop: 4 }}>
                       birim: $
                       {(
-                        Number(computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.heavyPackaging) || v.price) /
-                        v.unitsInPack
+                        Number(
+                          computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.heavyPackaging, v.cargoWeightGrams) ||
+                            v.price,
+                        ) / v.unitsInPack
                       ).toFixed(2)}
                     </div>
                   )}
@@ -1095,7 +1103,10 @@ export function HandleEditor({ handle }: { handle: string }) {
               heightCm={v.heightCm}
               depthCm={v.depthCm}
               heavyPackaging={v.heavyPackaging}
-              currentPrice={computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.heavyPackaging) || v.price}
+              cargoWeightGrams={v.cargoWeightGrams}
+              currentPrice={
+                computeSalePrice(v.costPrice ?? "0", v.weightGrams, undefined, v.heavyPackaging, v.cargoWeightGrams) || v.price
+              }
               onClose={() => setPriceCalcOfferId(null)}
               onApply={(priceUsd) => applyPriceOverride(v.offerId, v.costPrice ?? "0", priceUsd)}
             />

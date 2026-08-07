@@ -6,16 +6,19 @@ export function RealWeightInput({
   offerId,
   initialConfirmed,
   initialWeightGrams,
+  initialPrice,
 }: {
   offerId: string;
   initialConfirmed: boolean;
   initialWeightGrams: number | null;
+  initialPrice: string;
 }) {
   const [confirmed, setConfirmed] = useState(initialConfirmed);
   const [weightGrams, setWeightGrams] = useState(initialWeightGrams);
   const [input, setInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [priceChangeMessage, setPriceChangeMessage] = useState<string | null>(null);
 
   async function save() {
     const value = Number(input);
@@ -38,6 +41,13 @@ export function RealWeightInput({
       }
       setWeightGrams(value);
       setConfirmed(true);
+      if (data.price) {
+        setPriceChangeMessage(
+          data.price === initialPrice
+            ? `Satış fiyatı $${initialPrice} olarak kaldı, Ozon'a gönderildi.`
+            : `Satış fiyatı $${initialPrice} → $${data.price} olarak güncellendi ve Ozon'a gönderildi.`,
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bilinmeyen hata");
     } finally {
@@ -47,9 +57,16 @@ export function RealWeightInput({
 
   if (confirmed) {
     return (
-      <span className="hint" title="Gerçek ağırlık daha önce girildi, fiyat buna göre hesaplandı">
-        ✓ {weightGrams}g (teyitli)
-      </span>
+      <div>
+        <span className="hint" title="Gerçek ağırlık daha önce girildi, fiyat buna göre hesaplandı">
+          ✓ {weightGrams}g (teyitli)
+        </span>
+        {priceChangeMessage && (
+          <div className="hint" style={{ color: "var(--success)", marginTop: 4 }}>
+            {priceChangeMessage}
+          </div>
+        )}
+      </div>
     );
   }
 

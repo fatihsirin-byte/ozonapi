@@ -182,6 +182,7 @@ export default async function OrderDetailPage({
                           offerId={item.offerId}
                           initialConfirmed={item.product.weightConfirmed}
                           initialWeightGrams={item.product.weightGrams}
+                          initialPrice={item.product.price}
                         />
                       ) : (
                         <span className="hint">ürün yok</span>

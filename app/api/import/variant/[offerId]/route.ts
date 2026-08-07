@@ -17,6 +17,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const { offerId } = await params;
   const body = (await request.json()) as {
     weightGrams?: number;
+    cargoWeightGrams?: number | null;
     costPrice?: string;
     unitsInPack?: number;
     name?: string;

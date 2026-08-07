@@ -30,6 +30,7 @@ interface Variant {
   costPrice: string | null;
   weightGrams: number | null;
   cargoWeightGrams: number | null;
+  weightConfirmed: boolean;
   unitsInPack: number | null;
   packBaseOfferId: string | null;
   heavyPackaging: boolean;
@@ -423,20 +424,33 @@ export function HandleEditor({ handle }: { handle: string }) {
 
   async function updateVariantField(
     offerId: string,
-    field: "weightGrams" | "costPrice" | "unitsInPack" | "name",
+    field: "weightGrams" | "cargoWeightGrams" | "costPrice" | "unitsInPack" | "name",
     value: string,
   ) {
-    const isNumericField = field === "weightGrams" || field === "unitsInPack";
+    const isNumericField = field === "weightGrams" || field === "cargoWeightGrams" || field === "unitsInPack";
     setVariants((prev) =>
       prev
         ? prev.map((v) => (v.offerId === offerId ? { ...v, [field]: isNumericField ? Number(value) || null : value } : v))
         : prev,
     );
-    await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
+    const res = await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [field]: isNumericField ? Number(value) || 0 : value }),
     });
+
+    // Net ağırlık değişince kargo ağırlığı sunucu tarafında otomatik yeniden hesaplanıyor —
+    // güncel değeri yanıttan alıp tabloya yansıtıyoruz (elle girilen kargoWeightGrams'ta bu gerekmiyor).
+    if (field === "weightGrams") {
+      const data = await res.json().catch(() => null);
+      if (data?.product) {
+        setVariants((prev) =>
+          prev
+            ? prev.map((v) => (v.offerId === offerId ? { ...v, cargoWeightGrams: data.product.cargoWeightGrams } : v))
+            : prev,
+        );
+      }
+    }
 
     // Adet değiştiğinde, bu varyant bir taban varyanta bağlıysa (cascade) alış fiyatı/ağırlığı
     // otomatik olarak taban × yeni adet ile yeniden hesaplanır — kullanıcının ayrıca bir
@@ -951,11 +965,23 @@ export function HandleEditor({ handle }: { handle: string }) {
                     defaultValue={v.weightGrams ?? ""}
                     onBlur={(e) => updateVariantField(v.offerId, "weightGrams", e.target.value)}
                   />
-                  {v.cargoWeightGrams != null && (
-                    <div className="hint" style={{ marginTop: 4 }} title="Kargoda kullanılan (paketleme payı dahil, gerekirse hacimsel) hesaplanmış ağırlık — satış fiyatı buna göre hesaplanır">
-                      kargo: {v.cargoWeightGrams}g
-                    </div>
-                  )}
+                  <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                    <span className="hint" title="Kargoda kullanılan (paketleme payı dahil, gerekirse hacimsel) ağırlık — satış fiyatı buna göre hesaplanır, gerekirse elle düzeltebilirsiniz">
+                      kargo:
+                    </span>
+                    <input
+                      key={`${v.offerId}-cargo-${v.cargoWeightGrams}`}
+                      type="number"
+                      style={{ width: 70 }}
+                      defaultValue={v.cargoWeightGrams ?? ""}
+                      onBlur={(e) => updateVariantField(v.offerId, "cargoWeightGrams", e.target.value)}
+                    />
+                    {v.weightConfirmed && (
+                      <span className="hint" style={{ color: "var(--success)" }} title="Gerçek ağırlık sipariş ekranından girildi/teyit edildi">
+                        ✓ teyitli
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td style={{ textAlign: "center" }}>
                   <input

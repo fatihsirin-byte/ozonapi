@@ -63,3 +63,15 @@ export async function ozonGet<T>(path: string, params?: Record<string, unknown>)
   const response = await http.get<T>(path, { params });
   return response.data;
 }
+
+// Etiket (PDF) gibi binary dönen endpoint'ler için — Ozon bazen JSON hata (henüz hazır değil vb.)
+// döndürebiliyor, o yüzden response Content-Type'a bakılarak ayrıştırılıyor.
+export async function ozonPostBinary(path: string, body?: unknown): Promise<Buffer> {
+  const response = await http.post(path, body ?? {}, { responseType: "arraybuffer" });
+  const contentType = String(response.headers["content-type"] ?? "");
+  if (contentType.includes("application/json")) {
+    const parsed = JSON.parse(Buffer.from(response.data).toString("utf-8"));
+    throw new OzonApiError(parsed?.message ?? "Ozon etiket isteği başarısız", response.status, parsed);
+  }
+  return Buffer.from(response.data);
+}

@@ -6,6 +6,7 @@ import { OzonInvoicePanel } from "./OzonInvoicePanel";
 import { EtgbInfo } from "./EtgbInfo";
 import { CopyableField } from "./CopyableField";
 import { transliterateRussian } from "@/utils/transliterate";
+import { LabelDownloadButton } from "./LabelDownloadButton";
 
 export const dynamic = "force-dynamic";
 
@@ -58,9 +59,12 @@ export default async function OrderDetailPage({
     <div className="page-wide">
       <div className="topbar">
         <h1>{order.postingNumber}</h1>
-        <Link href="/orders">
-          <button className="btn-secondary">← Siparişler</button>
-        </Link>
+        <div style={{ display: "flex", gap: 8 }}>
+          <LabelDownloadButton postingNumber={order.postingNumber} />
+          <Link href="/orders">
+            <button className="btn-secondary">← Siparişler</button>
+          </Link>
+        </div>
       </div>
 
       <div className="card summary-grid" style={{ marginBottom: 16 }}>

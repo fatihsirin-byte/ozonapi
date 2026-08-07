@@ -1,4 +1,4 @@
-import { ozonPost } from "./client";
+import { ozonPost, ozonPostBinary } from "./client";
 
 export interface OzonFbsPosting {
   posting_number: string;
@@ -66,5 +66,13 @@ export function cancelFbsPosting(params: { postingNumber: string; cancelReasonId
     posting_number: params.postingNumber,
     cancel_reason_id: params.cancelReasonId,
     cancel_reason_message: params.cancelReasonMessage,
+  });
+}
+
+// Kargo etiketi (barkodlu PDF) — Ozon bazen "henüz hazırlanıyor" hatası dönebiliyor (etiket
+// posting paketlendikten kısa süre sonra oluşuyor), bu durumda ozonPostBinary hata fırlatır.
+export function getFbsPackageLabel(postingNumber: string): Promise<Buffer> {
+  return ozonPostBinary("/v2/posting/fbs/package-label", {
+    posting_number: [postingNumber],
   });
 }

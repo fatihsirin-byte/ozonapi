@@ -1,5 +1,5 @@
 import { prisma } from "../../db/prisma";
-import { computeSalePrice, computeOldPrice } from "../../pricing/formula";
+import { computeSalePrice, computeOldPrice, computeBillingWeightGrams } from "../../pricing/formula";
 import { translateToRussian } from "../../ai/translate";
 import { updatePrices, updateStocks, getImportStatus, archiveProducts } from "../../ozon/products";
 import { selectWarehouseId } from "../../ozon/warehouses";
@@ -277,19 +277,38 @@ export async function updateHandleImages(handle: string, images: string[], resen
 // güncelle" diye ayrı bir uç yok).
 export async function updateDraftVariant(
   offerId: string,
-  data: { weightGrams?: number; costPrice?: string; unitsInPack?: number; name?: string; heavyPackaging?: boolean }
+  data: {
+    weightGrams?: number;
+    cargoWeightGrams?: number | null;
+    costPrice?: string;
+    unitsInPack?: number;
+    name?: string;
+    heavyPackaging?: boolean;
+  }
 ) {
   const existing = await prisma.product.findUnique({ where: { offerId } });
   const weightGrams = data.weightGrams ?? existing?.weightGrams ?? undefined;
   const costPrice = data.costPrice ?? existing?.costPrice ?? undefined;
   const heavyPackaging = data.heavyPackaging !== undefined ? data.heavyPackaging : existing?.heavyPackaging;
-  const price = costPrice ? computeSalePrice(costPrice, weightGrams, undefined, heavyPackaging) : existing?.price;
+
+  // Net ağırlık (weightGrams) bu çağrıda değiştiyse ve kargo ağırlığı elle verilmediyse,
+  // kargo ağırlığını otomatik yeniden hesaplıyoruz (bkz. Product.cargoWeightGrams).
+  const cargoWeightGrams =
+    data.cargoWeightGrams !== undefined
+      ? data.cargoWeightGrams
+      : data.weightGrams !== undefined && weightGrams
+        ? Math.round(
+            computeBillingWeightGrams(weightGrams, existing?.widthCm, existing?.heightCm, existing?.depthCm, heavyPackaging),
+          )
+        : existing?.cargoWeightGrams;
+
+  const price = costPrice ? computeSalePrice(costPrice, weightGrams, undefined, heavyPackaging, cargoWeightGrams) : existing?.price;
   const finalPrice = price || existing?.price;
   const oldPrice = finalPrice && finalPrice !== existing?.price ? computeOldPrice(finalPrice) : existing?.oldPrice;
 
   const updated = await prisma.product.update({
     where: { offerId },
-    data: { ...data, price: finalPrice, oldPrice },
+    data: { ...data, cargoWeightGrams, price: finalPrice, oldPrice },
   });
 
   if (updated.ozonProductId && finalPrice) {
@@ -341,7 +360,10 @@ export async function createCascadeVariant(params: { baseOfferId: string; unitsI
 
   const costPrice = (Number(base.costPrice) * params.unitsInPack).toFixed(2);
   const weightGrams = base.weightGrams ? base.weightGrams * params.unitsInPack : null;
-  const price = computeSalePrice(costPrice, weightGrams, undefined, base.heavyPackaging) || "0";
+  const cargoWeightGrams = weightGrams
+    ? Math.round(computeBillingWeightGrams(weightGrams, base.widthCm, base.heightCm, base.depthCm, base.heavyPackaging))
+    : null;
+  const price = computeSalePrice(costPrice, weightGrams, undefined, base.heavyPackaging, cargoWeightGrams) || "0";
   const name = params.name?.trim() || `${base.name} - ${params.unitsInPack} Pieces`;
 
   return prisma.product.create({
@@ -351,6 +373,7 @@ export async function createCascadeVariant(params: { baseOfferId: string; unitsI
       price,
       costPrice,
       weightGrams,
+      cargoWeightGrams,
       unitsInPack: params.unitsInPack,
       packBaseOfferId: base.offerId,
       heavyPackaging: base.heavyPackaging,
@@ -538,6 +561,7 @@ export async function submitHandleToOzon(input: SubmitHandleInput) {
         descriptionCategoryId: input.descriptionCategoryId,
         typeId: input.typeId,
         weightGrams: variant.weightGrams ?? 100,
+        cargoWeightGrams: variant.cargoWeightGrams,
         widthCm: variant.widthCm ?? 10,
         heightCm: variant.heightCm ?? 10,
         depthCm: variant.depthCm ?? 10,

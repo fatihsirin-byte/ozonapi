@@ -3,7 +3,7 @@ import { importProducts, getImportStatus, updatePrices, updateStocks, getProduct
 import { getCategoryAttributes } from "../../ozon/categories";
 import { selectWarehouseId } from "../../ozon/warehouses";
 import { buildRichContentJson } from "../../ozon/rich-content";
-import { computeSalePrice, computeOldPrice } from "../../pricing/formula";
+import { computeSalePrice, computeOldPrice, computeBillingWeightGrams } from "../../pricing/formula";
 
 // Ozon hesabının sözleşme para birimi USD — RUB gönderilirse ürün sessizce "pending" kalıp
 // sonunda currency_differs_from_contract hatasıyla düşüyor (Faz 1'de keşfedildi).
@@ -205,6 +205,9 @@ export interface CreateProductInput {
   descriptionCategoryId: number;
   typeId: number;
   weightGrams: number;
+  // Elle düzeltilmiş kargo (faturalanacak) ağırlık — verilmezse net ağırlık + paketleme
+  // payından otomatik hesaplanır (bkz. computeBillingWeightGrams).
+  cargoWeightGrams?: number | null;
   widthCm: number;
   heightCm: number;
   depthCm: number;
@@ -218,11 +221,17 @@ export interface CreateProductInput {
 }
 
 export async function createProduct(input: CreateProductInput) {
+  const cargoWeightGrams =
+    input.cargoWeightGrams ??
+    Math.round(
+      computeBillingWeightGrams(input.weightGrams, input.widthCm, input.heightCm, input.depthCm, input.heavyPackaging),
+    );
   const price = computeSalePrice(
     input.costPrice,
     input.weightGrams,
     { widthCm: input.widthCm, heightCm: input.heightCm, depthCm: input.depthCm },
     input.heavyPackaging,
+    cargoWeightGrams,
   );
   const oldPrice = computeOldPrice(price);
 
@@ -236,6 +245,7 @@ export async function createProduct(input: CreateProductInput) {
       costPrice: input.costPrice,
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
+      cargoWeightGrams,
       unitsInPack: input.unitsInPack,
       heavyPackaging: input.heavyPackaging,
       widthCm: input.widthCm,
@@ -254,6 +264,7 @@ export async function createProduct(input: CreateProductInput) {
       costPrice: input.costPrice,
       currencyCode: CURRENCY_CODE,
       weightGrams: input.weightGrams,
+      cargoWeightGrams,
       unitsInPack: input.unitsInPack,
       heavyPackaging: input.heavyPackaging,
       widthCm: input.widthCm,
@@ -465,6 +476,7 @@ export async function updateProductPrice(offerId: string, costPrice: string, pri
       existing?.weightGrams,
       { widthCm: existing?.widthCm, heightCm: existing?.heightCm, depthCm: existing?.depthCm },
       existing?.heavyPackaging,
+      existing?.cargoWeightGrams,
     );
 
   const oldPrice = computeOldPrice(price);
@@ -476,6 +488,45 @@ export async function updateProductPrice(offerId: string, costPrice: string, pri
 
   await prisma.product.update({ where: { offerId }, data: { costPrice, price, oldPrice } });
   return { price };
+}
+
+// Net ağırlık (weightGrams) değişince kargo ağırlığını (cargoWeightGrams) otomatik yeniden
+// hesaplar — ancak kullanıcı bu çağrıda kargo ağırlığını da elle verdiyse (params.cargoWeightGrams)
+// otomatik hesaplamayı ES GEÇER, elle girileni aynen kaydeder (bkz. computeBillingWeightGrams).
+export async function updateProductWeight(
+  offerId: string,
+  params: {
+    weightGrams?: number | null;
+    cargoWeightGrams?: number | null;
+    widthCm?: number | null;
+    heightCm?: number | null;
+    depthCm?: number | null;
+  },
+) {
+  const existing = await prisma.product.findUnique({ where: { offerId } });
+  if (!existing) throw new Error("Ürün bulunamadı");
+
+  const weightGrams = params.weightGrams !== undefined ? params.weightGrams : existing.weightGrams;
+  const widthCm = params.widthCm !== undefined ? params.widthCm : existing.widthCm;
+  const heightCm = params.heightCm !== undefined ? params.heightCm : existing.heightCm;
+  const depthCm = params.depthCm !== undefined ? params.depthCm : existing.depthCm;
+
+  const cargoWeightGrams =
+    params.cargoWeightGrams !== undefined
+      ? params.cargoWeightGrams
+      : weightGrams
+        ? Math.round(computeBillingWeightGrams(weightGrams, widthCm, heightCm, depthCm, existing.heavyPackaging))
+        : null;
+
+  await prisma.product.update({
+    where: { offerId },
+    data: { weightGrams, cargoWeightGrams, widthCm, heightCm, depthCm },
+  });
+
+  if (existing.costPrice) {
+    return updateProductPrice(offerId, existing.costPrice);
+  }
+  return { price: null };
 }
 
 // Metal kutu/ağır ambalaj gibi standart dışı ürünlerde "ağır ambalaj" işaretini günceller ve

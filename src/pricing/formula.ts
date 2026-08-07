@@ -103,13 +103,18 @@ export function computeSalePrice(
   weightGrams?: number | null,
   dimsCm?: { widthCm?: number | null; heightCm?: number | null; depthCm?: number | null },
   heavyPackaging?: boolean,
+  // Kullanıcı kargo ağırlığını elle düzelttiyse (Product.cargoWeightGrams), formülün kendi
+  // hesapladığı değeri (net ağırlık + paketleme payı) YOK SAYIP doğrudan bunu kullanır.
+  cargoWeightOverrideGrams?: number | null,
 ): string {
   const cost = Number(costPrice);
   if (!cost || Number.isNaN(cost)) return "";
 
-  const billingWeight = weightGrams
-    ? computeBillingWeightGrams(weightGrams, dimsCm?.widthCm, dimsCm?.heightCm, dimsCm?.depthCm, heavyPackaging)
-    : 0;
+  const billingWeight =
+    cargoWeightOverrideGrams ??
+    (weightGrams
+      ? computeBillingWeightGrams(weightGrams, dimsCm?.widthCm, dimsCm?.heightCm, dimsCm?.depthCm, heavyPackaging)
+      : 0);
   const shipping = billingWeight ? estimateShippingCostUsd(billingWeight) : 0;
   const target = cost * (1 + marginRateForCost(cost)) + shipping;
 
@@ -153,16 +158,19 @@ export function computePriceBreakdown(
   dimsCm?: { widthCm?: number | null; heightCm?: number | null; depthCm?: number | null },
   actualPriceOverrideUsd?: number,
   heavyPackaging?: boolean,
+  cargoWeightOverrideGrams?: number | null,
 ): PriceBreakdown | null {
   const cost = Number(costPrice);
   if (!cost || Number.isNaN(cost)) return null;
 
-  const billingWeight = weightGrams
-    ? computeBillingWeightGrams(weightGrams, dimsCm?.widthCm, dimsCm?.heightCm, dimsCm?.depthCm, heavyPackaging)
-    : 0;
+  const billingWeight =
+    cargoWeightOverrideGrams ??
+    (weightGrams
+      ? computeBillingWeightGrams(weightGrams, dimsCm?.widthCm, dimsCm?.heightCm, dimsCm?.depthCm, heavyPackaging)
+      : 0);
   const shippingUsd = billingWeight ? estimateShippingCostUsd(billingWeight) : 0;
 
-  const recommendedStr = computeSalePrice(costPrice, weightGrams, dimsCm, heavyPackaging);
+  const recommendedStr = computeSalePrice(costPrice, weightGrams, dimsCm, heavyPackaging, cargoWeightOverrideGrams);
   const recommendedPriceUsd = recommendedStr ? Number(recommendedStr) : 0;
 
   const actualPriceUsd = actualPriceOverrideUsd ?? recommendedPriceUsd;

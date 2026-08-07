@@ -5,6 +5,7 @@ import {
   updateProductImages,
   updateProductCategoryAttributes,
   updateProductHeavyPackaging,
+  updateProductWeight,
   type ProductAttributeInput,
 } from "@/modules/products/products.service";
 import { OzonApiError } from "@/ozon/client";
@@ -32,11 +33,31 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     images?: string[];
     category?: { descriptionCategoryId: number; typeId: number };
     attributes?: ProductAttributeInput[];
+    weightGrams?: number | null;
+    cargoWeightGrams?: number | null;
+    widthCm?: number | null;
+    heightCm?: number | null;
+    depthCm?: number | null;
   };
 
   try {
     if (body.heavyPackaging !== undefined) {
       await updateProductHeavyPackaging(offerId, body.heavyPackaging);
+    }
+    if (
+      body.weightGrams !== undefined ||
+      body.cargoWeightGrams !== undefined ||
+      body.widthCm !== undefined ||
+      body.heightCm !== undefined ||
+      body.depthCm !== undefined
+    ) {
+      await updateProductWeight(offerId, {
+        weightGrams: body.weightGrams,
+        cargoWeightGrams: body.cargoWeightGrams,
+        widthCm: body.widthCm,
+        heightCm: body.heightCm,
+        depthCm: body.depthCm,
+      });
     }
     if (body.costPrice !== undefined) {
       await updateProductPrice(offerId, body.costPrice, body.priceOverride);

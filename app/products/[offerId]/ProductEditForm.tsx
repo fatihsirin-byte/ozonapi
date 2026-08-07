@@ -17,6 +17,7 @@ interface ProductData {
   lastError: string | null;
   images: unknown;
   weightGrams: number | null;
+  cargoWeightGrams: number | null;
   widthCm: number | null;
   heightCm: number | null;
   depthCm: number | null;
@@ -45,6 +46,56 @@ export function ProductEditForm({ product }: { product: ProductData }) {
   const [costPrice, setCostPrice] = useState(product.costPrice ?? "");
   const [priceOverride, setPriceOverride] = useState<string | null>(null);
   const [heavyPackaging, setHeavyPackaging] = useState(product.heavyPackaging);
+  const [weightGrams, setWeightGrams] = useState(product.weightGrams);
+  const [cargoWeightGrams, setCargoWeightGrams] = useState(
+    product.cargoWeightGrams ??
+      (product.weightGrams
+        ? Math.round(
+            computeBillingWeightGrams(
+              product.weightGrams,
+              product.widthCm,
+              product.heightCm,
+              product.depthCm,
+              product.heavyPackaging,
+            ),
+          )
+        : null),
+  );
+  const [savingWeight, setSavingWeight] = useState(false);
+
+  // Net ağırlık değiştirildiğinde kargo ağırlığını otomatik yeniden hesaplar (paketleme payı +
+  // gerekirse hacimsel ağırlık) — kullanıcı isterse kaydetmeden önce bu değeri elle düzeltebilir.
+  function recalcCargoWeight(nextWeightGrams: number | null) {
+    setCargoWeightGrams(
+      nextWeightGrams
+        ? Math.round(
+            computeBillingWeightGrams(nextWeightGrams, product.widthCm, product.heightCm, product.depthCm, heavyPackaging),
+          )
+        : null,
+    );
+  }
+
+  async function saveWeight() {
+    setSavingWeight(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/products/${product.offerId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weightGrams, cargoWeightGrams }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error ?? "Güncelleme başarısız" });
+        return;
+      }
+      setMessage({ type: "success", text: "Ağırlık kaydedildi." });
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Bilinmeyen hata" });
+    } finally {
+      setSavingWeight(false);
+    }
+  }
   const [showCalculator, setShowCalculator] = useState(false);
   const [images, setImages] = useState<string[]>(Array.isArray(product.images) ? (product.images as string[]) : []);
   const [saving, setSaving] = useState(false);
@@ -239,28 +290,34 @@ export function ProductEditForm({ product }: { product: ProductData }) {
             <label>Ürün adı</label>
             {product.name}
           </div>
-          <div className="field">
-            <label>Ağırlık / Koli Ölçüleri</label>
-            {product.weightGrams ? (
-              <>
-                {product.weightGrams}g · {product.widthCm}×{product.heightCm}×{product.depthCm}cm
-                <div className="hint">
-                  Kargoda kullanılan ağırlık (paketleme payı dahil, gerekirse hacimsel):{" "}
-                  {Math.round(
-                    computeBillingWeightGrams(
-                      product.weightGrams,
-                      product.widthCm,
-                      product.heightCm,
-                      product.depthCm,
-                      heavyPackaging,
-                    ),
-                  )}
-                  g
-                </div>
-              </>
-            ) : (
-              <span className="hint">Bilinmiyor</span>
-            )}
+          <div className="row">
+            <div className="field">
+              <label>Net Ağırlık (g)</label>
+              <input
+                type="number"
+                value={weightGrams ?? ""}
+                onChange={(e) => {
+                  const next = e.target.value ? Number(e.target.value) : null;
+                  setWeightGrams(next);
+                }}
+                onBlur={() => recalcCargoWeight(weightGrams)}
+              />
+              <div className="hint">Koli ölçüleri: {product.widthCm}×{product.heightCm}×{product.depthCm}cm</div>
+            </div>
+            <div className="field">
+              <label>Kargo (Faturalanacak) Ağırlık (g)</label>
+              <input
+                type="number"
+                value={cargoWeightGrams ?? ""}
+                onChange={(e) => setCargoWeightGrams(e.target.value ? Number(e.target.value) : null)}
+              />
+              <div className="hint">Otomatik hesaplanır (paketleme payı + gerekirse hacimsel), elle düzeltilebilir.</div>
+            </div>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <button className="btn-primary" disabled={savingWeight} onClick={saveWeight}>
+              {savingWeight ? "Kaydediliyor..." : "Ağırlığı Kaydet"}
+            </button>
           </div>
           <div className="hint">Kategori/özellik bilgilerini "Kategori & Özellikler" sekmesinden düzenleyebilirsiniz.</div>
         </>
@@ -288,9 +345,10 @@ export function ProductEditForm({ product }: { product: ProductData }) {
                   priceOverride ||
                   computeSalePrice(
                     costPrice,
-                    product.weightGrams,
+                    weightGrams,
                     { widthCm: product.widthCm, heightCm: product.heightCm, depthCm: product.depthCm },
                     heavyPackaging,
+                    cargoWeightGrams,
                   ) ||
                   product.price
                 }
@@ -311,29 +369,10 @@ export function ProductEditForm({ product }: { product: ProductData }) {
               </label>
             </div>
           </div>
-          {product.weightGrams && (
+          {cargoWeightGrams && (
             <div className="hint" style={{ marginBottom: 12 }}>
-              Kargo maliyeti ASE&GBS tarifesine göre hesaplanıp fiyata dahil edildi (
-              {Math.round(
-                computeBillingWeightGrams(
-                  product.weightGrams,
-                  product.widthCm,
-                  product.heightCm,
-                  product.depthCm,
-                  heavyPackaging,
-                ),
-              )}
-              g için ~$
-              {estimateShippingCostUsd(
-                computeBillingWeightGrams(
-                  product.weightGrams,
-                  product.widthCm,
-                  product.heightCm,
-                  product.depthCm,
-                  heavyPackaging,
-                ),
-              ).toFixed(2)}
-              ).
+              Kargo maliyeti ASE&GBS tarifesine göre hesaplanıp fiyata dahil edildi ({cargoWeightGrams}g için ~$
+              {estimateShippingCostUsd(cargoWeightGrams).toFixed(2)}). Ağırlığı "Genel" sekmesinden değiştirebilirsiniz.
             </div>
           )}
           <div style={{ display: "flex", gap: 8 }}>
@@ -348,11 +387,12 @@ export function ProductEditForm({ product }: { product: ProductData }) {
           {showCalculator && (
             <PriceCalculatorModal
               costPrice={costPrice}
-              weightGrams={product.weightGrams}
+              weightGrams={weightGrams}
               widthCm={product.widthCm}
               heightCm={product.heightCm}
               depthCm={product.depthCm}
               heavyPackaging={heavyPackaging}
+              cargoWeightGrams={cargoWeightGrams}
               currentPrice={priceOverride || product.price}
               onClose={() => setShowCalculator(false)}
               onApply={(priceUsd) => {

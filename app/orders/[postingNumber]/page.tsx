@@ -7,6 +7,7 @@ import { EtgbInfo } from "./EtgbInfo";
 import { CopyableField } from "./CopyableField";
 import { transliterateRussian } from "@/utils/transliterate";
 import { LabelDownloadButton } from "./LabelDownloadButton";
+import { RealWeightInput } from "./RealWeightInput";
 
 export const dynamic = "force-dynamic";
 
@@ -139,6 +140,7 @@ export default async function OrderDetailPage({
                 <th>Satış Fiyatı</th>
                 <th>Alış Fiyatı</th>
                 <th>Brüt Kâr</th>
+                <th>Gerçek Ağırlık</th>
               </tr>
             </thead>
             <tbody>
@@ -173,6 +175,17 @@ export default async function OrderDetailPage({
                       {unitCost != null
                         ? formatMoney(Number(item.price) * item.quantity - unitCost * item.quantity)
                         : "-"}
+                    </td>
+                    <td>
+                      {item.product ? (
+                        <RealWeightInput
+                          offerId={item.offerId}
+                          initialConfirmed={item.product.weightConfirmed}
+                          initialWeightGrams={item.product.weightGrams}
+                        />
+                      ) : (
+                        <span className="hint">ürün yok</span>
+                      )}
                     </td>
                   </tr>
                 );

@@ -529,6 +529,26 @@ export async function updateProductWeight(
   return { price: null };
 }
 
+// Sipariş ekranında bir ürün ilk kez satıldığında ya da gerçek ağırlığı hiç girilmediyse
+// kullanıcıdan tartılmış gerçek ağırlığı istiyoruz — bu, tahmini/Shopify'dan gelen weightGrams'ın
+// yerine geçer. Paketleme payı TEKRAR eklenmiyor (computeBillingWeightGrams çağrılmıyor) çünkü
+// kullanıcı zaten kargoya çıkan halini (paketlenmiş) tartıyor — cargoWeightGrams doğrudan bu değere
+// eşitlenir. weightConfirmed=true olduktan sonra diğer siparişlerde bu ürün için bir daha sorulmaz.
+export async function confirmRealWeight(offerId: string, realWeightGrams: number) {
+  const existing = await prisma.product.findUnique({ where: { offerId } });
+  if (!existing) throw new Error("Ürün bulunamadı");
+
+  await prisma.product.update({
+    where: { offerId },
+    data: { weightGrams: realWeightGrams, cargoWeightGrams: realWeightGrams, weightConfirmed: true },
+  });
+
+  if (existing.costPrice) {
+    return updateProductPrice(offerId, existing.costPrice);
+  }
+  return { price: null };
+}
+
 // Metal kutu/ağır ambalaj gibi standart dışı ürünlerde "ağır ambalaj" işaretini günceller ve
 // fiyatı bu yeni ağırlık varsayımıyla (paketleme yüzdesi 2.5 katına çıkar) yeniden hesaplayıp Ozon'a gönderir.
 export async function updateProductHeavyPackaging(offerId: string, heavyPackaging: boolean) {

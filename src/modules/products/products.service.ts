@@ -550,15 +550,26 @@ export async function confirmRealWeight(offerId: string, realWeightGrams: number
 }
 
 // Metal kutu/ağır ambalaj gibi standart dışı ürünlerde "ağır ambalaj" işaretini günceller ve
-// fiyatı bu yeni ağırlık varsayımıyla (paketleme yüzdesi 2.5 katına çıkar) yeniden hesaplayıp Ozon'a gönderir.
+// fiyatı bu yeni ağırlık varsayımıyla (paketleme yüzdesi %65'e çıkar) yeniden hesaplayıp Ozon'a gönderir.
+// ÖNEMLİ: paketleme payı değiştiği için kargo (faturalanacak) ağırlığı da yeniden hesaplanmalı —
+// aksi halde cargoWeightGrams eski (yanlış paketleme oranıyla hesaplanmış) değerde kalır ve fiyat
+// hiç değişmez, checkbox işlevsiz görünür (2026-08-10'da canlıda tespit edildi). Ürünün gerçek
+// (tartılmış) ağırlığı teyit edildiyse (weightConfirmed) dokunmuyoruz — o zaten ölçülmüş kargo ağırlığı.
 export async function updateProductHeavyPackaging(offerId: string, heavyPackaging: boolean) {
   const existing = await prisma.product.findUnique({ where: { offerId } });
+  const cargoWeightGrams =
+    existing?.weightConfirmed || !existing?.weightGrams
+      ? existing?.cargoWeightGrams
+      : Math.round(
+          computeBillingWeightGrams(existing.weightGrams, existing.widthCm, existing.heightCm, existing.depthCm, heavyPackaging),
+        );
+
   if (!existing?.costPrice) {
-    await prisma.product.update({ where: { offerId }, data: { heavyPackaging } });
+    await prisma.product.update({ where: { offerId }, data: { heavyPackaging, cargoWeightGrams } });
     return { price: null };
   }
 
-  await prisma.product.update({ where: { offerId }, data: { heavyPackaging } });
+  await prisma.product.update({ where: { offerId }, data: { heavyPackaging, cargoWeightGrams } });
   return updateProductPrice(offerId, existing.costPrice);
 }
 

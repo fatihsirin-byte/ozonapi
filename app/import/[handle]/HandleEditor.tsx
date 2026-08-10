@@ -464,11 +464,21 @@ export function HandleEditor({ handle }: { handle: string }) {
     setVariants((prev) =>
       prev ? prev.map((v) => (v.offerId === offerId ? { ...v, heavyPackaging } : v)) : prev,
     );
-    await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
+    const res = await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ heavyPackaging }),
     });
+    // Ağır ambalaj paketleme payını değiştirdiği için kargo ağırlığı sunucu tarafında yeniden
+    // hesaplanıyor — güncel değeri tabloya yansıtıyoruz (bkz. updateDraftVariant).
+    const data = await res.json().catch(() => null);
+    if (data?.product) {
+      setVariants((prev) =>
+        prev
+          ? prev.map((v) => (v.offerId === offerId ? { ...v, cargoWeightGrams: data.product.cargoWeightGrams } : v))
+          : prev,
+      );
+    }
   }
 
   const [recalculating, setRecalculating] = useState<string | null>(null);

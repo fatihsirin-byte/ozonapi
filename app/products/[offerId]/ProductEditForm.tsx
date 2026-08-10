@@ -18,6 +18,7 @@ interface ProductData {
   images: unknown;
   weightGrams: number | null;
   cargoWeightGrams: number | null;
+  weightConfirmed: boolean;
   widthCm: number | null;
   heightCm: number | null;
   depthCm: number | null;
@@ -63,13 +64,17 @@ export function ProductEditForm({ product }: { product: ProductData }) {
   );
   const [savingWeight, setSavingWeight] = useState(false);
 
-  // Net ağırlık değiştirildiğinde kargo ağırlığını otomatik yeniden hesaplar (paketleme payı +
-  // gerekirse hacimsel ağırlık) — kullanıcı isterse kaydetmeden önce bu değeri elle düzeltebilir.
-  function recalcCargoWeight(nextWeightGrams: number | null) {
+  // Net ağırlık YA DA ağır ambalaj işareti değiştirildiğinde kargo ağırlığını otomatik yeniden
+  // hesaplar (paketleme payı + gerekirse hacimsel ağırlık) — kullanıcı isterse kaydetmeden önce
+  // bu değeri elle düzeltebilir. Ağır ambalaj toggle'ı paketleme oranını değiştirdiği için bunu
+  // tetiklememesi, checkbox'ın fiyatı hiç etkilememesi gibi görünmesine yol açıyordu (2026-08-10'da
+  // canlıda tespit edildi). Gerçek (tartılmış) ağırlık teyit edildiyse (weightConfirmed) dokunmuyoruz.
+  function recalcCargoWeight(nextWeightGrams: number | null, nextHeavyPackaging: boolean) {
+    if (product.weightConfirmed) return;
     setCargoWeightGrams(
       nextWeightGrams
         ? Math.round(
-            computeBillingWeightGrams(nextWeightGrams, product.widthCm, product.heightCm, product.depthCm, heavyPackaging),
+            computeBillingWeightGrams(nextWeightGrams, product.widthCm, product.heightCm, product.depthCm, nextHeavyPackaging),
           )
         : null,
     );
@@ -300,7 +305,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
                   const next = e.target.value ? Number(e.target.value) : null;
                   setWeightGrams(next);
                 }}
-                onBlur={() => recalcCargoWeight(weightGrams)}
+                onBlur={() => recalcCargoWeight(weightGrams, heavyPackaging)}
               />
               <div className="hint">Koli ölçüleri: {product.widthCm}×{product.heightCm}×{product.depthCm}cm</div>
             </div>
@@ -363,7 +368,10 @@ export function ProductEditForm({ product }: { product: ProductData }) {
                 <input
                   type="checkbox"
                   checked={heavyPackaging}
-                  onChange={(e) => setHeavyPackaging(e.target.checked)}
+                  onChange={(e) => {
+                    setHeavyPackaging(e.target.checked);
+                    recalcCargoWeight(weightGrams, e.target.checked);
+                  }}
                 />
                 Ağır Ambalaj (metal kutu vb.)
               </label>

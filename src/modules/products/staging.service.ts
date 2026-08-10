@@ -291,12 +291,16 @@ export async function updateDraftVariant(
   const costPrice = data.costPrice ?? existing?.costPrice ?? undefined;
   const heavyPackaging = data.heavyPackaging !== undefined ? data.heavyPackaging : existing?.heavyPackaging;
 
-  // Net ağırlık (weightGrams) bu çağrıda değiştiyse ve kargo ağırlığı elle verilmediyse,
-  // kargo ağırlığını otomatik yeniden hesaplıyoruz (bkz. Product.cargoWeightGrams).
+  // Net ağırlık (weightGrams) YA DA ağır ambalaj işareti bu çağrıda değiştiyse ve kargo ağırlığı
+  // elle verilmediyse, kargo ağırlığını otomatik yeniden hesaplıyoruz (bkz. Product.cargoWeightGrams).
+  // Ağır ambalaj toggle'ı paketleme payını değiştirdiği için bunu da tetiklemesi ŞART — aksi halde
+  // checkbox fiyatı etkilemiyor gibi görünür (2026-08-10'da canlıda tespit edildi). Gerçek (tartılmış)
+  // ağırlık teyit edildiyse (weightConfirmed) dokunmuyoruz.
+  const weightNeedsRecalc = data.weightGrams !== undefined || data.heavyPackaging !== undefined;
   const cargoWeightGrams =
     data.cargoWeightGrams !== undefined
       ? data.cargoWeightGrams
-      : data.weightGrams !== undefined && weightGrams
+      : weightNeedsRecalc && weightGrams && !existing?.weightConfirmed
         ? Math.round(
             computeBillingWeightGrams(weightGrams, existing?.widthCm, existing?.heightCm, existing?.depthCm, heavyPackaging),
           )

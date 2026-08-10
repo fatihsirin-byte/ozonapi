@@ -195,7 +195,10 @@ export function OzonInvoicePanel({
           <a
             href={filePreviewUrl ?? undefined}
             target="_blank"
-            rel="noreferrer"
+            // NOT: rel="noreferrer"/"noopener" burada BİLEREK yok — blob: URL'ler yeni sekmeye
+            // opener bağlantısı olmadan (noopener ile) taşınamıyor, sekme boş açılıyor (2026-08-10'da
+            // canlıda tespit edildi). Bu link zaten aynı origin'e (kendi blob'umuza) gittiği için
+            // noopener'ın engellemeye çalıştığı güvenlik riski yok.
             onClick={(e) => e.stopPropagation()}
             title="Yeni sekmede aç (göndermeden önce kontrol et)"
           >

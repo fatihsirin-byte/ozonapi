@@ -44,7 +44,25 @@ export function OzonInvoicePanel({
   const [invoice, setInvoice] = useState<InvoiceResult | null>(null);
   const [hsCodes, setHsCodes] = useState<Record<string, string>>({});
   const [file, setFile] = useState<File | null>(null);
+  const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+
+  // Seçilen PDF'i Ozon'a göndermeden önce yeni sekmede açıp (tarih vb.) kontrol edebilmek için —
+  // her yeni dosya seçiminde eski object URL serbest bırakılır (bellek sızıntısı olmasın diye).
+  function selectFile(next: File) {
+    setFile(next);
+    setFilePreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(next);
+    });
+  }
+
+  useEffect(() => {
+    return () => {
+      if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [number, setNumber] = useState("");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [price, setPrice] = useState(String(defaultPrice.toFixed(2)));
@@ -93,6 +111,10 @@ export function OzonInvoicePanel({
       const refreshed = await fetch(`/api/orders/${encodeURIComponent(postingNumber)}/invoice`).then((r) => r.json());
       setInvoice(refreshed.invoice);
       setFile(null);
+      setFilePreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bilinmeyen hata");
     } finally {
@@ -150,7 +172,7 @@ export function OzonInvoicePanel({
         onDrop={(e) => {
           e.preventDefault();
           setDragOver(false);
-          if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+          if (e.dataTransfer.files[0]) selectFile(e.dataTransfer.files[0]);
         }}
         onClick={() => inputRef.current?.click()}
         style={{
@@ -167,9 +189,21 @@ export function OzonInvoicePanel({
           type="file"
           accept="application/pdf"
           style={{ display: "none" }}
-          onChange={(e) => e.target.files?.[0] && setFile(e.target.files[0])}
+          onChange={(e) => e.target.files?.[0] && selectFile(e.target.files[0])}
         />
-        {file ? <span>{file.name}</span> : <span className="hint">PDF faturayı buraya sürükle ya da tıkla</span>}
+        {file ? (
+          <a
+            href={filePreviewUrl ?? undefined}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            title="Yeni sekmede aç (göndermeden önce kontrol et)"
+          >
+            {file.name}
+          </a>
+        ) : (
+          <span className="hint">PDF faturayı buraya sürükle ya da tıkla</span>
+        )}
       </div>
 
       <div className="row" style={{ marginBottom: 12 }}>

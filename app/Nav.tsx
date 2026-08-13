@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/products", label: "Ürünler" },
   { href: "/orders", label: "Siparişler" },
   { href: "/import", label: "Shopify İçe Aktar" },
+  { href: "/fiyat", label: "Fiyat" },
 ];
 
 export function Nav() {

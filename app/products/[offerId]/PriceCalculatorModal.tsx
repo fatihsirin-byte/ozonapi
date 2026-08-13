@@ -70,7 +70,7 @@ export function PriceCalculatorModal({
 
         {recommended && (
           <div className="field">
-            <label>Önerilen Satış Fiyatı (USD) — %40 marj hedefi</label>
+            <label>Önerilen Satış Fiyatı (USD)</label>
             <div style={{ color: "var(--success)", fontWeight: 600 }}>${fmt(recommended.recommendedPriceUsd)}</div>
           </div>
         )}

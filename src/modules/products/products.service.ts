@@ -413,6 +413,43 @@ export async function getProduct(offerId: string) {
   return prisma.product.findUnique({ where: { offerId } });
 }
 
+// "Fiyat" sayfası için — /import'taki listDraftHandlesPage ile aynı arama/sayfalama deseni,
+// ama draft OLMAYAN (gerçek, Ozon'a bağlı) ürünler için. Fiyat Hesaplayıcı modalının ihtiyaç
+// duyduğu tüm alanlar (costPrice/ağırlık/boyut/heavyPackaging) dahil.
+export async function listProductsPage(page: number, pageSize: number, filters: { q?: string } = {}) {
+  const q = filters.q?.trim();
+  const where = {
+    status: { not: "draft" },
+    ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" as const } }, { offerId: { contains: q, mode: "insensitive" as const } }] } : {}),
+  };
+
+  const [items, total] = await Promise.all([
+    prisma.product.findMany({
+      where,
+      orderBy: { name: "asc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      select: {
+        offerId: true,
+        name: true,
+        images: true,
+        price: true,
+        costPrice: true,
+        oldPrice: true,
+        weightGrams: true,
+        cargoWeightGrams: true,
+        heavyPackaging: true,
+        widthCm: true,
+        heightCm: true,
+        depthCm: true,
+      },
+    }),
+    prisma.product.count({ where }),
+  ]);
+
+  return { items, total, page, pageSize };
+}
+
 // Ozon'a bağlı (ozonProductId'si olan) HER ürünün stoğunu tek bir sabit adede ayarlar.
 // /v2/products/stocks tek çağrıda en fazla 100 offer_id kabul ediyor, o yüzden 100'lük
 // gruplara bölüp gönderiyoruz.

@@ -4,6 +4,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PriceCalculatorModal } from "../products/[offerId]/PriceCalculatorModal";
 
+interface PriceIndexData {
+  minimal_price: string;
+  minimal_price_currency: string;
+  price_index_value: number;
+}
+
+interface PriceIndex {
+  color_index: "COLOR_INDEX_GREEN" | "COLOR_INDEX_YELLOW" | "COLOR_INDEX_RED" | "COLOR_INDEX_WITHOUT_INDEX";
+  external_index_data: PriceIndexData;
+  ozon_index_data: PriceIndexData;
+  self_marketplaces_index_data: PriceIndexData;
+}
+
 interface PriceProduct {
   offerId: string;
   name: string;
@@ -17,6 +30,41 @@ interface PriceProduct {
   widthCm: number | null;
   heightCm: number | null;
   depthCm: number | null;
+  priceIndex?: PriceIndex | null;
+}
+
+// Ozon'un renklendirdiği referans fiyat verisinden (ozon_index_data öncelikli, o boşsa
+// external) minimal_price'ı ve para birimini seçer — hangisi doluysa o gösterilir.
+function pickReference(idx: PriceIndex): PriceIndexData | null {
+  if (idx.ozon_index_data?.minimal_price) return idx.ozon_index_data;
+  if (idx.external_index_data?.minimal_price) return idx.external_index_data;
+  if (idx.self_marketplaces_index_data?.minimal_price) return idx.self_marketplaces_index_data;
+  return null;
+}
+
+function competitivenessBadge(idx?: PriceIndex | null) {
+  if (!idx || idx.color_index === "COLOR_INDEX_WITHOUT_INDEX") {
+    return <span className="hint">Karşılaştırma yok</span>;
+  }
+  const ref = pickReference(idx);
+  const color =
+    idx.color_index === "COLOR_INDEX_GREEN"
+      ? "var(--success)"
+      : idx.color_index === "COLOR_INDEX_RED"
+        ? "var(--danger)"
+        : "#e0a940"; // yellow — CSS değişkenlerinde tanımlı değil, tek kullanım için sabit
+  const label = idx.color_index === "COLOR_INDEX_GREEN" ? "Rekabetçi" : idx.color_index === "COLOR_INDEX_RED" ? "Pahalı" : "Ortalama";
+  return (
+    <div>
+      <span style={{ color, fontWeight: 600 }}>● {label}</span>
+      {ref && (
+        <div className="hint" style={{ margin: 0 }}>
+          Piyasa: {ref.minimal_price_currency === "RUB" ? "₽" : "$"}
+          {Number(ref.minimal_price).toLocaleString("tr-TR", { maximumFractionDigits: 2 })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const PAGE_SIZE = 25;
@@ -119,6 +167,7 @@ export function PriceList() {
             <tr>
               <th>Görsel</th>
               <th>Ürün</th>
+              <th>Rekabet</th>
             </tr>
           </thead>
           <tbody>
@@ -144,6 +193,7 @@ export function PriceList() {
                       {item.offerId}
                     </div>
                   </td>
+                  <td>{competitivenessBadge(item.priceIndex)}</td>
                 </tr>
               );
             })}

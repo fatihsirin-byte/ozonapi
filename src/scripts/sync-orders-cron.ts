@@ -6,12 +6,15 @@ import { backfillMissingStock } from "../modules/products/products.service";
 const DEFAULT_STOCK = 100;
 
 // PM2 altında ayrı bir process olarak sürekli çalışır (bkz. ecosystem.config.cjs "ozon-sync-cron"),
-// her 15 dakikada bir son 2 günün sipariş + finans verisini çeker (Ozon tarafındaki gecikmeli
-// muhasebeleştirme yüzünden "son 2 gün" penceresi kullanılıyor, tek günlük pencere geç gelen
-// kesintileri kaçırabilir).
+// her 15 dakikada bir son 30 günün sipariş + finans verisini çeker. NOT: since/to, Ozon'un
+// filter'ında siparişin YERLEŞTİRİLME (order_date) tarihine göre çalışıyor — sipariş DURUMU
+// (kargoya verildi/teslim edildi/iptal) günler sonra değişebiliyor, o yüzden pencere dar
+// tutulursa (önceden 2 gündü) eski bir siparişin durum güncellemesi otomatik yakalanamıyor,
+// sadece elle "Senkronize Et" (30 gün) ile görünüyordu — 2026-08-14'te kullanıcı bunu fark
+// etti, pencere elle senkronizasyonla aynı 30 güne çıkarıldı.
 async function runSync() {
   const to = new Date().toISOString();
-  const since = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   try {
     const orders = await syncFbsOrders({ since, to });
     const txCount = await syncTransactionsForDateRange(since, to);

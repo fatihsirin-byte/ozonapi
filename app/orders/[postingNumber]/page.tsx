@@ -200,7 +200,11 @@ export default async function OrderDetailPage({
         <h3 style={{ marginTop: 0 }}>Ozon Faturası (Proforma / KDV İadesi)</h3>
         <OzonInvoicePanel
           postingNumber={order.postingNumber}
-          items={order.items.map((item) => ({ offerId: item.offerId, name: item.product?.name ?? item.offerId }))}
+          items={order.items.map((item) => ({
+            offerId: item.offerId,
+            name: item.product?.name ?? item.offerId,
+            ozonSku: item.ozonSku != null ? String(item.ozonSku) : null,
+          }))}
           defaultPrice={orderAmount}
           suggestedInvoiceAmount={orderCost == null ? null : orderCost * 1.4}
         />

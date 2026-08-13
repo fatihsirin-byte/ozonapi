@@ -62,11 +62,13 @@ export async function syncFbsOrders(params: { since: string; to: string; status?
             orderId: order.id,
             productId: product?.id,
             offerId: item.offer_id,
+            ozonSku: item.sku != null ? BigInt(item.sku) : null,
             quantity: item.quantity,
             price: item.price,
           },
           update: {
             productId: product?.id,
+            ozonSku: item.sku != null ? BigInt(item.sku) : null,
             quantity: item.quantity,
             price: item.price,
           },

@@ -112,6 +112,10 @@ model OrderItem {
   product   Product? @relation(fields: [productId], references: [id])
   productId String?
   offerId   String
+  ozonSku   BigInt? // Ozon'un posting içindeki NUMERİK sku'su (offer_id'den farklı — bizim kendi kodumuz
+                     // yerine Ozon'un ürün eşleştirmesi için kullandığı kimlik). Fatura (hs_codes) gibi
+                     // Ozon'a geri gönderilen isteklerde offerId DEĞİL bu kullanılmalı (2026-08-13'te
+                     // "posting doesn't contain product_id" hatasıyla tespit edildi).
   quantity  Int
   price     String
 

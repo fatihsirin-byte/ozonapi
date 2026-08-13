@@ -5,6 +5,9 @@ import { useEffect, useRef, useState } from "react";
 interface OrderItemLite {
   offerId: string;
   name: string;
+  ozonSku: string | null; // Ozon'un posting içindeki NUMERİK sku'su — offerId'den farklı,
+  // fatura hs_codes[].sku alanına bu gitmeli (offerId gönderilirse Ozon "posting doesn't
+  // contain product_id ..." hatası verir, 2026-08-13'te tespit edildi).
 }
 
 interface InvoiceResult {
@@ -46,9 +49,14 @@ export function OzonInvoicePanel({
   const [file, setFile] = useState<File | null>(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
-  // Seçilen PDF'i Ozon'a göndermeden önce yeni sekmede açıp (tarih vb.) kontrol edebilmek için —
-  // her yeni dosya seçiminde eski object URL serbest bırakılır (bellek sızıntısı olmasın diye).
+  // Seçilen PDF'i Ozon'a göndermeden önce (tarih vb.) kontrol edebilmek için — her yeni dosya
+  // seçiminde eski object URL serbest bırakılır (bellek sızıntısı olmasın diye).
+  // NOT: Önizleme bir <iframe> içinde AÇILIYOR, yeni sekmede DEĞİL — blob: URL'ler yeni sekmede
+  // Safari'de (rel/noopener ayarından bağımsız olarak) hep boş açılıyor, Chrome'da da noopener
+  // verilince farklı render process'te açıldığı için blob çözülemiyor. iframe aynı browsing
+  // context'i kullandığı için her tarayıcıda tutarlı çalışıyor (2026-08-13'te tespit edildi).
   function selectFile(next: File) {
     setFile(next);
     setFilePreviewUrl((prev) => {
@@ -87,6 +95,11 @@ export function OzonInvoicePanel({
       setError("Önce bir PDF seçin/sürükleyin");
       return;
     }
+    const missingSku = items.find((item) => !item.ozonSku);
+    if (missingSku) {
+      setError(`${missingSku.offerId} için Ozon sku'su bulunamadı — siparişi yeniden senkronize edin`);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -100,7 +113,10 @@ export function OzonInvoicePanel({
           date: new Date(date).toISOString(),
           price: Number(price) || 0,
           priceCurrency: currency,
-          hsCodes: items.map((item) => ({ code: hsCodes[item.offerId] ?? "", sku: item.offerId })),
+          // NOT: sku alanına offerId DEĞİL Ozon'un numerik sku'su gitmeli — Ozon posting'deki ürünü
+          // bununla eşliyor, offerId göndermek "posting doesn't contain product_id ..." hatası verir
+          // (2026-08-13'te tespit edildi).
+          hsCodes: items.map((item) => ({ code: hsCodes[item.offerId] ?? "", sku: item.ozonSku ?? "" })),
         }),
       });
       const data = await res.json();
@@ -192,22 +208,65 @@ export function OzonInvoicePanel({
           onChange={(e) => e.target.files?.[0] && selectFile(e.target.files[0])}
         />
         {file ? (
-          <a
-            href={filePreviewUrl ?? undefined}
-            target="_blank"
-            // NOT: rel="noreferrer"/"noopener" burada BİLEREK yok — blob: URL'ler yeni sekmeye
-            // opener bağlantısı olmadan (noopener ile) taşınamıyor, sekme boş açılıyor (2026-08-10'da
-            // canlıda tespit edildi). Bu link zaten aynı origin'e (kendi blob'umuza) gittiği için
-            // noopener'ın engellemeye çalıştığı güvenlik riski yok.
-            onClick={(e) => e.stopPropagation()}
-            title="Yeni sekmede aç (göndermeden önce kontrol et)"
-          >
-            {file.name}
-          </a>
+          <span>
+            {file.name}{" "}
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ marginLeft: 8 }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowPreview(true);
+              }}
+              title="Önizle (göndermeden önce kontrol et)"
+            >
+              Önizle
+            </button>
+          </span>
         ) : (
           <span className="hint">PDF faturayı buraya sürükle ya da tıkla</span>
         )}
       </div>
+
+      {showPreview && filePreviewUrl && (
+        <div
+          onClick={() => setShowPreview(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--bg)",
+              borderRadius: 8,
+              width: "100%",
+              maxWidth: 800,
+              height: "90vh",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 12, borderBottom: "1px solid var(--border)" }}>
+              <span className="hint">{file?.name}</span>
+              <button type="button" className="btn-secondary" onClick={() => setShowPreview(false)}>
+                Kapat
+              </button>
+            </div>
+            {/* Blob URL yeni sekmede (target="_blank") Safari'de her zaman, Chrome'da noopener
+                verilince boş açılıyordu — iframe aynı browsing context'i paylaştığı için sorun yok. */}
+            <iframe src={filePreviewUrl} title="Fatura önizleme" style={{ flex: 1, border: "none" }} />
+          </div>
+        </div>
+      )}
 
       <div className="row" style={{ marginBottom: 12 }}>
         <div className="field" style={{ margin: 0 }}>

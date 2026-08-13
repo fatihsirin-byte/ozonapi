@@ -15,6 +15,15 @@ function formatMoney(n: number) {
   return `$${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// Ozon'un finans/işlem API'si (FinanceTransaction — komisyon/kargo/diğer kesinti/net) tutarları
+// RUB cinsinden dönüyor, hesabın sözleşme para birimi USD olsa da (2026-08-14'te Ozon'un kendi
+// satıcı panelindeki "-360 ₽" değeriyle karşılaştırılıp doğrulandı — bizim sistem bunu yanlışlıkla
+// "-$360" olarak gösteriyordu, ~80x büyütülmüş görünüyordu). Sabit bir kurla $'a çevirmek yerine
+// gerçek para birimini (₽) gösteriyoruz — tahmini bir kur kullanmak yeni bir hata riski taşır.
+function formatRub(n: number) {
+  return `₽${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 interface OrderRawPayload {
   shipment_date?: string;
   customer?: {
@@ -94,7 +103,9 @@ export default async function OrderDetailPage({
         {orderCost != null && (
           <div>
             <div className="hint">Brüt Kâr</div>
-            <div className="value" style={{ color: "var(--success)" }}>{formatMoney(orderAmount - orderCost)}</div>
+            <div className="value" style={{ color: orderAmount - orderCost >= 0 ? "var(--success)" : "var(--danger)" }}>
+              {formatMoney(orderAmount - orderCost)}
+            </div>
           </div>
         )}
         {raw?.shipment_date && (
@@ -216,26 +227,30 @@ export default async function OrderDetailPage({
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Finans Kesintileri (PNL)</h3>
+        <div className="hint" style={{ marginBottom: 16 }}>
+          Bu bölümdeki tutarlar Ozon'un finans/işlem verisinden geliyor ve <strong>₽ (RUB)</strong> cinsinden —
+          yukarıdaki $ tutarlarla (satış/alış/brüt kâr, bizim kendi USD fiyatımız) karıştırılmasın.
+        </div>
         <div className="summary-grid" style={{ marginBottom: 16 }}>
           <div>
             <div className="hint">Toplam Tutar</div>
-            <div className="value">{formatMoney(totals.amount)}</div>
+            <div className="value">{formatRub(totals.amount)}</div>
           </div>
           <div>
             <div className="hint">Komisyon</div>
-            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(totals.commission)}</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatRub(totals.commission)}</div>
           </div>
           <div>
             <div className="hint">Kargo</div>
-            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(totals.delivery)}</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatRub(totals.delivery)}</div>
           </div>
           <div>
             <div className="hint">Diğer</div>
-            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(totals.other)}</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatRub(totals.other)}</div>
           </div>
           <div>
             <div className="hint">Net</div>
-            <div className="value" style={{ color: "var(--success)" }}>{formatMoney(net)}</div>
+            <div className="value" style={{ color: net >= 0 ? "var(--success)" : "var(--danger)" }}>{formatRub(net)}</div>
           </div>
         </div>
         {order.transactions.length === 0 ? (
@@ -248,10 +263,10 @@ export default async function OrderDetailPage({
               <tr>
                 <th>Tarih</th>
                 <th>Tip</th>
-                <th>Tutar</th>
-                <th>Komisyon</th>
-                <th>Kargo</th>
-                <th>Diğer</th>
+                <th>Tutar (₽)</th>
+                <th>Komisyon (₽)</th>
+                <th>Kargo (₽)</th>
+                <th>Diğer (₽)</th>
               </tr>
             </thead>
             <tbody>
@@ -259,10 +274,10 @@ export default async function OrderDetailPage({
                 <tr key={t.id}>
                   <td>{new Date(t.operationDate).toLocaleString("tr-TR")}</td>
                   <td>{t.operationType}</td>
-                  <td>{formatMoney(t.amount)}</td>
-                  <td>{formatMoney(t.commissionAmount ?? 0)}</td>
-                  <td>{formatMoney(t.deliveryCharge ?? 0)}</td>
-                  <td>{formatMoney(t.otherCharges ?? 0)}</td>
+                  <td>{formatRub(t.amount)}</td>
+                  <td>{formatRub(t.commissionAmount ?? 0)}</td>
+                  <td>{formatRub(t.deliveryCharge ?? 0)}</td>
+                  <td>{formatRub(t.otherCharges ?? 0)}</td>
                 </tr>
               ))}
             </tbody>

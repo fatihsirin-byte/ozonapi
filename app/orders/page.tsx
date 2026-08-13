@@ -17,6 +17,13 @@ function formatMoney(n: number) {
   return `$${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// Ozon'un finans/işlem API'si (PNL kartı) tutarları RUB cinsinden dönüyor, hesabın sözleşme para
+// birimi USD olsa da (2026-08-14'te Ozon'un kendi panelindeki "-360 ₽" değeriyle karşılaştırılıp
+// doğrulandı — sistemimiz bunu yanlışlıkla "-$360" gösteriyordu, ~80x büyütülmüş görünüyordu).
+function formatRub(n: number) {
+  return `₽${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 function getShipmentDate(rawPayload: unknown): string | null {
   const date = (rawPayload as { shipment_date?: string } | null)?.shipment_date;
   return date ?? null;
@@ -78,6 +85,10 @@ export default async function OrdersPage({
 
       <div className="card" style={{ marginBottom: 16 }}>
         <h3 style={{ marginTop: 0 }}>Son 30 Gün PNL (Ozon finans işlemleri)</h3>
+        <div className="hint" style={{ marginBottom: 16 }}>
+          Bu kart Ozon'un finans/işlem verisinden geliyor ve <strong>₽ (RUB)</strong> cinsinden — yukarıdaki
+          "Brüt Kâr" kartıyla (bizim kendi USD fiyatımız) karıştırılmasın.
+        </div>
         {!hasSettledData && (
           <div className="hint" style={{ marginBottom: 16, color: "var(--muted)" }}>
             Ozon, komisyon/kargo/diğer kesintileri sipariş <strong>teslim edildikten</strong> sonra
@@ -89,23 +100,25 @@ export default async function OrdersPage({
         <div className="summary-grid" style={{ marginBottom: 16 }}>
           <div>
             <div className="hint">Toplam Tutar</div>
-            <div className="value">{formatMoney(pnl.amount)}</div>
+            <div className="value">{formatRub(pnl.amount)}</div>
           </div>
           <div>
             <div className="hint">Komisyon</div>
-            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(pnl.commission)}</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatRub(pnl.commission)}</div>
           </div>
           <div>
             <div className="hint">Kargo</div>
-            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(pnl.delivery)}</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatRub(pnl.delivery)}</div>
           </div>
           <div>
             <div className="hint">Diğer Kesintiler</div>
-            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(pnl.other)}</div>
+            <div className="value" style={{ color: "var(--danger)" }}>{formatRub(pnl.other)}</div>
           </div>
           <div>
             <div className="hint">Net</div>
-            <div className="value" style={{ color: "var(--success)" }}>{formatMoney(pnl.net)}</div>
+            <div className="value" style={{ color: pnl.net >= 0 ? "var(--success)" : "var(--danger)" }}>
+              {formatRub(pnl.net)}
+            </div>
           </div>
         </div>
         {pnl.byOperationType.length > 0 && (
@@ -114,7 +127,7 @@ export default async function OrdersPage({
               <tr>
                 <th>İşlem Tipi</th>
                 <th>Adet</th>
-                <th>Toplam Tutar</th>
+                <th>Toplam Tutar (₽)</th>
               </tr>
             </thead>
             <tbody>
@@ -122,7 +135,7 @@ export default async function OrdersPage({
                 <tr key={t.operationType}>
                   <td>{t.operationType}</td>
                   <td>{t.count}</td>
-                  <td>{formatMoney(t.amount)}</td>
+                  <td>{formatRub(t.amount)}</td>
                 </tr>
               ))}
             </tbody>

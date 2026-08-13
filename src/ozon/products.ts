@@ -61,16 +61,16 @@ export interface OzonPriceUpdateResponse {
 
 // Sadece fiyat güncellemek için — tüm ürünü (kategori/attribute) yeniden göndermeye gerek kalmıyor.
 // ÖNEMLİ: min_price verilmezse Ozon old_price'ı sessizce kabul etmiyor (updated:true dönse de
-// üstü çizili fiyat boş kalıyor) — bu 2026-07-31'de canlıda doğrulandı. min_price'ı price ile
-// aynı gönderiyoruz ki Ozon'un kendi otomatik promosyon/indirim mekanizması bizim old_price'ı
-// hemen ardından sıfırlamasın (satıcı panelinde "Promotion" kaynaklı sıfırlanma gözlendi).
-export function updatePrices(items: Array<{ offerId: string; price: string; oldPrice?: string }>) {
+// üstü çizili fiyat boş kalıyor) — bu 2026-07-31'de canlıda doğrulandı. Bu yüzden min_price HER
+// ZAMAN gönderiliyor — artık gerçek bir taban değer olarak (bkz. computeMinPrice, %40 marj);
+// verilmezse (eski davranış gibi) price ile aynı değere düşülüyor.
+export function updatePrices(items: Array<{ offerId: string; price: string; oldPrice?: string; minPrice?: string }>) {
   return ozonPost<OzonPriceUpdateResponse>("/v1/product/import/prices", {
     prices: items.map((item) => ({
       offer_id: item.offerId,
       price: item.price,
       old_price: item.oldPrice ?? "0",
-      min_price: item.price,
+      min_price: item.minPrice ?? item.price,
       currency_code: "USD",
       price_strategy_enabled: "UNKNOWN",
     })),

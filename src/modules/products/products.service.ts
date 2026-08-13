@@ -3,7 +3,31 @@ import { importProducts, getImportStatus, updatePrices, updateStocks, getProduct
 import { getCategoryAttributes } from "../../ozon/categories";
 import { selectWarehouseId } from "../../ozon/warehouses";
 import { buildRichContentJson } from "../../ozon/rich-content";
-import { computeSalePrice, computeOldPrice, computeBillingWeightGrams } from "../../pricing/formula";
+import { computeSalePrice, computeMinPrice, computeOldPrice, computeBillingWeightGrams } from "../../pricing/formula";
+
+// min_price'ı DB'de tutmuyoruz (2026-08-13, kullanıcı talebi — sadece Ozon'a gönderilirken
+// costPrice'tan anlık hesaplanıyor) — resend (görsel/attribute güncelleme) akışlarında bu yüzden
+// her seferinde costPrice'tan yeniden türetiyoruz; costPrice yoksa (nadiren) price'a düşüyoruz.
+function computeResendMinPrice(product: {
+  costPrice: string | null;
+  price: string;
+  weightGrams: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+  depthCm: number | null;
+  heavyPackaging: boolean;
+  cargoWeightGrams: number | null;
+}): string {
+  return product.costPrice
+    ? computeMinPrice(
+        product.costPrice,
+        product.weightGrams,
+        { widthCm: product.widthCm, heightCm: product.heightCm, depthCm: product.depthCm },
+        product.heavyPackaging,
+        product.cargoWeightGrams,
+      )
+    : product.price;
+}
 
 // Ozon hesabının sözleşme para birimi USD — RUB gönderilirse ürün sessizce "pending" kalıp
 // sonunda currency_differs_from_contract hatasıyla düşüyor (Faz 1'de keşfedildi).
@@ -233,6 +257,13 @@ export async function createProduct(input: CreateProductInput) {
     input.heavyPackaging,
     cargoWeightGrams,
   );
+  const minPrice = computeMinPrice(
+    input.costPrice,
+    input.weightGrams,
+    { widthCm: input.widthCm, heightCm: input.heightCm, depthCm: input.depthCm },
+    input.heavyPackaging,
+    cargoWeightGrams,
+  );
   const oldPrice = computeOldPrice(price);
 
   await prisma.product.upsert({
@@ -296,7 +327,7 @@ export async function createProduct(input: CreateProductInput) {
       name: input.name,
       price,
       old_price: oldPrice,
-      min_price: price,
+      min_price: minPrice,
       currency_code: CURRENCY_CODE,
       category_id: input.descriptionCategoryId,
       description_category_id: input.descriptionCategoryId,
@@ -479,15 +510,22 @@ export async function updateProductPrice(offerId: string, costPrice: string, pri
       existing?.cargoWeightGrams,
     );
 
+  const minPrice = computeMinPrice(
+    costPrice,
+    existing?.weightGrams,
+    { widthCm: existing?.widthCm, heightCm: existing?.heightCm, depthCm: existing?.depthCm },
+    existing?.heavyPackaging,
+    existing?.cargoWeightGrams,
+  );
   const oldPrice = computeOldPrice(price);
-  const { result } = await updatePrices([{ offerId, price, oldPrice }]);
+  const { result } = await updatePrices([{ offerId, price, oldPrice, minPrice }]);
   const entry = result.find((r) => r.offer_id === offerId);
   if (entry && !entry.updated) {
     throw new Error(entry.errors.map((e) => e.message).join("; ") || "Fiyat güncellenemedi");
   }
 
   await prisma.product.update({ where: { offerId }, data: { costPrice, price, oldPrice } });
-  return { price };
+  return { price, minPrice };
 }
 
 // Net ağırlık (weightGrams) değişince kargo ağırlığını (cargoWeightGrams) otomatik yeniden
@@ -648,7 +686,7 @@ export async function updateProductImages(offerId: string, images: string[]) {
       name: product.nameRu ?? product.name,
       price: product.price,
       old_price: resendOldPrice,
-      min_price: product.price,
+      min_price: computeResendMinPrice(product),
       currency_code: CURRENCY_CODE,
       category_id: product.descriptionCategoryId,
       description_category_id: product.descriptionCategoryId,
@@ -722,7 +760,7 @@ export async function updateProductCategoryAttributes(
       name: product.nameRu ?? product.name,
       price: product.price,
       old_price: resendOldPrice,
-      min_price: product.price,
+      min_price: computeResendMinPrice(product),
       currency_code: CURRENCY_CODE,
       category_id: input.descriptionCategoryId,
       description_category_id: input.descriptionCategoryId,

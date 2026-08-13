@@ -66,12 +66,21 @@ export function estimateShippingCostUsd(weightGrams: number): number {
   return 3.0 + 0.5 * (weightGrams / 100);
 }
 
-const MARGIN_RATE = 0.4; // alış fiyatı üzerine %40 marj
+const MARGIN_RATE = 0.65; // alış fiyatı üzerine %65 marj (2026-08-13'te %40'tan önce %60'a,
+// sonra %65'e yükseltildi, kullanıcı talebi — eski %40 marj artık aşağıdaki
+// MIN_PRICE_MARGIN_RATE ile min_price'a taşındı)
 // Alış fiyatı $1'ın altındaki ürünlerde %40 marj mutlak olarak çok küçük kalıyor (örn. $0.29
 // alışta ~$0.10 kâr) — bir iade/hasar/ekstra kesinti tek işlemde bunu sıfırlıyor. Bu yüzden
 // düşük alış fiyatlı ürünlerde marjı %65'e çıkarıyoruz (2026-08-03, kullanıcı talebi).
 const LOW_COST_MARGIN_RATE = 0.65;
 const LOW_COST_THRESHOLD_USD = 1;
+
+// Ozon'un "min_price" alanı — sistemin otomatik promosyon/indirim mekanizmasının fiyatı
+// bunun altına düşürmesine izin vermediği taban fiyat. Eskiden buraya normal satış fiyatının
+// aynısı gönderiliyordu (bkz. src/ozon/products.ts yorumu — sadece Ozon'un old_price'ı
+// reddetmesini önlemek içindi). 2026-08-13'te kullanıcı talebiyle gerçek bir taban haline
+// getirildi: eski %40 normal marj artık min_price'ın marjı oldu, normal fiyat %60'a çıktı.
+const MIN_PRICE_MARGIN_RATE = 0.4;
 
 function marginRateForCost(cost: number): number {
   return cost < LOW_COST_THRESHOLD_USD ? LOW_COST_MARGIN_RATE : MARGIN_RATE;
@@ -98,13 +107,13 @@ function totalFeeRate(price: number): number {
   return COMMISSION_RATE + logisticsFeeUsd / price + BANK_FEE_RATE;
 }
 
-export function computeSalePrice(
+// computeSalePrice ve computeMinPrice arasında paylaşılan asıl formül — tek fark uygulanan marj oranı.
+function computePriceForMargin(
+  marginRate: number,
   costPrice: string | number,
   weightGrams?: number | null,
   dimsCm?: { widthCm?: number | null; heightCm?: number | null; depthCm?: number | null },
   heavyPackaging?: boolean,
-  // Kullanıcı kargo ağırlığını elle düzelttiyse (Product.cargoWeightGrams), formülün kendi
-  // hesapladığı değeri (net ağırlık + paketleme payı) YOK SAYIP doğrudan bunu kullanır.
   cargoWeightOverrideGrams?: number | null,
 ): string {
   const cost = Number(costPrice);
@@ -116,7 +125,7 @@ export function computeSalePrice(
       ? computeBillingWeightGrams(weightGrams, dimsCm?.widthCm, dimsCm?.heightCm, dimsCm?.depthCm, heavyPackaging)
       : 0);
   const shipping = billingWeight ? estimateShippingCostUsd(billingWeight) : 0;
-  const target = cost * (1 + marginRateForCost(cost)) + shipping;
+  const target = cost * (1 + marginRate) + shipping;
 
   // Lojistik hizmet bedeli tavanlı olduğu için oran fiyata bağlı — bir kere kabaca hesaplayıp,
   // bulunan fiyatla oranı yeniden hesaplayarak (tavan dahil) düzeltiyoruz.
@@ -130,14 +139,43 @@ export function computeSalePrice(
   return price.toFixed(2);
 }
 
-// "Üstü çizili" (eski/indirim) fiyat — kullanıcı isteğiyle her üründe satış fiyatının
-// %30-%50 üzerinde, rastgele (ürün başına ayrı) bir değer olacak şekilde üretiliyor;
-// hepsi aynı oranda olmasın diye her çağrıda yeniden rastgele seçiliyor.
+export function computeSalePrice(
+  costPrice: string | number,
+  weightGrams?: number | null,
+  dimsCm?: { widthCm?: number | null; heightCm?: number | null; depthCm?: number | null },
+  heavyPackaging?: boolean,
+  // Kullanıcı kargo ağırlığını elle düzelttiyse (Product.cargoWeightGrams), formülün kendi
+  // hesapladığı değeri (net ağırlık + paketleme payı) YOK SAYIP doğrudan bunu kullanır.
+  cargoWeightOverrideGrams?: number | null,
+): string {
+  const cost = Number(costPrice);
+  if (!cost || Number.isNaN(cost)) return "";
+  return computePriceForMargin(marginRateForCost(cost), costPrice, weightGrams, dimsCm, heavyPackaging, cargoWeightOverrideGrams);
+}
+
+// Ozon'a min_price olarak gönderilecek taban fiyat — sabit %40 marj (bkz. MIN_PRICE_MARGIN_RATE
+// yorumu). marginRateForCost'taki düşük-alış-fiyatı %65 istisnası burada UYGULANMIYOR; min_price
+// her zaman sabit %40'a dayanıyor, normal fiyatla arasındaki fark ürün alış fiyatından bağımsız tutuluyor.
+export function computeMinPrice(
+  costPrice: string | number,
+  weightGrams?: number | null,
+  dimsCm?: { widthCm?: number | null; heightCm?: number | null; depthCm?: number | null },
+  heavyPackaging?: boolean,
+  cargoWeightOverrideGrams?: number | null,
+): string {
+  return computePriceForMargin(MIN_PRICE_MARGIN_RATE, costPrice, weightGrams, dimsCm, heavyPackaging, cargoWeightOverrideGrams);
+}
+
+// "Üstü çizili" (eski/indirim) fiyat — satış fiyatı, bu fiyata rastgele %15-%20 arası bir
+// indirim uygulanmış hali olacak şekilde GERİYE hesaplanıyor (satış = eski × 0.80-0.85 arası,
+// yani eski = satış ÷ 0.80-0.85). Hepsi aynı oranda olmasın diye her çağrıda yeniden rastgele
+// seçiliyor (2026-08-13'te kullanıcı talebiyle %30-50 "üzerine ekle" mantığından bu şekle
+// değiştirildi — önceki mantık indirim yerine kâr üstüne rastgele zam gibi görünüyordu).
 export function computeOldPrice(price: string | number): string {
   const sale = Number(price);
   if (!sale || Number.isNaN(sale)) return "";
-  const markup = 0.3 + Math.random() * 0.2; // %30 - %50
-  return (sale * (1 + markup)).toFixed(2);
+  const discountFactor = 0.8 + Math.random() * 0.05; // satış = eski × (0.80 - 0.85)
+  return (sale / discountFactor).toFixed(2);
 }
 
 export interface PriceBreakdown {

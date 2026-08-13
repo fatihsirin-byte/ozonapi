@@ -1,5 +1,5 @@
 import { prisma } from "../../db/prisma";
-import { computeSalePrice, computeOldPrice, computeBillingWeightGrams } from "../../pricing/formula";
+import { computeSalePrice, computeMinPrice, computeOldPrice, computeBillingWeightGrams } from "../../pricing/formula";
 import { translateToRussian } from "../../ai/translate";
 import { updatePrices, updateStocks, getImportStatus, archiveProducts } from "../../ozon/products";
 import { selectWarehouseId } from "../../ozon/warehouses";
@@ -308,6 +308,8 @@ export async function updateDraftVariant(
 
   const price = costPrice ? computeSalePrice(costPrice, weightGrams, undefined, heavyPackaging, cargoWeightGrams) : existing?.price;
   const finalPrice = price || existing?.price;
+  // min_price DB'de tutulmuyor (2026-08-13, kullanıcı talebi) — her gönderimde costPrice'tan anlık hesaplanıyor.
+  const minPrice = costPrice ? computeMinPrice(costPrice, weightGrams, undefined, heavyPackaging, cargoWeightGrams) : finalPrice;
   const oldPrice = finalPrice && finalPrice !== existing?.price ? computeOldPrice(finalPrice) : existing?.oldPrice;
 
   const updated = await prisma.product.update({
@@ -317,7 +319,7 @@ export async function updateDraftVariant(
 
   if (updated.ozonProductId && finalPrice) {
     try {
-      await updatePrices([{ offerId, price: finalPrice, oldPrice: oldPrice ?? undefined }]);
+      await updatePrices([{ offerId, price: finalPrice, oldPrice: oldPrice ?? undefined, minPrice: minPrice ?? undefined }]);
     } catch {
       // Fiyat Ozon'a gönderilemedi (örn. Ozon tarafında geçici bir hata) — local DB güncellendi,
       // kullanıcı Fiyat Hesaplayıcı'dan tekrar deneyebilir. Sessizce yutuyoruz ki her tuş

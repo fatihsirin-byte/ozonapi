@@ -413,6 +413,30 @@ export async function getProduct(offerId: string) {
   return prisma.product.findUnique({ where: { offerId } });
 }
 
+// Kampanyalar sayfası için — Ozon'un aksiyon/promosyon uç noktaları ürünü kendi numerik
+// product_id'siyle veriyor (bizim offerId'miz değil). Görsel/isim/Fiyat Hesaplayıcı için
+// gereken alanları (costPrice/ağırlık/boyut) local Product'tan tek seferde toplu çekip
+// product_id -> Product map'i döner.
+export async function getProductsByOzonProductIds(productIds: string[]) {
+  const products = await prisma.product.findMany({
+    where: { ozonProductId: { in: productIds } },
+    select: {
+      offerId: true,
+      ozonProductId: true,
+      name: true,
+      images: true,
+      costPrice: true,
+      weightGrams: true,
+      cargoWeightGrams: true,
+      heavyPackaging: true,
+      widthCm: true,
+      heightCm: true,
+      depthCm: true,
+    },
+  });
+  return new Map(products.filter((p) => p.ozonProductId).map((p) => [p.ozonProductId as string, p]));
+}
+
 // "Fiyat" sayfası için — /import'taki listDraftHandlesPage ile aynı arama/sayfalama deseni,
 // ama draft OLMAYAN (gerçek, Ozon'a bağlı) ürünler için. Fiyat Hesaplayıcı modalının ihtiyaç
 // duyduğu tüm alanlar (costPrice/ağırlık/boyut/heavyPackaging) dahil.

@@ -136,3 +136,46 @@ Açıklama: ${description}`;
     descriptionRu: stripTurkishChars(stripEmoji(parsed.descriptionRu)),
   };
 }
+
+// Ozon'un kendi aksiyon/kampanya başlıkları Rusça geliyor (bkz. src/ozon/actions.ts) — kampanya
+// sayfasında okunur olması için Türkçe'ye çeviriyoruz. Process-ömürlü basit bir cache var çünkü
+// aksiyon sayısı azdır (birkaç tane) ve başlıkları neredeyse hiç değişmez — her sayfa
+// yüklemesinde aynı metni tekrar tekrar Gemini'ye göndermeye gerek yok (2026-08-14).
+const titleTranslationCache = new Map<string, string>();
+
+export async function translateActionTitle(title: string): Promise<string> {
+  const cached = titleTranslationCache.get(title);
+  if (cached) return cached;
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return title; // çeviremiyorsak orijinali göster, sayfayı bozmasın
+
+  try {
+    const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: `Aşağıdaki Ozon pazaryeri kampanya/promosyon başlığını Rusça'dan Türkçe'ye çevir. SADECE çevrilmiş metni yaz, başka hiçbir şey ekleme (tırnak, açıklama vb. yok):\n\n${title}`,
+              },
+            ],
+          },
+        ],
+        generationConfig: { temperature: 0.1 },
+      }),
+    });
+    if (!res.ok) return title;
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (!text) return title;
+    // NOT: stripTurkishChars burada KULLANILMIYOR — hedef dil Türkçe, ğ/ş/ı gibi karakterler
+    // istenen, aksine korunmalı (o fonksiyon sadece Rusça çıktı için Latin marka adlarını temizliyordu).
+    titleTranslationCache.set(title, text);
+    return text;
+  } catch {
+    return title; // çeviri başarısız olsa da kampanya listesi çalışmaya devam etsin
+  }
+}

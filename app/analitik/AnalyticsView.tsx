@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 interface DayRow {
   date: string;
@@ -28,6 +29,7 @@ interface TopProduct {
   name: string;
   revenue: number;
   orderedUnits: number;
+  offerId: string | null;
 }
 
 const RANGE_OPTIONS = [
@@ -261,7 +263,13 @@ export function AnalyticsView() {
               <tbody>
                 {products.map((p) => (
                   <tr key={p.sku}>
-                    <td>{p.name || p.sku}</td>
+                    <td>
+                      {p.offerId ? (
+                        <Link href={`/products/${encodeURIComponent(p.offerId)}`}>{p.name || p.sku}</Link>
+                      ) : (
+                        p.name || p.sku
+                      )}
+                    </td>
                     <td>{fmtRub(p.revenue)}</td>
                     <td>{fmtNum(p.orderedUnits)}</td>
                   </tr>

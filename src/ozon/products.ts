@@ -55,6 +55,13 @@ export function getProductInfoList(offerIds: string[]) {
   return ozonPost<OzonProductInfoListResponse>("/v3/product/info/list", { offer_id: offerIds });
 }
 
+// Aynı uç nokta offer_id yerine sku ile de filtrelenebiliyor (2026-08-14'te canlıda
+// doğrulandı) — Analitik sayfasındaki sku bazlı satış kırılımını bizim offerId'mize
+// (dolayısıyla ürün kartı linkine) çevirmek için kullanılıyor.
+export function getProductInfoBySku(skus: string[]) {
+  return ozonPost<OzonProductInfoListResponse>("/v3/product/info/list", { sku: skus });
+}
+
 export interface OzonPriceUpdateResponse {
   result: Array<{ product_id: number; offer_id: string; updated: boolean; errors: Array<{ code: string; message: string }> }>;
 }

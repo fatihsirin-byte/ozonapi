@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listActionCandidates, listActionProducts, activateActionProducts, deactivateActionProducts } from "@/ozon/actions";
+import { getProductsByOzonProductIds } from "@/modules/products/products.service";
 import { OzonApiError } from "@/ozon/client";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ actionId: string }> }) {
@@ -12,7 +13,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       type === "candidates"
         ? await listActionCandidates(Number(actionId), 1000)
         : await listActionProducts(Number(actionId), 1000);
-    return NextResponse.json({ products: result.products, total: result.total });
+
+    // Ozon product_id -> bizim Product'ımız (görsel/isim/costPrice/ağırlık — Fiyat
+    // Hesaplayıcı modalı ve kart görünümü için, /fiyat sayfasındaki aynı desen).
+    const localByProductId = await getProductsByOzonProductIds(result.products.map((p) => String(p.id)));
+    const products = result.products.map((p) => {
+      const local = localByProductId.get(String(p.id));
+      return {
+        ...p,
+        offerId: local?.offerId ?? null,
+        name: local?.name ?? `Ürün ${p.id}`,
+        images: local?.images ?? null,
+        costPrice: local?.costPrice ?? null,
+        weightGrams: local?.weightGrams ?? null,
+        cargoWeightGrams: local?.cargoWeightGrams ?? null,
+        heavyPackaging: local?.heavyPackaging ?? false,
+        widthCm: local?.widthCm ?? null,
+        heightCm: local?.heightCm ?? null,
+        depthCm: local?.depthCm ?? null,
+      };
+    });
+
+    return NextResponse.json({ products, total: result.total });
   } catch (error) {
     if (error instanceof OzonApiError) {
       return NextResponse.json({ error: error.message, ozon: error.body }, { status: error.status ?? 502 });

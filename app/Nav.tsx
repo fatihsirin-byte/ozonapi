@@ -8,6 +8,8 @@ const LINKS = [
   { href: "/orders", label: "Siparişler" },
   { href: "/import", label: "Shopify İçe Aktar" },
   { href: "/fiyat", label: "Fiyat" },
+  { href: "/analitik", label: "Analitik" },
+  { href: "/kampanyalar", label: "Kampanyalar" },
 ];
 
 export function Nav() {

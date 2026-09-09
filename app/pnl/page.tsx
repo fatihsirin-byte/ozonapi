@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { getPnlRows, computeRowMetrics, summarizePnlRows, groupMissingCostPrice } from "@/modules/finance/pnl-report.service";
+import {
+  getPnlRows,
+  computeRowMetrics,
+  summarizePnlRows,
+  groupMissingCostPrice,
+  estimateShippingForWeight,
+} from "@/modules/finance/pnl-report.service";
 import { PnlToolbar } from "./PnlToolbar";
 import { CostPriceCell } from "./CostPriceCell";
 import { CopyableProductName } from "./CopyableProductName";
@@ -156,6 +162,8 @@ export default async function PnlPage({
                   <th style={{ whiteSpace: "nowrap" }}>Satış</th>
                   <th style={{ whiteSpace: "nowrap" }}>Alış</th>
                   <th style={{ whiteSpace: "nowrap" }}>Ağırlık / Kargo</th>
+                  <th style={{ whiteSpace: "nowrap" }}>Tahmini Kargo (Ağırlıktan)</th>
+                  <th style={{ whiteSpace: "nowrap" }}>Fark (Gerçek − Tahmini)</th>
                   <th style={{ whiteSpace: "nowrap" }}>Net Kâr</th>
                   <th style={{ whiteSpace: "nowrap" }}>Marj</th>
                 </tr>
@@ -163,6 +171,14 @@ export default async function PnlPage({
               <tbody>
                 {rows.map((row, i) => {
                   const m = computeRowMetrics(row);
+                  // Kâr hesabında kullanılan değerden (gerçek varsa gerçek) BAĞIMSIZ olarak,
+                  // sistemdeki ağırlıktan çıkan tahmini kargo ücreti her zaman ayrı gösteriliyor —
+                  // gerçekle arasındaki farkı görüp ağırlık verisinin ne kadar isabetli olduğunu
+                  // anlamak için (2026-09-09, kullanıcı talebi).
+                  const estimatedShippingUsd =
+                    row.cargoWeightGrams != null ? estimateShippingForWeight(row.cargoWeightGrams * row.quantity) : null;
+                  const shippingDiff =
+                    row.realShippingUsd != null && estimatedShippingUsd != null ? row.realShippingUsd - estimatedShippingUsd : null;
                   return (
                     <tr key={`${row.postingNumber}-${row.offerId}-${i}`}>
                       <td>
@@ -202,6 +218,18 @@ export default async function PnlPage({
                             {row.weightSource !== "unknown" && ` (${WEIGHT_SOURCE_LABEL[row.weightSource]})`}
                           </>
                         )}
+                      </td>
+                      <td className="hint" style={{ whiteSpace: "nowrap" }}>
+                        {estimatedShippingUsd != null ? fmtMoney(estimatedShippingUsd) : "-"}
+                      </td>
+                      <td
+                        className="hint"
+                        style={{
+                          whiteSpace: "nowrap",
+                          color: shippingDiff == null ? undefined : shippingDiff > 0 ? "var(--danger)" : "var(--success)",
+                        }}
+                      >
+                        {shippingDiff != null ? `${shippingDiff >= 0 ? "+" : ""}${fmtMoney(shippingDiff)}` : "-"}
                       </td>
                       <td style={{ color: m.profit == null ? undefined : m.profit >= 0 ? "var(--success)" : "var(--danger)" }}>
                         {m.profit != null ? fmtMoney(m.profit) : <span className="hint" title={m.warning ?? undefined}>{m.warning ?? "-"}</span>}

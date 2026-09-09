@@ -1,5 +1,6 @@
 import { prisma } from "../../db/prisma";
 import { computeBillingWeightGrams } from "../../pricing/formula";
+import { getUsdToRubRate } from "../../pricing/fx-rate";
 
 // Fiyat formülüyle (src/pricing/formula.ts) aynı oranlar — kalem bazlı kâr/zarar raporunda
 // (UI tablosu + CSV indirme) hem canlı sayı hem CSV formülü olarak kullanılıyor, tek yerden
@@ -26,6 +27,10 @@ export interface PnlRow {
   // fazla farklı ürün varsa satış tutarı payına göre ORANTILI dağıtılmış hali (approximatePosting
   // true ise bu bir yaklaşık paylaştırma — Ozon kalem bazında ayrım vermiyor).
   realShippingRub: number | null;
+  // realShippingRub'ın güncel (o an çekilmiş) USD/RUB kuruyla $'a çevrilmiş hali — kâr/zarar
+  // hesabında (computeRowMetrics) tahmini $ formülün YERİNE bu kullanılır. Kur çekilemezse
+  // (ağ hatası) null kalır ve tahmini formüle düşülür — bkz. pricing/fx-rate.ts.
+  realShippingUsd: number | null;
   approximateShippingSplit: boolean;
   shippingReviewed: boolean;
 }
@@ -115,14 +120,20 @@ function sumRealShippingRub(transactions: Array<{ deliveryCharge: number | null 
 // diye sadece daha önce senkronize edilmiş veriyi okur).
 export async function getPnlRows(params?: { since?: Date; to?: Date }): Promise<PnlRow[]> {
   const orders = await prisma.order.findMany({
-    where:
-      params?.since || params?.to
+    where: {
+      // Kâr/zarar sadece GERÇEKLEŞMİŞ satışları yansıtsın diye iptal edilen ve henüz
+      // tamamlanmamış (kargoda vb.) siparişler hariç tutuluyor (2026-09-09, kullanıcı talebi:
+      // "sadece delivered olanlar gelecek").
+      status: "delivered",
+      ...(params?.since || params?.to
         ? { orderDate: { ...(params.since ? { gte: params.since } : {}), ...(params.to ? { lte: params.to } : {}) } }
-        : {},
+        : {}),
+    },
     include: { items: { include: { product: true } } },
     orderBy: { orderDate: "asc" },
   });
 
+  const usdToRubRate = await getUsdToRubRate();
   const postingNumbers = orders.map((o) => o.postingNumber);
   const transactions = postingNumbers.length > 0
     ? await prisma.financeTransaction.findMany({ where: { postingNumber: { in: postingNumbers } } })
@@ -165,6 +176,7 @@ export async function getPnlRows(params?: { since?: Date; to?: Date }): Promise<
         weightSource: product?.weightConfirmed ? "measured" : product?.weightGrams != null ? "estimated" : "unknown",
         cargoWeightGrams: effectiveCargoWeightGrams(product),
         realShippingRub,
+        realShippingUsd: realShippingRub != null && usdToRubRate != null ? realShippingRub / usdToRubRate : null,
         approximateShippingSplit,
         shippingReviewed: item.shippingReviewed,
       });
@@ -189,12 +201,15 @@ export function estimateShippingForWeight(weightGrams: number): number {
 // formülleriyle BİREBİR aynı mantık (UI tablosunda ve toplamlarda kullanılıyor).
 export function computeRowMetrics(row: PnlRow): PnlRowMetrics {
   const totalSale = row.quantity * row.unitSalePrice;
-  // DÜZELTME (2026-08-24, kullanıcı bulgusu): kargo ücreti tarifesi kademeli (sabit taban +
-  // gram başı ücret) — bu yüzden önce toplam ağırlığı (birim ağırlık × adet) bulup formülü
-  // TEK SEFERDE o toplam ağırlığa uygulamak gerekiyor. Eskiden birim ağırlıkla hesaplanan ücret
-  // adetle çarpılıyordu, bu da $0.80/$3 sabit tabanı da adetle katlayıp (örn. 3 adet aynı ürün
-  // aynı pakette gönderiliyorken) kargo maliyetini olması gerekenden fazla gösteriyordu.
-  const shipping = row.cargoWeightGrams != null ? estimateShippingForWeight(row.cargoWeightGrams * row.quantity) : null;
+  // Ozon'un GERÇEK kargo kesintisi varsa (₽, güncel kurla $'a çevrilmiş) o kullanılır — yoksa
+  // (henüz Ozon işlememişse ya da o an kur çekilemediyse) ağırlık bazlı tahmini formüle
+  // düşülür. DÜZELTME (2026-08-24, kullanıcı bulgusu, tahmini formül için): kargo ücreti
+  // tarifesi kademeli (sabit taban + gram başı ücret) — bu yüzden önce toplam ağırlığı (birim
+  // ağırlık × adet) bulup formülü TEK SEFERDE o toplam ağırlığa uygulamak gerekiyor. Eskiden
+  // birim ağırlıkla hesaplanan ücret adetle çarpılıyordu, bu da $0.80/$3 sabit tabanı da adetle
+  // katlayıp kargo maliyetini olması gerekenden fazla gösteriyordu.
+  const shipping =
+    row.realShippingUsd ?? (row.cargoWeightGrams != null ? estimateShippingForWeight(row.cargoWeightGrams * row.quantity) : null);
   const commission = totalSale * COMMISSION_RATE;
   const logistics = Math.min(row.unitSalePrice * LOGISTICS_SERVICE_RATE, LOGISTICS_SERVICE_CAP_USD) * row.quantity;
   const bankFee = totalSale * BANK_FEE_RATE;
@@ -296,10 +311,13 @@ export function buildPnlCsv(rows: PnlRow[]): string {
       row.cargoWeightGrams ?? "",
       `=F${rowNum}*${G}`,
       `=IF(${H}="","",F${rowNum}*${H})`,
-      // Kargo ücreti kademeli tarifeye göre TOPLAM ağırlık (birim ağırlık × adet) üzerinden
-      // tek seferde hesaplanıyor — birim başına hesaplayıp adetle çarpmak sabit tabanı da
-      // (0.8 / 3) katlayıp maliyeti şişiriyordu (bkz. computeRowMetrics yorumu).
-      `=IF(${J}="","",IF(F${rowNum}*${J}<=500,0.8+0.0055*F${rowNum}*${J},3+0.5*(F${rowNum}*${J}/100)))`,
+      // Ozon'un gerçek kargo kesintisi varsa (₽'den o anki kurla çevrilmiş) sabit sayı olarak
+      // yazılıyor — yoksa kademeli tahmini formül (TOPLAM ağırlık, birim ağırlık × adet,
+      // üzerinden tek seferde; birim başına hesaplayıp adetle çarpmak sabit tabanı da (0.8/3)
+      // katlayıp maliyeti şişiriyordu, bkz. computeRowMetrics yorumu).
+      row.realShippingUsd != null
+        ? row.realShippingUsd
+        : `=IF(${J}="","",IF(F${rowNum}*${J}<=500,0.8+0.0055*F${rowNum}*${J},3+0.5*(F${rowNum}*${J}/100)))`,
       `=K${rowNum}*0.05`,
       `=MIN(${G}*0.02,200/75)*F${rowNum}`,
       `=K${rowNum}*0.019`,

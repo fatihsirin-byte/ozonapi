@@ -106,7 +106,7 @@ export function KargoKontroluTable({ rows }: { rows: PnlRow[] }) {
               <th>Ürün</th>
               <th style={{ whiteSpace: "nowrap" }}>Adet</th>
               <th style={{ whiteSpace: "nowrap" }}>Alış</th>
-              <th style={{ whiteSpace: "nowrap" }}>Gerçek Kargo (₽)</th>
+              <th style={{ whiteSpace: "nowrap" }}>Gerçek Kargo ($)</th>
               <th style={{ whiteSpace: "nowrap" }}>Tahmini Ağırlık</th>
             </tr>
           </thead>
@@ -139,8 +139,10 @@ export function KargoKontroluTable({ rows }: { rows: PnlRow[] }) {
                     )}
                   </td>
                   <td className="hint" style={{ whiteSpace: "nowrap" }}>
-                    {row.approximateShippingSplit ? "~" : ""}
-                    ₽{(row.realShippingRub ?? 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}
+                    <span title={`₽${(row.realShippingRub ?? 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`}>
+                      {row.approximateShippingSplit ? "~" : ""}
+                      {row.realShippingUsd != null ? fmtMoney(row.realShippingUsd) : "-"}
+                    </span>
                     {row.approximateShippingSplit && (
                       <span title="Posting'te birden fazla ürün var, tutar satış payına göre paylaştırıldı"> *</span>
                     )}

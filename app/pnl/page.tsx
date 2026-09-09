@@ -44,11 +44,13 @@ export default async function PnlPage({
       <PnlTabs active="tum-siparisler" />
 
       <div className="hint" style={{ marginBottom: 16 }}>
-        Bugüne kadar senkronize edilmiş <strong>tüm siparişlerin</strong> kalem bazında kâr/zarar dökümü.
-        Fiyat formülündeki (komisyon %5, lojistik hizmet bedeli %2 / tavan 200₽, banka ücreti %1.9,
-        ASE kargo tarifesi) oranlar kullanılıyor — Ozon'un gerçekleşmiş finans hareketlerine değil,
-        tahmini bir hesaba dayanıyor. Ağırlığı elle güncellediğiniz (tartılmış) ürünlerde gerçek
-        ağırlık, güncellemediklerinizde var olan tahmini ağırlık kullanılıyor.
+        <strong>Teslim edilmiş</strong> siparişlerin kalem bazında kâr/zarar dökümü (iptal edilen ve
+        henüz kargoda olan siparişler hariç — sadece gerçekleşmiş satış sayılıyor).
+        Kargo ücretinde Ozon'un gerçek kesintisi varsa (teslimattan sonra işleniyor) o kullanılıyor —
+        Ozon bunu ₽ (RUB) veriyor, güncel günlük kurla $'a çevrilip kâr hesabına katılıyor. Henüz
+        gerçek veri yoksa fiyat formülündeki (komisyon %5, lojistik hizmet bedeli %2 / tavan 200₽,
+        banka ücreti %1.9) tahmini ASE kargo tarifesi kullanılıyor. Ağırlığı elle güncellediğiniz
+        (tartılmış) ürünlerde gerçek ağırlık, güncellemediklerinizde tahmini ağırlık kullanılıyor.
         {" "}"CSV İndir" ile aynı rapor, oranları değiştirip yeniden hesaplatabileceğiniz canlı
         formüllü bir dosya olarak (Google Sheets'e yüklenebilir) inebilir.
       </div>
@@ -188,9 +190,11 @@ export default async function PnlPage({
                         )}
                       </td>
                       <td className="hint" style={{ whiteSpace: "nowrap" }}>
-                        {row.realShippingRub != null ? (
-                          <span title={row.approximateShippingSplit ? "Posting'te birden fazla ürün var, tutar satış payına göre paylaştırıldı" : undefined}>
-                            {row.approximateShippingSplit ? "~" : ""}₽{row.realShippingRub.toLocaleString("tr-TR", { maximumFractionDigits: 0 })} (gerçek)
+                        {row.realShippingUsd != null ? (
+                          <span
+                            title={`₽${row.realShippingRub?.toLocaleString("tr-TR", { maximumFractionDigits: 0 })} — güncel kurla çevrildi${row.approximateShippingSplit ? " (posting'te birden fazla ürün var, tutar satış payına göre paylaştırıldı)" : ""}`}
+                          >
+                            {row.approximateShippingSplit ? "~" : ""}{fmtMoney(row.realShippingUsd)} (gerçek)
                           </span>
                         ) : (
                           <>

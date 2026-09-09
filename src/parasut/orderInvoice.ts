@@ -120,6 +120,7 @@ export async function createInvoiceForOzonOrder(postingNumber: string) {
       quantity: item.quantity,
       unit_price: unitPriceTry,
       vat_rate: 0,
+      vatExemptionCode: "301", // KDVK Md. 11/1-a, mal ihracatı istisnası (2026-09-09, kullanıcı talebi)
       description: name,
       productId,
     });

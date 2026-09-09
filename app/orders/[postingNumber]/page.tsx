@@ -9,6 +9,7 @@ import { transliterateRussian } from "@/utils/transliterate";
 import { LabelDownloadButton } from "./LabelDownloadButton";
 import { RealWeightInput } from "./RealWeightInput";
 import { ParasutInvoiceButton } from "../ParasutInvoiceButton";
+import { estimateShippingForWeight, effectiveCargoWeightGrams } from "@/modules/finance/pnl-report.service";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,17 @@ export default async function OrderDetailPage({
   const orderCost = computeOrderCost(order.items);
   const orderAmount = computeOrderAmount(order.items);
 
+  // Tahmini kargo (ağırlıktan) + olası net kâr — PNL sayfasındaki aynı tarife/kademeli hesap
+  // mantığı (kalemlerin toplam ağırlığı TEK SEFERDE formüle uygulanıyor, bkz. pnl-report.service.ts
+  // computeRowMetrics yorumu) sipariş detayında da görülsün diye (2026-09-09, kullanıcı talebi).
+  const totalWeightForShipping = order.items.reduce((sum, item) => {
+    const w = effectiveCargoWeightGrams(item.product);
+    return w != null ? sum + w * item.quantity : sum;
+  }, 0);
+  const hasWeightData = order.items.every((item) => effectiveCargoWeightGrams(item.product) != null);
+  const estimatedShippingUsd = hasWeightData && totalWeightForShipping > 0 ? estimateShippingForWeight(totalWeightForShipping) : null;
+  const possibleNetProfit = orderCost != null && estimatedShippingUsd != null ? orderAmount - orderCost - estimatedShippingUsd : null;
+
   return (
     <div className="page-wide">
       <div className="topbar">
@@ -117,6 +129,18 @@ export default async function OrderDetailPage({
             </div>
           </div>
         )}
+        <div>
+          <div className="hint">Tahmini Kargo (Ağırlıktan)</div>
+          <div className="value" style={{ color: "var(--danger)" }}>
+            {estimatedShippingUsd == null ? <span className="hint">ağırlık yok</span> : formatMoney(estimatedShippingUsd)}
+          </div>
+        </div>
+        <div>
+          <div className="hint">Olası Net Kâr (kargo dahil)</div>
+          <div className="value" style={{ color: possibleNetProfit == null ? undefined : possibleNetProfit >= 0 ? "var(--success)" : "var(--danger)" }}>
+            {possibleNetProfit == null ? <span className="hint">-</span> : formatMoney(possibleNetProfit)}
+          </div>
+        </div>
         {raw?.shipment_date && (
           <div>
             <div className="hint">Kargo Tarihi</div>

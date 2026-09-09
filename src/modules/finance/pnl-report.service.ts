@@ -97,7 +97,7 @@ export interface PnlRowMetrics {
 // tartılmış değere eşitleniyor (bkz. products.service.ts confirmRealWeight), aksi halde
 // formülün hesapladığı inflated değer orada duruyor. Burada sadece mevcut cargoWeightGrams
 // kullanılıyor, yoksa weightGrams'tan aynı formülle (computeBillingWeightGrams) türetiliyor.
-function effectiveCargoWeightGrams(product: {
+export function effectiveCargoWeightGrams(product: {
   weightGrams: number | null;
   cargoWeightGrams: number | null;
   widthCm: number | null;

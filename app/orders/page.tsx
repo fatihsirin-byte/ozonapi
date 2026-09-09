@@ -132,26 +132,6 @@ export default async function OrdersPage({
             </div>
           </div>
         </div>
-        {pnl.byOperationType.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th>İşlem Tipi</th>
-                <th>Adet</th>
-                <th>Toplam Tutar (₽)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pnl.byOperationType.map((t) => (
-                <tr key={t.operationType}>
-                  <td>{t.operationType}</td>
-                  <td>{t.count}</td>
-                  <td>{formatRub(t.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
       </div>
 
       <div className="card" style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>

@@ -16,6 +16,10 @@ export interface ParasutSalesInvoiceDetailInput {
   // Paraşüt her fatura satırı için bir "Ürün/Hizmet" kaydı istiyor — boş bırakılırsa "Ürün/hizmet
   // doldurulmalı" hatası veriyor (2026-09-09'da canlıda doğrulandı). bkz. src/parasut/products.ts.
   productId: string;
+  // KDV istisna kodu — "301" (KDVK Md. 11/1-a, mal ihracatı istisnası). Kullanıcı talebi
+  // (2026-09-09): "0 301 istisnası seçiyor musun mal ihracatı olarak" — vat_rate zaten 0 ama bu
+  // alan olmadan resmi istisna kodu faturaya işlenmiyordu.
+  vatExemptionCode?: string;
 }
 
 export interface CreateSalesInvoiceInput {
@@ -80,6 +84,7 @@ export function createSalesInvoice(input: CreateSalesInvoiceInput) {
               quantity: d.quantity,
               unit_price: d.unit_price,
               vat_rate: d.vat_rate,
+              vat_exemption_code: d.vatExemptionCode,
               description: d.description,
               discount_type: d.discount_type,
               discount_value: d.discount_value,

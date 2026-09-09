@@ -49,3 +49,45 @@ export async function getEArchivePdfUrl(eArchiveId: string): Promise<string | nu
   const res = await showEArchive(eArchiveId);
   return (res.data.attributes.url as string | undefined) ?? null;
 }
+
+export type ResolveInvoicePdfResult =
+  | { status: "ready"; pdfUrl: string; recoveredFromFailure: boolean }
+  | { status: "processing" };
+
+// PDF durumunu canlı sorgulayan, hem "Faturayı Aç" butonu hem toplu ZIP indirme tarafından
+// kullanılan tek ortak yer (2026-09-09'da code review'da tespit edilen kod tekrarına karşılık
+// birleştirildi). KRİTİK: allowRetry SADECE fatura kesilirken e-Arşiv adımı gerçekten başarısız
+// olduysa (Order.parasutEArchiveFailed) true gönderilmeli — aksi halde Paraşüt/GİB tarafında hâlâ
+// işlemde olan (ama BİZİM tarafımızda başarıyla kabul edilmiş) bir e-Arşiv'i "yok" sanıp
+// createEArchive'i tekrar çağırmak, aynı fatura için GERÇEK, ikinci bir GİB başvurusu oluşturabilir
+// (2026-09-09'da code review'da tespit edildi — bu proje için özellikle riskli, gerçek belgeler
+// silinemiyor). allowRetry false iken sadece "processing" döner, kullanıcı biraz sonra tekrar dener.
+export async function resolveInvoicePdf(invoiceId: string, allowRetry: boolean): Promise<ResolveInvoicePdfResult> {
+  let eArchiveId: string | null;
+  try {
+    eArchiveId = await findActiveEArchiveId(invoiceId);
+  } catch {
+    return { status: "processing" };
+  }
+
+  let recoveredFromFailure = false;
+  if (!eArchiveId && allowRetry) {
+    try {
+      const retry = await createEArchive(invoiceId);
+      eArchiveId = retry.data.id;
+      recoveredFromFailure = true;
+    } catch {
+      return { status: "processing" };
+    }
+  }
+
+  if (!eArchiveId) return { status: "processing" };
+
+  try {
+    const pdfUrl = await getEArchivePdfUrl(eArchiveId);
+    if (!pdfUrl) return { status: "processing" };
+    return { status: "ready", pdfUrl, recoveredFromFailure };
+  } catch {
+    return { status: "processing" };
+  }
+}

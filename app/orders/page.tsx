@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listOrders, computeOrderAmount, computeOrderCost } from "@/modules/orders/orders.service";
 import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
 import { OrdersToolbar } from "./OrdersToolbar";
+import { OrdersSearchBar } from "./OrdersSearchBar";
 import { ParasutInvoiceButton } from "./ParasutInvoiceButton";
 import { InvoicedTodayZipButton } from "./InvoicedTodayZipButton";
 
@@ -27,7 +28,7 @@ function getShipmentDate(rawPayload: unknown): string | null {
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; page?: string; invoicedToday?: string }>;
+  searchParams: Promise<{ status?: string; page?: string; invoicedToday?: string; q?: string }>;
 }) {
   const params = await searchParams;
   const page = Number(params.page ?? "1");
@@ -38,15 +39,25 @@ export default async function OrdersPage({
     status: showInvoicedToday ? undefined : params.status,
     invoicedSince: showInvoicedToday ? todayRange.start : undefined,
     invoicedTo: showInvoicedToday ? todayRange.end : undefined,
+    search: params.q,
     skip: (page - 1) * 50,
     take: 50,
   });
+
+  const pageQuery = new URLSearchParams();
+  if (params.status) pageQuery.set("status", params.status);
+  if (params.q) pageQuery.set("q", params.q);
+  const pageQueryPrefix = pageQuery.toString() ? `${pageQuery.toString()}&` : "";
 
   return (
     <div className="page-wide">
       <div className="topbar">
         <h1>Siparişler</h1>
         <OrdersToolbar />
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <OrdersSearchBar />
       </div>
 
       <div className="card" style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -67,7 +78,9 @@ export default async function OrdersPage({
       <div className="card">
         {orders.length === 0 ? (
           <div className="empty-state">
-            Henüz sipariş yok. "Senkronize Et" ile Ozon'dan sipariş çekin (ilk çalıştırmada cron da otomatik çalışıyor, birkaç dakika sürebilir).
+            {params.q
+              ? `"${params.q}" için sonuç bulunamadı.`
+              : "Henüz sipariş yok. \"Senkronize Et\" ile Ozon'dan sipariş çekin (ilk çalıştırmada cron da otomatik çalışıyor, birkaç dakika sürebilir)."}
           </div>
         ) : (
           <table>
@@ -153,12 +166,12 @@ export default async function OrdersPage({
         {total > 50 && (
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             {page > 1 && (
-              <Link href={`/orders?${params.status ? `status=${params.status}&` : ""}page=${page - 1}`}>
+              <Link href={`/orders?${pageQueryPrefix}page=${page - 1}`}>
                 <button className="btn-secondary">Önceki</button>
               </Link>
             )}
             {page * 50 < total && (
-              <Link href={`/orders?${params.status ? `status=${params.status}&` : ""}page=${page + 1}`}>
+              <Link href={`/orders?${pageQueryPrefix}page=${page + 1}`}>
                 <button className="btn-secondary">Sonraki</button>
               </Link>
             )}

@@ -1,4 +1,4 @@
-import { parasutGet, parasutPost } from "./client";
+import { parasutGet, parasutPost, parasutPut } from "./client";
 
 export interface ParasutProductAttributes {
   name: string;
@@ -33,5 +33,11 @@ export function searchProductsByCode(code: string) {
 export function createProduct(attributes: ParasutProductAttributes) {
   return parasutPost<ParasutProductResponse>("products", {
     data: { type: "products", attributes },
+  });
+}
+
+export function updateProduct(id: string, attributes: Partial<ParasutProductAttributes>) {
+  return parasutPut<ParasutProductResponse>(`products/${id}`, {
+    data: { id, type: "products", attributes },
   });
 }

@@ -1,4 +1,4 @@
-import { parasutGet, parasutPost, parasutDelete } from "./client";
+import { parasutGet, parasutPost, parasutPut, parasutDelete } from "./client";
 
 // Paraşüt'ün JSON:API'si — Ozon üzerinden Rusya'ya yapılan satışlar için kullanıcının elle
 // kestiği 466 gerçek faturadan (2026-09-09'da incelendi) çıkan patern: item_type "invoice"
@@ -111,4 +111,19 @@ export function showSalesInvoice(invoiceId: string) {
 
 export function deleteSalesInvoice(invoiceId: string) {
   return parasutDelete<void>(`sales_invoices/${invoiceId}`);
+}
+
+// "Vergi İstisna Muafiyet Sebebi: 301 - 11/1-a Mal İhracatı" metni normalde e-Arşiv adımı
+// (createEArchive) tarafından otomatik basılıyor — biz notta tekrarlarsak PDF'te iki kere
+// çıkıyor (2026-09-09'da muhasebeci geri bildirimiyle tespit edildi, bkz. orderInvoice.ts).
+// AMA e-Arşiv adımı kalıcı olarak başarısız kalırsa (bkz. resolveInvoicePdf), o zaman bu metni
+// basacak başka bir yer kalmıyor — bu fonksiyon o durumda notu yedekten güncellemek için var.
+export function updateSalesInvoiceNote(invoiceId: string, invoiceNote: string) {
+  return parasutPut<ParasutSalesInvoiceResponse>(`sales_invoices/${invoiceId}`, {
+    data: {
+      id: invoiceId,
+      type: "sales_invoices",
+      attributes: { invoice_note: invoiceNote },
+    },
+  });
 }

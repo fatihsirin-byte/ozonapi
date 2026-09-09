@@ -115,6 +115,12 @@ model Order {
   parasutInvoiceId String?
   parasutInvoiceNo String?
   parasutPrintUrl  String?
+  // true ise fatura kesilirken e-Arşiv adımı (GİB'e gönderme) başarısız oldu — bu durumda PDF
+  // arayan uçlar (bkz. src/parasut/eArchives.ts resolveInvoicePdf) tekrar deneyebilir. false ise
+  // e-Arşiv gönderimi zaten kabul edilmiş demektir — o zaman TEKRAR createEArchive çağırmak GERÇEK,
+  // ikinci bir e-Arşiv başvurusuna yol açabilir (2026-09-09'da code review'da tespit edildi), bu
+  // yüzden false iken sadece "hazır olana kadar bekle" denir, yeniden gönderim denenmez.
+  parasutEArchiveFailed Boolean @default(false)
   // "Bugün faturası kesilenler" filtresi (TSİ bazında) için — createdAt/updatedAt başka
   // sebeplerle de değişebildiğinden fatura anını ayrı tutuyoruz (2026-09-09, kullanıcı talebi).
   parasutInvoicedAt DateTime?

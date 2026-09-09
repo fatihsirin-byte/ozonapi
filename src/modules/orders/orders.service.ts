@@ -129,6 +129,29 @@ export function computeOrderCost(items: Array<{ quantity: number; product: { cos
   return total;
 }
 
+// Sipariş arama kutusu (2026-09-09, kullanıcı talebi): müşteri adı, Ozon sipariş no, ürün SKU'su
+// (Ozon'un numerik ürün kimliği), ürün adı ve offerId'nin hepsinde birden arar. NOT: sistemde
+// hiçbir yerde gerçek "barkod" (EAN/UPC) verisi saklanmıyor — Ozon'un posting API'sinde de böyle
+// bir alan gelmiyor (yalnızca kargo paketi için ayrı bir "barcodes" alanı var, ürünle ilgisiz) —
+// bu yüzden barkod araması kapsam dışı, kullanıcıya ayrıca belirtildi.
+function buildOrderSearchFilter(search: string) {
+  const trimmed = search.trim();
+  if (!trimmed) return undefined;
+  const asSku = /^\d+$/.test(trimmed) ? BigInt(trimmed) : null;
+
+  return {
+    OR: [
+      { postingNumber: { contains: trimmed, mode: "insensitive" as const } },
+      { rawPayload: { path: ["customer", "name"], string_contains: trimmed } },
+      { rawPayload: { path: ["addressee", "name"], string_contains: trimmed } },
+      { items: { some: { offerId: { contains: trimmed, mode: "insensitive" as const } } } },
+      { items: { some: { product: { name: { contains: trimmed, mode: "insensitive" as const } } } } },
+      { items: { some: { product: { nameRu: { contains: trimmed, mode: "insensitive" as const } } } } },
+      ...(asSku !== null ? [{ items: { some: { ozonSku: asSku } } }] : []),
+    ],
+  };
+}
+
 export async function listOrders(params: {
   status?: string;
   scheme?: string;
@@ -136,9 +159,11 @@ export async function listOrders(params: {
   to?: Date;
   invoicedSince?: Date;
   invoicedTo?: Date;
+  search?: string;
   skip?: number;
   take?: number;
 }) {
+  const searchFilter = params.search ? buildOrderSearchFilter(params.search) : undefined;
   const where = {
     ...(params.status ? { status: params.status } : {}),
     ...(params.scheme ? { scheme: params.scheme } : {}),
@@ -153,6 +178,7 @@ export async function listOrders(params: {
           },
         }
       : {}),
+    ...(searchFilter ?? {}),
   };
 
   const [orders, total] = await Promise.all([

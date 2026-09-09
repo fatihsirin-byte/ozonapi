@@ -1,9 +1,9 @@
 import { prisma } from "../db/prisma";
 import { getOrderDetail, fetchEtgbForOrder } from "../modules/orders/orders.service";
 import { createContact } from "./contacts";
-import { createSalesInvoice } from "./invoices";
+import { createSalesInvoice, updateSalesInvoiceNote } from "./invoices";
 import { createEArchive } from "./eArchives";
-import { searchProductsByCode, createProduct } from "./products";
+import { searchProductsByCode, createProduct, updateProduct } from "./products";
 import { getUsdToTryRate } from "../pricing/fx-rate";
 import { transliterateRussian } from "../utils/transliterate";
 
@@ -53,14 +53,32 @@ export class OrderInvoiceError extends Error {}
 // code review ile tespit edildi) — bu proje için özellikle riskli, çünkü gerçek faturalar silinemiyor
 // (bkz. proje kuralı). Bu yüzden işe başlamadan önce parasutInvoiceId'yi atomik olarak bu sentinel
 // değere çekiyoruz; DB bunu tek bir isteğe garanti eder, ikinci istek claim.count === 0 görüp geri çekilir.
-const INVOICE_CLAIM_SENTINEL = "PENDING";
+export const INVOICE_CLAIM_SENTINEL = "PENDING";
 
 // Paraşüt her fatura satırında bir "Ürün/Hizmet" kaydı istiyor (boş bırakılırsa "Ürün/hizmet
 // doldurulmalı" hatası — 2026-09-09'da canlıda tespit edildi). Aynı Ozon ürünü (offerId=code)
 // için mükerrer kayıt açmamak adına önce aranıyor, yoksa oluşturuluyor.
+//
+// ÖNEMLİ (2026-09-09'da canlı faturada tespit edildi): Paraşüt, fatura PDF'inde satırın adını
+// bizim gönderdiğimiz "description"dan değil, bağlı ÜRÜN kaydının kendi "name" alanından
+// basıyor. Bu ürün daha önce (transliterasyon eklenmeden önceki bir testte) Kiril harfli adla
+// oluşmuşsa, biz artık doğru Latin adı gönderiyor olsak bile PDF'te hâlâ eski Kiril ad çıkıyordu
+// — bu yüzden var olan kayıt bulunduğunda adı güncel değilse Paraşüt'te güncelleniyor.
 async function findOrCreateParasutProduct(offerId: string, name: string, unitPriceTry: number): Promise<string> {
   const existing = await searchProductsByCode(offerId);
-  if (existing.data.length > 0) return existing.data[0].id;
+  if (existing.data.length > 0) {
+    const product = existing.data[0];
+    if (product.attributes.name !== name) {
+      // Sadece katalog adını günceller — başarısız olsa bile (2026-09-09'da code review'da
+      // tespit edildi) gerçek faturanın kesilmesini ENGELLEMEMELİ, bu yüzden ayrı try/catch'te.
+      try {
+        await updateProduct(product.id, { name });
+      } catch (err) {
+        console.error(`[parasut] Ürün adı güncellenemedi (product ${product.id}, offerId ${offerId}):`, err);
+      }
+    }
+    return product.id;
+  }
 
   const created = await createProduct({
     name,
@@ -156,12 +174,13 @@ async function doCreateInvoiceForOzonOrder(postingNumber: string) {
     });
   }
 
-  // Gerçek faturalarda "Fatura Açıklaması" (PDF'te basılan) şu formatta: "301 - 11/1-a Mal
-  // İhracatı ETGB {gümrük beyan no}" (2026-09-09'da kullanıcının paylaştığı gerçek örnekten).
-  // ETGB, kargo süreci tamamlanınca Ozon/ASE&GBS tarafından oluşuyor — henüz yoksa numara
-  // olmadan aynı ibare kullanılır, fatura kesimini bloke etmez.
+  // ÖNEMLİ (2026-09-09'da muhasebeci geri bildirimiyle tespit edildi): "301 - 11/1-a Mal İhracatı"
+  // ibaresini fatura notuna KENDİMİZ eklersek, Paraşüt zaten aynı metni (vat_exemption_reason_code
+  // sayesinde) "Vergi İstisna Muafiyet Sebebi: 301 - 11/1-a Mal İhracatı" olarak otomatik bastığı
+  // için PDF'te iki kere görünüyor. Bu yüzden fatura notu alanına SADECE ETGB referansı yazılıyor.
+  // ETGB, kargo süreci tamamlanınca Ozon/ASE&GBS tarafından oluşuyor — henüz yoksa boş bırakılır.
   const etgb = await fetchEtgbForOrder(postingNumber, order.orderDate);
-  const invoiceNote = etgb ? `301 - 11/1-a Mal İhracatı ETGB ${etgb.etgb.number}` : "301 - 11/1-a Mal İhracatı";
+  const invoiceNote = etgb ? `ETGB ${etgb.etgb.number}` : undefined;
 
   const nextSequence = await getNextInvoiceSequence();
   const issueDate = new Date().toISOString().slice(0, 10);
@@ -210,11 +229,27 @@ async function doCreateInvoiceForOzonOrder(postingNumber: string) {
   } catch (err) {
     eArchiveFailed = true;
     console.error(`[parasut] e-Arşiv oluşturma başarısız (invoice ${invoiceId}, posting ${postingNumber}):`, err);
+    // e-Arşiv başarısız olursa "Vergi İstisna Muafiyet Sebebi: 301 - 11/1-a Mal İhracatı" metnini
+    // otomatik basacak başka bir yer kalmıyor (bkz. invoices.ts updateSalesInvoiceNote yorumu) —
+    // notu yedekten bu metinle güncelliyoruz. Bu da başarısız olursa faturanın kesilmesini
+    // engellemez, sadece loglanır (kullanıcı zaten eArchiveFailed uyarısını görecek).
+    try {
+      const fallbackNote = invoiceNote ? `${invoiceNote}\n301 - 11/1-a Mal İhracatı` : "301 - 11/1-a Mal İhracatı";
+      await updateSalesInvoiceNote(invoiceId, fallbackNote);
+    } catch (noteErr) {
+      console.error(`[parasut] Yedek istisna notu yazılamadı (invoice ${invoiceId}):`, noteErr);
+    }
   }
 
   await prisma.order.update({
     where: { postingNumber },
-    data: { parasutInvoiceId: invoiceId, parasutInvoiceNo: invoiceNo, parasutPrintUrl: printUrl, parasutInvoicedAt: new Date() },
+    data: {
+      parasutInvoiceId: invoiceId,
+      parasutInvoiceNo: invoiceNo,
+      parasutPrintUrl: printUrl,
+      parasutInvoicedAt: new Date(),
+      parasutEArchiveFailed: eArchiveFailed,
+    },
   });
 
   return { invoiceId, invoiceNo, printUrl, alreadyExisted: false, eArchiveFailed };

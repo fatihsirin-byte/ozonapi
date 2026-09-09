@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getPnlRows, computeRowMetrics, summarizePnlRows } from "@/modules/finance/pnl-report.service";
+import { getPnlRows, computeRowMetrics, summarizePnlRows, groupMissingCostPrice } from "@/modules/finance/pnl-report.service";
 import { PnlToolbar } from "./PnlToolbar";
 import { CostPriceCell } from "./CostPriceCell";
 import { CopyableProductName } from "./CopyableProductName";
@@ -22,9 +22,17 @@ const WEIGHT_SOURCE_LABEL = {
   unknown: "-",
 } as const;
 
-export default async function PnlPage() {
+export default async function PnlPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ missingCost?: string }>;
+}) {
+  const params = await searchParams;
+  const showMissingCostOnly = params.missingCost === "1";
+
   const rows = await getPnlRows();
   const totals = summarizePnlRows(rows);
+  const missingCostGroups = groupMissingCostPrice(rows);
 
   return (
     <div className="page-wide">
@@ -78,12 +86,56 @@ export default async function PnlPage() {
           </div>
         </div>
         {totals.missingCostCount > 0 && (
-          <div className="hint" style={{ marginTop: 12 }}>
-            {totals.missingCostCount} kalemde alış fiyatı girilmemiş — bunlar toplamlara dahil edilmedi.
+          <div className="hint" style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            {totals.missingCostCount} kalemde ({missingCostGroups.length} farklı üründe) alış fiyatı girilmemiş —
+            bunlar toplamlara dahil edilmedi.
+            <Link href={showMissingCostOnly ? "/pnl" : "/pnl?missingCost=1"}>
+              <button className="btn-secondary" style={{ padding: "2px 10px", fontSize: 12 }}>
+                {showMissingCostOnly ? "Tüm listeye dön" : "Sadece eksik olanları göster"}
+              </button>
+            </Link>
           </div>
         )}
       </div>
 
+      {showMissingCostOnly ? (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Alış Fiyatı Eksik Ürünler ({missingCostGroups.length})</h3>
+          <div className="hint" style={{ marginBottom: 16 }}>
+            Her ürün için alış fiyatı BİR KERE girilir — aynı ürünün kaç siparişi varsa hepsine
+            otomatik yansır (fiyat ürün üzerinde tutuluyor, sipariş satırında değil).
+          </div>
+          {missingCostGroups.length === 0 ? (
+            <div className="empty-state">Eksik alış fiyatı kalmadı.</div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Ürün</th>
+                  <th style={{ whiteSpace: "nowrap" }}>Sipariş Sayısı</th>
+                  <th style={{ whiteSpace: "nowrap" }}>Alış Fiyatı</th>
+                </tr>
+              </thead>
+              <tbody>
+                {missingCostGroups.map((g) => (
+                  <tr key={g.offerId}>
+                    <td>
+                      <div>
+                        <CopyableProductName name={g.productName} nameRu={g.productNameRu} />
+                      </div>
+                      <div className="hint">{g.offerId}</div>
+                    </td>
+                    <td>{g.orderCount}</td>
+                    <td>
+                      <CostPriceCell offerId={g.offerId} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      ) : (
       <div className="card">
         {rows.length === 0 ? (
           <div className="empty-state">
@@ -126,7 +178,15 @@ export default async function PnlPage() {
                       </td>
                       <td>{row.quantity}</td>
                       <td>{fmtMoney(m.totalSale)}</td>
-                      <td>{m.totalCost != null ? fmtMoney(m.totalCost) : <CostPriceCell offerId={row.offerId} />}</td>
+                      <td>
+                        {m.totalCost != null ? (
+                          fmtMoney(m.totalCost)
+                        ) : (
+                          <Link href="/pnl?missingCost=1" className="hint">
+                            eksik
+                          </Link>
+                        )}
+                      </td>
                       <td className="hint" style={{ whiteSpace: "nowrap" }}>
                         {row.realShippingRub != null ? (
                           <span title={row.approximateShippingSplit ? "Posting'te birden fazla ürün var, tutar satış payına göre paylaştırıldı" : undefined}>
@@ -151,6 +211,7 @@ export default async function PnlPage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

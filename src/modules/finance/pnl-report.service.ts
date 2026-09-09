@@ -30,6 +30,37 @@ export interface PnlRow {
   shippingReviewed: boolean;
 }
 
+export interface MissingCostPriceGroup {
+  offerId: string;
+  productName: string;
+  productNameRu: string | null;
+  orderCount: number;
+}
+
+// Alış fiyatı boş kalemleri SİPARİŞ SATIRI değil ÜRÜN bazında gruplar — aynı ürünün onlarca
+// sipariş satırı varsa hepsi için ayrı ayrı "gir" tıklamak yerine bir kere girilip hepsine
+// yansısın diye (2026-09-09, kullanıcı talebi: "ürün bazlı bir kere doldur, aynı üründen bi
+// sürü varsa tıkladığımda listeden kaldır"). costPrice zaten Product üzerinde tutulduğu için
+// bir ürün için girilince bu grup bir sonraki yüklemede kendiliğinden listeden düşer.
+export function groupMissingCostPrice(rows: PnlRow[]): MissingCostPriceGroup[] {
+  const map = new Map<string, MissingCostPriceGroup>();
+  for (const row of rows) {
+    if (row.unitCostPrice != null) continue;
+    const existing = map.get(row.offerId);
+    if (existing) {
+      existing.orderCount += 1;
+    } else {
+      map.set(row.offerId, {
+        offerId: row.offerId,
+        productName: row.productName,
+        productNameRu: row.productNameRu,
+        orderCount: 1,
+      });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => b.orderCount - a.orderCount);
+}
+
 export interface PnlRowMetrics {
   totalSale: number;
   totalCost: number | null;

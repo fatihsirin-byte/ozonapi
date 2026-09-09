@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { PnlRow } from "@/modules/finance/pnl-report.service";
 import { CopyableProductName } from "../CopyableProductName";
-import { CostPriceCell } from "../CostPriceCell";
 
 function fmtMoney(n: number) {
   return `$${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -130,7 +129,15 @@ export function KargoKontroluTable({ rows }: { rows: PnlRow[] }) {
                     <div className="hint">{row.offerId}</div>
                   </td>
                   <td>{row.quantity}</td>
-                  <td>{row.unitCostPrice != null ? fmtMoney(row.unitCostPrice * row.quantity) : <CostPriceCell offerId={row.offerId} />}</td>
+                  <td>
+                    {row.unitCostPrice != null ? (
+                      fmtMoney(row.unitCostPrice * row.quantity)
+                    ) : (
+                      <Link href="/pnl?missingCost=1" className="hint">
+                        eksik
+                      </Link>
+                    )}
+                  </td>
                   <td className="hint" style={{ whiteSpace: "nowrap" }}>
                     {row.approximateShippingSplit ? "~" : ""}
                     ₽{(row.realShippingRub ?? 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}

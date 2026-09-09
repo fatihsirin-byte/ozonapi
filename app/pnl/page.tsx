@@ -1,15 +1,10 @@
 import Link from "next/link";
-import {
-  getPnlRows,
-  computeRowMetrics,
-  summarizePnlRows,
-  groupMissingCostPrice,
-  estimateShippingForWeight,
-} from "@/modules/finance/pnl-report.service";
+import { getPnlRows, summarizePnlRows, groupMissingCostPrice } from "@/modules/finance/pnl-report.service";
 import { PnlToolbar } from "./PnlToolbar";
 import { CostPriceCell } from "./CostPriceCell";
 import { CopyableProductName } from "./CopyableProductName";
 import { PnlTabs } from "./PnlTabs";
+import { PnlMainTable } from "./PnlMainTable";
 
 export const dynamic = "force-dynamic";
 
@@ -21,12 +16,6 @@ function fmtPct(n: number | null) {
   if (n == null) return "-";
   return `${n.toLocaleString("tr-TR", { maximumFractionDigits: 1 })}%`;
 }
-
-const WEIGHT_SOURCE_LABEL = {
-  measured: "Ölçülmüş",
-  estimated: "Tahmini",
-  unknown: "-",
-} as const;
 
 export default async function PnlPage({
   searchParams,
@@ -128,10 +117,38 @@ export default async function PnlPage({
                 {missingCostGroups.map((g) => (
                   <tr key={g.offerId}>
                     <td>
-                      <div>
-                        <CopyableProductName name={g.productName} nameRu={g.productNameRu} />
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        {g.productImage && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={g.productImage}
+                            alt=""
+                            width={40}
+                            height={40}
+                            style={{ objectFit: "cover", borderRadius: 4, flexShrink: 0 }}
+                          />
+                        )}
+                        <div>
+                          <div>
+                            <CopyableProductName name={g.productName} nameRu={g.productNameRu} />
+                          </div>
+                          <div className="hint">
+                            {g.offerId}
+                            {g.ozonProductId && (
+                              <>
+                                {" · "}
+                                <a
+                                  href={`https://www.ozon.ru/product/${g.ozonProductId}/`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  Ozon'da gör ↗
+                                </a>
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <div className="hint">{g.offerId}</div>
                     </td>
                     <td>{g.orderCount}</td>
                     <td>
@@ -150,97 +167,7 @@ export default async function PnlPage({
             Henüz sipariş yok. Yukarıdaki "Senkronize Et" ile Ozon'dan sipariş çekin.
           </div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ whiteSpace: "nowrap" }}>Posting No</th>
-                  <th style={{ whiteSpace: "nowrap" }}>Tarih</th>
-                  <th style={{ whiteSpace: "nowrap" }}>Durum</th>
-                  <th>Ürün</th>
-                  <th style={{ whiteSpace: "nowrap" }}>Adet</th>
-                  <th style={{ whiteSpace: "nowrap" }}>Satış</th>
-                  <th style={{ whiteSpace: "nowrap" }}>Alış</th>
-                  <th style={{ whiteSpace: "nowrap" }}>Ağırlık / Kargo</th>
-                  <th style={{ whiteSpace: "nowrap" }}>Tahmini Kargo (Ağırlıktan)</th>
-                  <th style={{ whiteSpace: "nowrap" }}>Fark (Gerçek − Tahmini)</th>
-                  <th style={{ whiteSpace: "nowrap" }}>Net Kâr</th>
-                  <th style={{ whiteSpace: "nowrap" }}>Marj</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, i) => {
-                  const m = computeRowMetrics(row);
-                  // Kâr hesabında kullanılan değerden (gerçek varsa gerçek) BAĞIMSIZ olarak,
-                  // sistemdeki ağırlıktan çıkan tahmini kargo ücreti her zaman ayrı gösteriliyor —
-                  // gerçekle arasındaki farkı görüp ağırlık verisinin ne kadar isabetli olduğunu
-                  // anlamak için (2026-09-09, kullanıcı talebi).
-                  const estimatedShippingUsd =
-                    row.cargoWeightGrams != null ? estimateShippingForWeight(row.cargoWeightGrams * row.quantity) : null;
-                  const shippingDiff =
-                    row.realShippingUsd != null && estimatedShippingUsd != null ? row.realShippingUsd - estimatedShippingUsd : null;
-                  return (
-                    <tr key={`${row.postingNumber}-${row.offerId}-${i}`}>
-                      <td>
-                        <Link href={`/orders/${row.postingNumber}`}>{row.postingNumber}</Link>
-                      </td>
-                      <td style={{ whiteSpace: "nowrap" }}>{row.orderDate ?? "-"}</td>
-                      <td>
-                        <span className="badge pending">{row.status}</span>
-                      </td>
-                      <td>
-                        <div>
-                          <CopyableProductName name={row.productName} nameRu={row.productNameRu} />
-                        </div>
-                        <div className="hint">{row.offerId}</div>
-                      </td>
-                      <td>{row.quantity}</td>
-                      <td>{fmtMoney(m.totalSale)}</td>
-                      <td>
-                        {m.totalCost != null ? (
-                          fmtMoney(m.totalCost)
-                        ) : (
-                          <Link href="/pnl?missingCost=1" className="hint">
-                            eksik
-                          </Link>
-                        )}
-                      </td>
-                      <td className="hint" style={{ whiteSpace: "nowrap" }}>
-                        {row.realShippingUsd != null ? (
-                          <span
-                            title={`₽${row.realShippingRub?.toLocaleString("tr-TR", { maximumFractionDigits: 0 })} — güncel kurla çevrildi${row.approximateShippingSplit ? " (posting'te birden fazla ürün var, tutar satış payına göre paylaştırıldı)" : ""}`}
-                          >
-                            {row.approximateShippingSplit ? "~" : ""}{fmtMoney(row.realShippingUsd)} (gerçek)
-                          </span>
-                        ) : (
-                          <>
-                            {row.cargoWeightGrams != null ? `${Math.round(row.cargoWeightGrams)}g` : "-"}
-                            {row.weightSource !== "unknown" && ` (${WEIGHT_SOURCE_LABEL[row.weightSource]})`}
-                          </>
-                        )}
-                      </td>
-                      <td className="hint" style={{ whiteSpace: "nowrap" }}>
-                        {estimatedShippingUsd != null ? fmtMoney(estimatedShippingUsd) : "-"}
-                      </td>
-                      <td
-                        className="hint"
-                        style={{
-                          whiteSpace: "nowrap",
-                          color: shippingDiff == null ? undefined : shippingDiff > 0 ? "var(--danger)" : "var(--success)",
-                        }}
-                      >
-                        {shippingDiff != null ? `${shippingDiff >= 0 ? "+" : ""}${fmtMoney(shippingDiff)}` : "-"}
-                      </td>
-                      <td style={{ color: m.profit == null ? undefined : m.profit >= 0 ? "var(--success)" : "var(--danger)" }}>
-                        {m.profit != null ? fmtMoney(m.profit) : <span className="hint" title={m.warning ?? undefined}>{m.warning ?? "-"}</span>}
-                      </td>
-                      <td>{fmtPct(m.marginPct)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <PnlMainTable rows={rows} />
         )}
       </div>
       )}

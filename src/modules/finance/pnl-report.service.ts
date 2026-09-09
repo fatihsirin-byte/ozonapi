@@ -17,6 +17,8 @@ export interface PnlRow {
   offerId: string;
   productName: string;
   productNameRu: string | null;
+  productImage: string | null;
+  ozonProductId: string | null;
   quantity: number;
   unitSalePrice: number;
   unitCostPrice: number | null;
@@ -39,6 +41,8 @@ export interface MissingCostPriceGroup {
   offerId: string;
   productName: string;
   productNameRu: string | null;
+  productImage: string | null;
+  ozonProductId: string | null;
   orderCount: number;
 }
 
@@ -59,6 +63,8 @@ export function groupMissingCostPrice(rows: PnlRow[]): MissingCostPriceGroup[] {
         offerId: row.offerId,
         productName: row.productName,
         productNameRu: row.productNameRu,
+        productImage: row.productImage,
+        ozonProductId: row.ozonProductId,
         orderCount: 1,
       });
     }
@@ -170,6 +176,8 @@ export async function getPnlRows(params?: { since?: Date; to?: Date }): Promise<
         offerId: item.offerId,
         productName: product?.name ?? "(ürün kaydı yok)",
         productNameRu: product?.nameRu ?? null,
+        productImage: Array.isArray(product?.images) ? ((product.images as string[])[0] ?? null) : null,
+        ozonProductId: product?.ozonProductId ?? null,
         quantity: item.quantity,
         unitSalePrice: Number(item.price),
         unitCostPrice: product?.costPrice != null ? Number(product.costPrice) : null,

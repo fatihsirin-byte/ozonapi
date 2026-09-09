@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listOrders, computeOrderAmount, computeOrderCost } from "@/modules/orders/orders.service";
 import { getPnlSummary } from "@/modules/finance/finance.service";
 import { OrdersToolbar } from "./OrdersToolbar";
+import { ParasutInvoiceButton } from "./ParasutInvoiceButton";
 
 export const dynamic = "force-dynamic";
 
@@ -172,6 +173,7 @@ export default async function OrdersPage({
                 <th style={{ whiteSpace: "nowrap" }} title="Satış tutarı - alış maliyeti (Ozon komisyon/kargo kesintileri hariç)">
                   Brüt Kâr
                 </th>
+                <th style={{ whiteSpace: "nowrap" }}>Fatura</th>
               </tr>
             </thead>
             <tbody>
@@ -225,6 +227,13 @@ export default async function OrdersPage({
                         if (cost == null) return <span className="hint">alış fiyatı yok</span>;
                         return formatMoney(computeOrderAmount(o.items) - cost);
                       })()}
+                    </td>
+                    <td>
+                      <ParasutInvoiceButton
+                        postingNumber={o.postingNumber}
+                        initialInvoiceNo={o.parasutInvoiceNo}
+                        initialPrintUrl={o.parasutPrintUrl}
+                      />
                     </td>
                   </tr>
                 );

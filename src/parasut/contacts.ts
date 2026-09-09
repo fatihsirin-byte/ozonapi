@@ -12,6 +12,9 @@ export interface ParasutContactAttributes {
   email?: string;
   phone?: string;
   account_type?: "customer" | "supplier"; // faturayı kime kesiyorsak "customer"
+  is_abroad?: boolean;
+  country?: string;
+  invoicing_preferences?: { e_document_note?: string };
 }
 
 export interface ParasutContact {

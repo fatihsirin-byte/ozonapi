@@ -8,6 +8,7 @@ import { CopyableField } from "./CopyableField";
 import { transliterateRussian } from "@/utils/transliterate";
 import { LabelDownloadButton } from "./LabelDownloadButton";
 import { RealWeightInput } from "./RealWeightInput";
+import { ParasutInvoiceButton } from "../ParasutInvoiceButton";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +75,11 @@ export default async function OrderDetailPage({
         <h1>{order.postingNumber}</h1>
         <div style={{ display: "flex", gap: 8 }}>
           <LabelDownloadButton postingNumber={order.postingNumber} />
+          <ParasutInvoiceButton
+            postingNumber={order.postingNumber}
+            initialInvoiceNo={order.parasutInvoiceNo}
+            initialPrintUrl={order.parasutPrintUrl}
+          />
           <Link href="/orders">
             <button className="btn-secondary">← Siparişler</button>
           </Link>

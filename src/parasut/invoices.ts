@@ -1,9 +1,9 @@
-import { parasutGet, parasutPost } from "./client";
+import { parasutGet, parasutPost, parasutDelete } from "./client";
 
-// Paraşüt'ün JSON:API'si — "invoice": genel satış faturası, "export": ihracat faturası (KDV
-// istisnası). Ozon üzerinden Türkiye'den Rusya'ya yapılan satışlar muhtemelen "export" olacak
-// ama kesin kural (item_type, KDV oranı, e-fatura/e-arşiv zorunluluğu vb.) muhasebe tarafından
-// (kullanıcı) teyit edilecek — bkz. sales_invoices modülündeki not.
+// Paraşüt'ün JSON:API'si — Ozon üzerinden Rusya'ya yapılan satışlar için kullanıcının elle
+// kestiği 466 gerçek faturadan (2026-09-09'da incelendi) çıkan patern: item_type "invoice"
+// (export DEĞİL), currency TRL, satır KDV oranı %0 (301 mal ihracatı istisnası muhtemelen
+// yazdırma şablonunda uygulanıyor, API alanında görünmüyor) — bkz. orderInvoice.ts.
 export type ParasutInvoiceItemType = "invoice" | "export" | "cost" | "return" | "cancelled";
 
 export interface ParasutSalesInvoiceDetailInput {
@@ -13,6 +13,9 @@ export interface ParasutSalesInvoiceDetailInput {
   description: string;
   discount_type?: "percentage" | "amount";
   discount_value?: number;
+  // Paraşüt her fatura satırı için bir "Ürün/Hizmet" kaydı istiyor — boş bırakılırsa "Ürün/hizmet
+  // doldurulmalı" hatası veriyor (2026-09-09'da canlıda doğrulandı). bkz. src/parasut/products.ts.
+  productId: string;
 }
 
 export interface CreateSalesInvoiceInput {
@@ -24,6 +27,7 @@ export interface CreateSalesInvoiceInput {
   exchangeRate?: number; // currency TRL değilse gerekli
   invoiceSeries?: string;
   invoiceId?: string;
+  cashSale?: boolean;
   contactId: string;
   details: ParasutSalesInvoiceDetailInput[];
 }
@@ -58,6 +62,7 @@ export function createSalesInvoice(input: CreateSalesInvoiceInput) {
         exchange_rate: input.exchangeRate,
         invoice_series: input.invoiceSeries,
         invoice_id: input.invoiceId,
+        cash_sale: input.cashSale,
       },
       relationships: {
         contact: {
@@ -74,6 +79,9 @@ export function createSalesInvoice(input: CreateSalesInvoiceInput) {
               discount_type: d.discount_type,
               discount_value: d.discount_value,
             },
+            relationships: {
+              product: { data: { id: d.productId, type: "products" } },
+            },
           })),
         },
       },
@@ -87,4 +95,8 @@ export function listSalesInvoices(page = 1, size = 25) {
 
 export function showSalesInvoice(invoiceId: string) {
   return parasutGet<ParasutSalesInvoiceResponse>(`sales_invoices/${invoiceId}?include=active_e_document,contact,details.product`);
+}
+
+export function deleteSalesInvoice(invoiceId: string) {
+  return parasutDelete<void>(`sales_invoices/${invoiceId}`);
 }

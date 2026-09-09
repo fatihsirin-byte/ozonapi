@@ -111,18 +111,35 @@ function createHttpClient(): AxiosInstance {
 
 const http = createHttpClient();
 
+const MAX_RETRIES = 3;
+
 // path, company_id'siz gönderilir — örn. "sales_invoices", "contacts/123" — burada otomatik
 // /v4/{company_id}/ öneki eklenir (bkz. Paraşüt'ün PHP resmi olmayan client'ındaki aynı pattern).
+// 429 (rate limit) durumunda Ozon client'ındaki gibi (bkz. src/ozon/client.ts) üstel bekleme ile
+// tekrar deniyor — sıra numarası bulmak için onlarca sayfa taranırken (bkz. orderInvoice.ts)
+// bu limite gerçekten takılıyor (2026-09-09'da canlıda tespit edildi).
 async function parasutRequest<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
   const config = requireParasutConfig();
-  const token = await getAccessToken();
-  const response = await http.request<T>({
-    method,
-    url: `/${config.companyId}/${path}`,
-    data: body,
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return response.data;
+  let attempt = 0;
+  while (true) {
+    try {
+      const token = await getAccessToken();
+      const response = await http.request<T>({
+        method,
+        url: `/${config.companyId}/${path}`,
+        data: body,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return response.data;
+    } catch (error) {
+      attempt += 1;
+      const status = error instanceof ParasutApiError ? error.status : undefined;
+      const shouldRetry = status === 429 && attempt < MAX_RETRIES;
+      if (!shouldRetry) throw error;
+      const backoffMs = 1500 * 2 ** (attempt - 1);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
 }
 
 export function parasutGet<T>(path: string): Promise<T> {

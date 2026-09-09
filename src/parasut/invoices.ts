@@ -1,4 +1,4 @@
-import { parasutGet, parasutPost, parasutDelete } from "./client";
+import { parasutGet, parasutPost, parasutDelete, parasutGetBinary } from "./client";
 
 // Paraşüt'ün JSON:API'si — Ozon üzerinden Rusya'ya yapılan satışlar için kullanıcının elle
 // kestiği 466 gerçek faturadan (2026-09-09'da incelendi) çıkan patern: item_type "invoice"
@@ -21,6 +21,10 @@ export interface ParasutSalesInvoiceDetailInput {
 export interface CreateSalesInvoiceInput {
   itemType?: ParasutInvoiceItemType;
   description?: string;
+  // Paraşüt'ün bastığı PDF'te "Fatura Açıklaması" olarak görünen serbest metin alanı — gerçek
+  // faturalarda "301 - 11/1-a Mal İhracatı ETGB {gümrük no}" formatında (2026-09-09'da kullanıcının
+  // paylaştığı gerçek fatura örneğinden alındı, bkz. orderInvoice.ts).
+  invoiceNote?: string;
   issueDate: string; // YYYY-MM-DD
   dueDate?: string; // YYYY-MM-DD
   currency?: "TRL" | "USD" | "EUR"; // Paraşüt "TRL" kullanıyor, "TRY" değil
@@ -56,6 +60,7 @@ export function createSalesInvoice(input: CreateSalesInvoiceInput) {
       attributes: {
         item_type: input.itemType ?? "invoice",
         description: input.description,
+        invoice_note: input.invoiceNote,
         issue_date: input.issueDate,
         due_date: input.dueDate ?? input.issueDate,
         currency: input.currency ?? "TRL",
@@ -99,4 +104,12 @@ export function showSalesInvoice(invoiceId: string) {
 
 export function deleteSalesInvoice(invoiceId: string) {
   return parasutDelete<void>(`sales_invoices/${invoiceId}`);
+}
+
+// Toplu ZIP indirme için (bkz. app/api/orders/parasut-invoices/today-zip). NOT: Paraşüt bu uçta
+// "düz" (e-belge olmayan) faturalar için hesapta bir "Yazdırma Şablonu" (PrintTemplate)
+// tanımlı olmasını istiyor — tanımlı değilse "Record was not found: PrintTemplate" hatası
+// veriyor (2026-09-09'da canlıda tespit edildi, bkz. Ayarlar > Yazdırma Şablonları).
+export function getSalesInvoicePdf(invoiceId: string) {
+  return parasutGetBinary(`sales_invoices/${invoiceId}.pdf`);
 }

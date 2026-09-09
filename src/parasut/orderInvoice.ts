@@ -1,13 +1,13 @@
 import { prisma } from "../db/prisma";
-import { getOrderDetail } from "../modules/orders/orders.service";
+import { getOrderDetail, fetchEtgbForOrder } from "../modules/orders/orders.service";
 import { createContact } from "./contacts";
-import { createSalesInvoice, listSalesInvoices } from "./invoices";
+import { createSalesInvoice } from "./invoices";
 import { searchProductsByCode, createProduct } from "./products";
 import { getUsdToTryRate } from "../pricing/fx-rate";
 import { transliterateRussian } from "../utils/transliterate";
 
 // Ozon siparişleri için kullanıcının elle kestiği gerçek faturaların hepsi bu seriden
-// (GZN2026000000001, ...000000466 vb. — 2026-09-09'da canlıda doğrulandı; "GZG" serisi ayrı/
+// (GZN2026000000001, ...000000467 vb. — 2026-09-09'da canlıda doğrulandı; "GZG" serisi ayrı/
 // ilgisiz bir iş akışı). Paraşüt API üzerinden fatura oluşturulurken seri+sıra no verilmezse
 // fatura numarası atanmıyor (boş kalıyor) — bu yüzden bir sonraki sırayı kendimiz buluyoruz.
 const INVOICE_SERIES_PREFIX = "GZN";
@@ -16,40 +16,20 @@ function currentInvoiceSeries(): string {
   return `${INVOICE_SERIES_PREFIX}${new Date().getFullYear()}`;
 }
 
-// Tam taramayı (yüzlerce fatura, ~19 sayfa) her tıklamada tekrar yapmamak için process ömrü
-// boyunca bellekte tutuluyor — ilk çağrıda gerçek Paraşüt verisiyle taranıyor, sonrasında yerel
-// olarak artırılıyor. Bu arada Paraşüt panelinden elle aynı seriye fatura kesilirse (nadir,
-// buton bunun yerine geçmesi hedeflendiği için) sıra kayabilir — süreç PM2 tarafından periyodik
-// yeniden başlatıldığında kendiliğinden düzelir.
-let cachedMaxSequence: number | null = null;
-
-// Bu seride şu ana kadar kullanılan en yüksek sıra numarasını bulup bir sonrakini döner.
-// Not: eşzamanlı iki "Fatura Kes" tıklaması aynı anda çalışırsa teorik olarak çakışabilir —
-// kullanıcının kendi tarif ettiği akış "tek tek, manuel" olduğu için (2026-09-09) bu risk düşük.
+// ÖNEMLİ (2026-09-09'da canlıda tespit edilen hata): sırayı Paraşüt'ün canlı fatura listesini
+// tarayarak bulmak GÜVENLİ DEĞİL — bir fatura (ör. test amaçlı) silinince listeden kaybolduğu
+// için bir sonraki tarama o numarayı "boş" sanıp BAŞKA (gerçek) bir faturaya tekrar veriyor; bu
+// yüzden gerçek bir sipariş faturası, daha önce silinmiş bir test faturasıyla AYNI numarayı aldı.
+// Bunun yerine ParasutInvoiceSequence tablosunda ATOMİK olarak artan, asla geri alınmayan kalıcı
+// bir sayaç tutuluyor — bir fatura sonradan silinse bile o numara bir daha kullanılmıyor.
 async function getNextInvoiceSequence(): Promise<string> {
-  if (cachedMaxSequence == null) {
-    const series = currentInvoiceSeries();
-    let page = 1;
-    let maxSeq = 0;
-    const pageSize = 25; // Paraşüt'ün izin verdiği maksimum
-    while (page <= 60) {
-      const { data } = await listSalesInvoices(page, pageSize);
-      if (data.length === 0) break;
-      for (const inv of data) {
-        const no = (inv.attributes as { invoice_no?: string }).invoice_no ?? "";
-        if (no.startsWith(series)) {
-          const seq = parseInt(no.slice(series.length), 10);
-          if (!Number.isNaN(seq) && seq > maxSeq) maxSeq = seq;
-        }
-      }
-      page += 1;
-      if (data.length < pageSize) break;
-      await new Promise((resolve) => setTimeout(resolve, 1100));
-    }
-    cachedMaxSequence = maxSeq;
-  }
-  cachedMaxSequence += 1;
-  return String(cachedMaxSequence).padStart(9, "0");
+  const series = currentInvoiceSeries();
+  const row = await prisma.parasutInvoiceSequence.upsert({
+    where: { key: series },
+    create: { key: series, lastSequence: 1 },
+    update: { lastSequence: { increment: 1 } },
+  });
+  return String(row.lastSequence).padStart(9, "0");
 }
 
 interface OrderRawPayload {
@@ -127,9 +107,13 @@ export async function createInvoiceForOzonOrder(postingNumber: string) {
   });
   const contactId = contactRes.data.id;
 
+  // Kullanıcı talebi (2026-09-09): "AI ile çevirmeye gerek yok, tek kural Kiril değil Latin harfi
+  // olması" — bu yüzden anlam çevirisi değil, sadece transliterateRussian (aynı müşteri adı/
+  // adresinde kullanılan) uygulanıyor; Ozon'dan doğrudan gelen ürünlerde name Kiril olabiliyor.
   const details = [];
   for (const item of order.items) {
-    const name = item.product?.name ?? item.offerId;
+    const rawName = item.product?.name ?? item.offerId;
+    const name = transliterateRussian(rawName);
     const unitPriceTry = Number((Number(item.price) * rate).toFixed(2));
     const productId = await findOrCreateParasutProduct(item.offerId, name, unitPriceTry);
     details.push({
@@ -141,6 +125,13 @@ export async function createInvoiceForOzonOrder(postingNumber: string) {
     });
   }
 
+  // Gerçek faturalarda "Fatura Açıklaması" (PDF'te basılan) şu formatta: "301 - 11/1-a Mal
+  // İhracatı ETGB {gümrük beyan no}" (2026-09-09'da kullanıcının paylaştığı gerçek örnekten).
+  // ETGB, kargo süreci tamamlanınca Ozon/ASE&GBS tarafından oluşuyor — henüz yoksa numara
+  // olmadan aynı ibare kullanılır, fatura kesimini bloke etmez.
+  const etgb = await fetchEtgbForOrder(postingNumber, order.orderDate);
+  const invoiceNote = etgb ? `301 - 11/1-a Mal İhracatı ETGB ${etgb.etgb.number}` : "301 - 11/1-a Mal İhracatı";
+
   const nextSequence = await getNextInvoiceSequence();
   const issueDate = new Date().toISOString().slice(0, 10);
   const invoiceRes = await createSalesInvoice({
@@ -148,7 +139,10 @@ export async function createInvoiceForOzonOrder(postingNumber: string) {
     issueDate,
     currency: "TRL",
     contactId,
+    // Paraşüt listesinde "Fatura İsmi" olarak görünüyor — sipariş no burada olunca Ozon
+    // siparişiyle eşleştirmek/aramak kolaylaşıyor.
     description: postingNumber,
+    invoiceNote,
     details,
     // BİLİNEN SORUN (2026-09-09, canlıda test edildi): gerçek referans faturalarda invoice_no
     // TEK PARÇA bir string ("GZN2026000000001"), invoice_series/invoice_id ikisi de null —
@@ -172,7 +166,7 @@ export async function createInvoiceForOzonOrder(postingNumber: string) {
 
   await prisma.order.update({
     where: { postingNumber },
-    data: { parasutInvoiceId: invoiceId, parasutInvoiceNo: invoiceNo, parasutPrintUrl: printUrl },
+    data: { parasutInvoiceId: invoiceId, parasutInvoiceNo: invoiceNo, parasutPrintUrl: printUrl, parasutInvoicedAt: new Date() },
   });
 
   return { invoiceId, invoiceNo, printUrl, alreadyExisted: false };

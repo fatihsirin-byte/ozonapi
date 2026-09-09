@@ -129,12 +129,29 @@ export function computeOrderCost(items: Array<{ quantity: number; product: { cos
   return total;
 }
 
-export async function listOrders(params: { status?: string; scheme?: string; since?: Date; to?: Date; skip?: number; take?: number }) {
+export async function listOrders(params: {
+  status?: string;
+  scheme?: string;
+  since?: Date;
+  to?: Date;
+  invoicedSince?: Date;
+  invoicedTo?: Date;
+  skip?: number;
+  take?: number;
+}) {
   const where = {
     ...(params.status ? { status: params.status } : {}),
     ...(params.scheme ? { scheme: params.scheme } : {}),
     ...(params.since || params.to
       ? { orderDate: { ...(params.since ? { gte: params.since } : {}), ...(params.to ? { lte: params.to } : {}) } }
+      : {}),
+    ...(params.invoicedSince || params.invoicedTo
+      ? {
+          parasutInvoicedAt: {
+            ...(params.invoicedSince ? { gte: params.invoicedSince } : {}),
+            ...(params.invoicedTo ? { lt: params.invoicedTo } : {}),
+          },
+        }
       : {}),
   };
 

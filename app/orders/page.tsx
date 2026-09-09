@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { listOrders, computeOrderAmount, computeOrderCost } from "@/modules/orders/orders.service";
 import { getPnlSummary } from "@/modules/finance/finance.service";
+import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
 import { OrdersToolbar } from "./OrdersToolbar";
 import { ParasutInvoiceButton } from "./ParasutInvoiceButton";
+import { InvoicedTodayZipButton } from "./InvoicedTodayZipButton";
 
 export const dynamic = "force-dynamic";
 
@@ -33,14 +35,22 @@ function getShipmentDate(rawPayload: unknown): string | null {
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; page?: string }>;
+  searchParams: Promise<{ status?: string; page?: string; invoicedToday?: string }>;
 }) {
   const params = await searchParams;
   const page = Number(params.page ?? "1");
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const showInvoicedToday = params.invoicedToday === "1";
+  const todayRange = getIstanbulTodayRangeUtc();
 
   const [{ orders, total }, pnl, { orders: recentOrders }] = await Promise.all([
-    listOrders({ status: params.status, skip: (page - 1) * 50, take: 50 }),
+    listOrders({
+      status: showInvoicedToday ? undefined : params.status,
+      invoicedSince: showInvoicedToday ? todayRange.start : undefined,
+      invoicedTo: showInvoicedToday ? todayRange.end : undefined,
+      skip: (page - 1) * 50,
+      take: 50,
+    }),
     getPnlSummary({ since }),
     listOrders({ since, take: 1000 }),
   ]);
@@ -144,15 +154,19 @@ export default async function OrdersPage({
         )}
       </div>
 
-      <div className="card" style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div className="card" style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <Link href="/orders">
-          <button className={`btn-secondary${!params.status ? " active" : ""}`}>Tümü</button>
+          <button className={`btn-secondary${!params.status && !showInvoicedToday ? " active" : ""}`}>Tümü</button>
         </Link>
         {STATUS_OPTIONS.map((s) => (
           <Link key={s} href={`/orders?status=${s}`}>
             <button className={`btn-secondary${params.status === s ? " active" : ""}`}>{s}</button>
           </Link>
         ))}
+        <Link href="/orders?invoicedToday=1">
+          <button className={`btn-secondary${showInvoicedToday ? " active" : ""}`}>Bugün Faturası Kesilenler</button>
+        </Link>
+        {showInvoicedToday && <InvoicedTodayZipButton />}
       </div>
 
       <div className="card">

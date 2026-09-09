@@ -7,6 +7,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Paraşüt fatura sıra numarası sayacı — "key" ör. "GZN2026". Her fatura kesiminde ATOMİK olarak
+// artırılır ve BİR DAHA GERİ ALINMAZ; Paraşüt'ün canlı fatura listesini tarayarak "en yüksek
+// numara"yı bulmak yerine bu kullanılıyor, çünkü bir fatura silinince Paraşüt listesinden
+// kaybolduğu için tarama o numarayı "boş" sanıp BAŞKA bir faturaya tekrar veriyordu — bu, gerçek
+// bir siparişin faturasının, silinmiş bir test faturasıyla AYNI sıra numarasını almasına yol açtı
+// (2026-09-09'da canlıda tespit edildi, bkz. src/parasut/orderInvoice.ts).
+model ParasutInvoiceSequence {
+  key          String @id
+  lastSequence Int
+}
+
 // Ozon'daki ürünü cache'ler. offerId bizim SKU'muz, ozonProductId Ozon tarafındaki id.
 model Product {
   id                    String    @id @default(cuid())
@@ -104,6 +115,9 @@ model Order {
   parasutInvoiceId String?
   parasutInvoiceNo String?
   parasutPrintUrl  String?
+  // "Bugün faturası kesilenler" filtresi (TSİ bazında) için — createdAt/updatedAt başka
+  // sebeplerle de değişebildiğinden fatura anını ayrı tutuyoruz (2026-09-09, kullanıcı talebi).
+  parasutInvoicedAt DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

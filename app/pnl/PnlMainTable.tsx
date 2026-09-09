@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { computeRowMetrics, estimateShippingForWeight, type PnlRow } from "@/modules/finance/pnl-report.service";
 import { CopyableProductName } from "./CopyableProductName";
+import { OrderDetailModal } from "./OrderDetailModal";
 
 function fmtMoney(n: number) {
   return `$${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -71,6 +72,7 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("orderDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [openPosting, setOpenPosting] = useState<string | null>(null);
 
   const enriched = useMemo<Enriched[]>(
     () =>
@@ -116,6 +118,13 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
     });
     return copy;
   }, [filtered, sortKey, sortDir]);
+
+  // Aynı siparişe (postingNumber) ait birden fazla ürün varsa şu an sıralamada bitişik olduğu
+  // sürece görsel olarak birleştiriliyor — posting no/tarih/durum sadece grubun ilk satırında
+  // gösteriliyor (2026-09-09, kullanıcı talebi: "2'li 3'lüleri farklı satırlar aynı trackingler
+  // gibi oluyor, tracking boş bırakabilirsin"). Sıralama posting'leri dağıtırsa (ör. ürün adına
+  // göre sıralanınca) grup doğal olarak bozulur, o zaman her satır kendi posting no'sunu gösterir.
+  const openOrderItems = useMemo(() => (openPosting ? enriched.filter((e) => e.row.postingNumber === openPosting).map((e) => e.row) : []), [enriched, openPosting]);
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -165,15 +174,27 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
             <tbody>
               {sorted.map((e, i) => {
                 const { row } = e;
+                const isFirstOfGroup = i === 0 || sorted[i - 1].row.postingNumber !== row.postingNumber;
+                const groupSize = sorted.filter((x) => x.row.postingNumber === row.postingNumber).length;
                 return (
-                  <tr key={`${row.postingNumber}-${row.offerId}-${i}`}>
+                  <tr key={`${row.postingNumber}-${row.offerId}-${i}`} style={!isFirstOfGroup ? { borderTop: "none" } : undefined}>
                     <td>
-                      <Link href={`/orders/${row.postingNumber}`}>{row.postingNumber}</Link>
+                      {isFirstOfGroup ? (
+                        <button
+                          type="button"
+                          onClick={() => setOpenPosting(row.postingNumber)}
+                          className="hint"
+                          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", color: "inherit", textDecoration: "underline" }}
+                        >
+                          {row.postingNumber}
+                          {groupSize > 1 && ` (${groupSize} ürün)`}
+                        </button>
+                      ) : (
+                        <span className="hint">↳</span>
+                      )}
                     </td>
-                    <td style={{ whiteSpace: "nowrap" }}>{row.orderDate ?? "-"}</td>
-                    <td>
-                      <span className="badge pending">{row.status}</span>
-                    </td>
+                    <td style={{ whiteSpace: "nowrap" }}>{isFirstOfGroup ? row.orderDate ?? "-" : ""}</td>
+                    <td>{isFirstOfGroup && <span className="badge pending">{row.status}</span>}</td>
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         {row.productImage && (
@@ -252,6 +273,15 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {openPosting && openOrderItems.length > 0 && (
+        <OrderDetailModal
+          postingNumber={openPosting}
+          items={openOrderItems}
+          allRows={rows}
+          onClose={() => setOpenPosting(null)}
+        />
       )}
     </div>
   );

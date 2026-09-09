@@ -229,11 +229,33 @@ export function computeShippingDiffUsd(row: PnlRow): number | null {
   return row.realShippingUsd - estimated;
 }
 
-// "Sadece zarar edilmiş kargoları göster" filtresi — hem UI'da (bkz. app/pnl/page.tsx) hem
-// CSV export'ta (bkz. app/api/orders/pnl-report/csv/route.ts) aynı mantık kullanılsın diye
-// tek yerden (2026-09-09, kullanıcı talebi: "csv her zaman filtrelere göre çalışsın").
+// "Sadece zarar edilmiş kargoları göster" filtresi — gerçek kargo tahminden YÜKSEK olanlar
+// (bizim açımızdan olumsuz fark). Hem UI'da (bkz. app/pnl/page.tsx) hem CSV export'ta (bkz.
+// app/api/orders/pnl-report/csv/route.ts) aynı mantık kullanılsın diye tek yerden (2026-09-09,
+// kullanıcı talebi: "csv her zaman filtrelere göre çalışsın").
 export function filterShippingLoss(rows: PnlRow[]): PnlRow[] {
   return rows.filter((r) => (computeShippingDiffUsd(r) ?? 0) > 0);
+}
+
+// "Hatalı hesaplanan kargoları göster" — yönden bağımsız, gerçek ile tahmin arasında ANLAMLI
+// bir fark olan (1 sentten büyük) her satır. "Sadece zarar edilen" (yukarıdaki) sadece bizim
+// aleyhimize olan yönü gösterirken bu, ağırlık verisinin genel isabetini denetlemek için ikisini
+// de kapsar (2026-09-09, kullanıcı talebi).
+export function filterShippingMismatch(rows: PnlRow[]): PnlRow[] {
+  return rows.filter((r) => Math.abs(computeShippingDiffUsd(r) ?? 0) > 0.01);
+}
+
+// "Mütabık olunmayan kargoları tahminle değiştir" checkbox'ı için — gerçek kargo ile tahmin
+// birbirini TUTMAYAN (mismatch) satırlarda gerçek değeri yok sayıp tahmine düşürür, ki
+// computeRowMetrics/summarizePnlRows o satırlarda otomatik ağırlık bazlı tahmini kullansın.
+// Ham veriyi (realShippingRub/realShippingUsd) DEĞİL, sadece bu hesaplama için türetilmiş bir
+// KOPYASINI değiştirir — Kargo Kontrolü sekmesi gibi başka yerler gerçek veriyi olduğu gibi
+// görmeye devam eder (2026-09-09, kullanıcı talebi).
+export function overrideDisputedShippingWithEstimate(rows: PnlRow[]): PnlRow[] {
+  return rows.map((r) => {
+    if (Math.abs(computeShippingDiffUsd(r) ?? 0) <= 0.01) return r;
+    return { ...r, realShippingRub: null, realShippingUsd: null };
+  });
 }
 
 // Bir satırın kâr/zarar dökümünü JS'te hesaplar — buildPnlCsv()'nin ürettiği sheet

@@ -1,10 +1,17 @@
-import Link from "next/link";
-import { getPnlRows, summarizePnlRows, groupMissingCostPrice, filterShippingLoss } from "@/modules/finance/pnl-report.service";
+import {
+  getPnlRows,
+  summarizePnlRows,
+  groupMissingCostPrice,
+  filterShippingLoss,
+  filterShippingMismatch,
+  overrideDisputedShippingWithEstimate,
+} from "@/modules/finance/pnl-report.service";
 import { PnlToolbar } from "./PnlToolbar";
 import { CostPriceCell } from "./CostPriceCell";
 import { CopyableProductName } from "./CopyableProductName";
 import { PnlTabs } from "./PnlTabs";
 import { PnlMainTable } from "./PnlMainTable";
+import { PnlFilterControls } from "./PnlFilterControls";
 
 export const dynamic = "force-dynamic";
 
@@ -20,15 +27,28 @@ function fmtPct(n: number | null) {
 export default async function PnlPage({
   searchParams,
 }: {
-  searchParams: Promise<{ missingCost?: string; shippingLoss?: string }>;
+  searchParams: Promise<{
+    missingCost?: string;
+    shippingLoss?: string;
+    shippingMismatch?: string;
+    useEstimateForDisputed?: string;
+  }>;
 }) {
   const params = await searchParams;
   const showMissingCostOnly = params.missingCost === "1";
   const showShippingLossOnly = params.shippingLoss === "1";
+  const showShippingMismatchOnly = params.shippingMismatch === "1";
+  const useEstimateForDisputed = params.useEstimateForDisputed === "1";
 
-  const allRows = await getPnlRows();
+  const fetchedRows = await getPnlRows();
+  // "Mütabık olunmayan kargoları tahminle değiştir" checkbox'ı — bu satırlarda gerçek kargo
+  // yok sayılıp ağırlık tahminine düşülür, TÜM aşağıdaki hesaplar (Özet, tablo, filtre sayıları,
+  // CSV) bunun üzerinden devam eder (2026-09-09, kullanıcı talebi).
+  const allRows = useEstimateForDisputed ? overrideDisputedShippingWithEstimate(fetchedRows) : fetchedRows;
+
   const shippingLossRows = filterShippingLoss(allRows);
-  const rows = showShippingLossOnly ? shippingLossRows : allRows;
+  const shippingMismatchRows = filterShippingMismatch(allRows);
+  const rows = showShippingLossOnly ? shippingLossRows : showShippingMismatchOnly ? shippingMismatchRows : allRows;
   const totals = summarizePnlRows(rows);
   const missingCostGroups = groupMissingCostPrice(rows);
 
@@ -85,28 +105,12 @@ export default async function PnlPage({
             <div className="value">{fmtPct(totals.marginPct)}</div>
           </div>
         </div>
-        {totals.missingCostCount > 0 && (
-          <div className="hint" style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8 }}>
-            {totals.missingCostCount} kalemde ({missingCostGroups.length} farklı üründe) alış fiyatı girilmemiş —
-            bunlar toplamlara dahil edilmedi.
-            <Link href={showMissingCostOnly ? "/pnl" : "/pnl?missingCost=1"}>
-              <button className="btn-secondary" style={{ padding: "2px 10px", fontSize: 12 }}>
-                {showMissingCostOnly ? "Tüm listeye dön" : "Sadece eksik olanları göster"}
-              </button>
-            </Link>
-          </div>
-        )}
-        {shippingLossRows.length > 0 && (
-          <div className="hint" style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-            {shippingLossRows.length} kalemde gerçek kargo, ağırlıktan çıkan tahminden daha yüksek
-            (kırmızı "Fark").
-            <Link href={showShippingLossOnly ? "/pnl" : "/pnl?shippingLoss=1"}>
-              <button className="btn-secondary" style={{ padding: "2px 10px", fontSize: 12 }}>
-                {showShippingLossOnly ? "Tüm listeye dön" : "Sadece zarar edilen kargoları göster"}
-              </button>
-            </Link>
-          </div>
-        )}
+        <PnlFilterControls
+          missingCostCount={totals.missingCostCount}
+          missingCostGroupCount={missingCostGroups.length}
+          shippingLossCount={shippingLossRows.length}
+          shippingMismatchCount={shippingMismatchRows.length}
+        />
       </div>
 
       {showMissingCostOnly ? (

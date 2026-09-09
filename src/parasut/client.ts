@@ -157,30 +157,3 @@ export function parasutPut<T>(path: string, body: unknown): Promise<T> {
 export function parasutDelete<T>(path: string): Promise<T> {
   return parasutRequest<T>("DELETE", path);
 }
-
-// PDF gibi binary dönen uçlar için — ör. "sales_invoices/{id}.pdf" (toplu ZIP indirme, bkz.
-// orderInvoice.ts). Hata JSON dönerse (arraybuffer içinde) çözüp anlamlı mesaj veriyor.
-export async function parasutGetBinary(path: string): Promise<Buffer> {
-  const config = requireParasutConfig();
-  const token = await getAccessToken();
-  try {
-    const response = await http.request({
-      method: "GET",
-      url: `/${config.companyId}/${path}`,
-      headers: { Authorization: `Bearer ${token}` },
-      responseType: "arraybuffer",
-    });
-    return Buffer.from(response.data as ArrayBuffer);
-  } catch (error) {
-    if (error instanceof ParasutApiError && error.body instanceof ArrayBuffer) {
-      try {
-        const parsed = JSON.parse(Buffer.from(error.body).toString("utf-8"));
-        const message = parsed?.errors?.[0]?.detail ?? parsed?.errors?.[0]?.title ?? error.message;
-        throw new ParasutApiError(message, error.status, parsed);
-      } catch {
-        throw error;
-      }
-    }
-    throw error;
-  }
-}

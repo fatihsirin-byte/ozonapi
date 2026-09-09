@@ -2,6 +2,7 @@ import { prisma } from "../db/prisma";
 import { getOrderDetail, fetchEtgbForOrder } from "../modules/orders/orders.service";
 import { createContact } from "./contacts";
 import { createSalesInvoice } from "./invoices";
+import { createEArchive } from "./eArchives";
 import { searchProductsByCode, createProduct } from "./products";
 import { getUsdToTryRate } from "../pricing/fx-rate";
 import { transliterateRussian } from "../utils/transliterate";
@@ -47,6 +48,13 @@ const FOREIGN_CUSTOMER_TAX_NUMBER = "11111111111";
 
 export class OrderInvoiceError extends Error {}
 
+// Yarış durumu koruması: aynı sipariş için iki istek (çift tıklama, iki açık sekme) neredeyse aynı
+// anda gelirse, ikisi de "henüz faturalanmamış" görüp GERÇEK, ayrı iki fatura kesebilir (2026-09-09'da
+// code review ile tespit edildi) — bu proje için özellikle riskli, çünkü gerçek faturalar silinemiyor
+// (bkz. proje kuralı). Bu yüzden işe başlamadan önce parasutInvoiceId'yi atomik olarak bu sentinel
+// değere çekiyoruz; DB bunu tek bir isteğe garanti eder, ikinci istek claim.count === 0 görüp geri çekilir.
+const INVOICE_CLAIM_SENTINEL = "PENDING";
+
 // Paraşüt her fatura satırında bir "Ürün/Hizmet" kaydı istiyor (boş bırakılırsa "Ürün/hizmet
 // doldurulmalı" hatası — 2026-09-09'da canlıda tespit edildi). Aynı Ozon ürünü (offerId=code)
 // için mükerrer kayıt açmamak adına önce aranıyor, yoksa oluşturuluyor.
@@ -71,16 +79,38 @@ async function findOrCreateParasutProduct(offerId: string, name: string, unitPri
 // satır fiyatları. Sipariş zaten daha önce faturalandıysa (Order.parasutInvoiceId dolu) yeniden
 // fatura KESMEZ, var olanı döner — buton yanlışlıkla iki kere tıklanırsa mükerrer fatura oluşmasın diye.
 export async function createInvoiceForOzonOrder(postingNumber: string) {
-  const existing = await prisma.order.findUnique({ where: { postingNumber } });
-  if (existing?.parasutInvoiceId) {
+  const claim = await prisma.order.updateMany({
+    where: { postingNumber, parasutInvoiceId: null },
+    data: { parasutInvoiceId: INVOICE_CLAIM_SENTINEL },
+  });
+
+  if (claim.count === 0) {
+    const current = await prisma.order.findUnique({ where: { postingNumber } });
+    if (!current) throw new OrderInvoiceError("Sipariş bulunamadı");
+    if (current.parasutInvoiceId === INVOICE_CLAIM_SENTINEL) {
+      throw new OrderInvoiceError(
+        "Bu sipariş için fatura kesme işlemi az önce başka bir istekle başlatıldı, birkaç saniye sonra tekrar deneyin",
+      );
+    }
     return {
-      invoiceId: existing.parasutInvoiceId,
-      invoiceNo: existing.parasutInvoiceNo,
-      printUrl: existing.parasutPrintUrl,
+      invoiceId: current.parasutInvoiceId,
+      invoiceNo: current.parasutInvoiceNo,
+      printUrl: current.parasutPrintUrl,
       alreadyExisted: true,
     };
   }
 
+  try {
+    return await doCreateInvoiceForOzonOrder(postingNumber);
+  } catch (err) {
+    // Claim'i geri bırak ki hata sonrası tekrar denenebilsin (yoksa sipariş sonsuza dek
+    // "PENDING" sentinel'inde takılı kalır, ne fatura kesilir ne buton tekrar aktif olur).
+    await prisma.order.update({ where: { postingNumber }, data: { parasutInvoiceId: null } }).catch(() => {});
+    throw err;
+  }
+}
+
+async function doCreateInvoiceForOzonOrder(postingNumber: string) {
   const order = await getOrderDetail(postingNumber);
   if (!order) throw new OrderInvoiceError("Sipariş bulunamadı");
   if (order.items.length === 0) throw new OrderInvoiceError("Siparişte kalem yok");
@@ -155,6 +185,9 @@ export async function createInvoiceForOzonOrder(postingNumber: string) {
     // kolayca düzeltilebilir.
     invoiceSeries: currentInvoiceSeries(),
     invoiceId: nextSequence,
+    // Yurt dışı müşteri — automation-nextjs projesindeki çalışan entegrasyonda da bu alan
+    // e-Arşiv/istisna işlenmesi için true gönderiliyor (2026-09-09).
+    isAbroad: true,
     // cashSale: true denendi ama Paraşüt "hesap bilgisi + ödeme tarihi doldurulmalı" diyor —
     // hangi kasa/banka hesabına işleneceğini bilmediğimiz için (yanlış hesaba yazmak riskli)
     // şimdilik atlanıyor, fatura "unpaid" açılıyor; kullanıcı Paraşüt panelinden tahsilatı
@@ -165,10 +198,24 @@ export async function createInvoiceForOzonOrder(postingNumber: string) {
   const invoiceNo = (invoiceRes.data.attributes as { invoice_no?: string }).invoice_no ?? null;
   const printUrl = `https://uygulama.parasut.com/${process.env.PARASUT_COMPANY_ID}/sales_invoices/${invoiceId}/print`;
 
+  // KRİTİK ADIM: yalnızca sales_invoices oluşturmak faturayı TASLAK'ta bırakıyor — resmi
+  // e-Arşiv'e dönüşmesi (GİB'e gidip QR/ETTN kazanması, KDV istisnasının gerçekten işlenmesi)
+  // için ayrı bir e_archives isteği gerekiyor (bkz. src/parasut/eArchives.ts, 2026-09-09'da
+  // automation-nextjs referans projesinde bulundu). Bu adım başarısız olursa fatura yine de
+  // Paraşüt'te oluşmuş olur (taslak) — hatayı yutmuyoruz, kullanıcıya "e-Arşiv adımı başarısız"
+  // diye bildiriyoruz ki panelden manuel tamamlayabilsin.
+  let eArchiveFailed = false;
+  try {
+    await createEArchive(invoiceId);
+  } catch (err) {
+    eArchiveFailed = true;
+    console.error(`[parasut] e-Arşiv oluşturma başarısız (invoice ${invoiceId}, posting ${postingNumber}):`, err);
+  }
+
   await prisma.order.update({
     where: { postingNumber },
     data: { parasutInvoiceId: invoiceId, parasutInvoiceNo: invoiceNo, parasutPrintUrl: printUrl, parasutInvoicedAt: new Date() },
   });
 
-  return { invoiceId, invoiceNo, printUrl, alreadyExisted: false };
+  return { invoiceId, invoiceNo, printUrl, alreadyExisted: false, eArchiveFailed };
 }

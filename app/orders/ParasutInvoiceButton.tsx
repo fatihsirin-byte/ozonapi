@@ -17,6 +17,7 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
   const [error, setError] = useState<string | null>(null);
   const [invoiceNo, setInvoiceNo] = useState(initialInvoiceNo);
   const [printUrl, setPrintUrl] = useState(initialPrintUrl);
+  const [eArchiveWarning, setEArchiveWarning] = useState(false);
 
   async function handleCreate() {
     if (!confirm("Paraşüt'te bu sipariş için GERÇEK bir satış faturası kesilecek. Onaylıyor musunuz?")) return;
@@ -31,6 +32,7 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
       }
       setInvoiceNo(data.invoiceNo);
       setPrintUrl(data.printUrl);
+      setEArchiveWarning(Boolean(data.eArchiveFailed));
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bilinmeyen hata");
@@ -41,9 +43,16 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
 
   if (printUrl) {
     return (
-      <a href={printUrl} target="_blank" rel="noopener noreferrer">
-        <button className="btn-secondary">Faturayı Aç {invoiceNo ? `(${invoiceNo})` : ""} ↗</button>
-      </a>
+      <div>
+        <a href={printUrl} target="_blank" rel="noopener noreferrer">
+          <button className="btn-secondary">Faturayı Aç {invoiceNo ? `(${invoiceNo})` : ""} ↗</button>
+        </a>
+        {eArchiveWarning && (
+          <div className="hint" style={{ color: "var(--danger)", marginTop: 4 }}>
+            Fatura oluştu ama e-Arşiv adımı başarısız oldu — Paraşüt panelinden kontrol edin.
+          </div>
+        )}
+      </div>
     );
   }
 

@@ -1,4 +1,4 @@
-import { parasutGet, parasutPost, parasutDelete, parasutGetBinary } from "./client";
+import { parasutGet, parasutPost, parasutDelete } from "./client";
 
 // Paraşüt'ün JSON:API'si — Ozon üzerinden Rusya'ya yapılan satışlar için kullanıcının elle
 // kestiği 466 gerçek faturadan (2026-09-09'da incelendi) çıkan patern: item_type "invoice"
@@ -36,6 +36,7 @@ export interface CreateSalesInvoiceInput {
   invoiceSeries?: string;
   invoiceId?: string;
   cashSale?: boolean;
+  isAbroad?: boolean;
   contactId: string;
   details: ParasutSalesInvoiceDetailInput[];
 }
@@ -72,6 +73,7 @@ export function createSalesInvoice(input: CreateSalesInvoiceInput) {
         invoice_series: input.invoiceSeries,
         invoice_id: input.invoiceId,
         cash_sale: input.cashSale,
+        is_abroad: input.isAbroad,
       },
       relationships: {
         contact: {
@@ -109,12 +111,4 @@ export function showSalesInvoice(invoiceId: string) {
 
 export function deleteSalesInvoice(invoiceId: string) {
   return parasutDelete<void>(`sales_invoices/${invoiceId}`);
-}
-
-// Toplu ZIP indirme için (bkz. app/api/orders/parasut-invoices/today-zip). NOT: Paraşüt bu uçta
-// "düz" (e-belge olmayan) faturalar için hesapta bir "Yazdırma Şablonu" (PrintTemplate)
-// tanımlı olmasını istiyor — tanımlı değilse "Record was not found: PrintTemplate" hatası
-// veriyor (2026-09-09'da canlıda tespit edildi, bkz. Ayarlar > Yazdırma Şablonları).
-export function getSalesInvoicePdf(invoiceId: string) {
-  return parasutGetBinary(`sales_invoices/${invoiceId}.pdf`);
 }

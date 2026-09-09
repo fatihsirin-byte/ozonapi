@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { listOrders, computeOrderAmount, computeOrderCost } from "@/modules/orders/orders.service";
-import { getPnlSummary } from "@/modules/finance/finance.service";
 import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
 import { OrdersToolbar } from "./OrdersToolbar";
 import { ParasutInvoiceButton } from "./ParasutInvoiceButton";
@@ -20,13 +19,6 @@ function formatMoney(n: number) {
   return `$${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-// Ozon'un finans/işlem API'si (PNL kartı) tutarları RUB cinsinden dönüyor, hesabın sözleşme para
-// birimi USD olsa da (2026-08-14'te Ozon'un kendi panelindeki "-360 ₽" değeriyle karşılaştırılıp
-// doğrulandı — sistemimiz bunu yanlışlıkla "-$360" gösteriyordu, ~80x büyütülmüş görünüyordu).
-function formatRub(n: number) {
-  return `₽${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 function getShipmentDate(rawPayload: unknown): string | null {
   const date = (rawPayload as { shipment_date?: string } | null)?.shipment_date;
   return date ?? null;
@@ -39,99 +31,22 @@ export default async function OrdersPage({
 }) {
   const params = await searchParams;
   const page = Number(params.page ?? "1");
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const showInvoicedToday = params.invoicedToday === "1";
   const todayRange = getIstanbulTodayRangeUtc();
 
-  const [{ orders, total }, pnl, { orders: recentOrders }] = await Promise.all([
-    listOrders({
-      status: showInvoicedToday ? undefined : params.status,
-      invoicedSince: showInvoicedToday ? todayRange.start : undefined,
-      invoicedTo: showInvoicedToday ? todayRange.end : undefined,
-      skip: (page - 1) * 50,
-      take: 50,
-    }),
-    getPnlSummary({ since }),
-    listOrders({ since, take: 1000 }),
-  ]);
-
-  const grossRevenue = recentOrders.reduce((sum, o) => sum + computeOrderAmount(o.items), 0);
-  const costs = recentOrders.map((o) => computeOrderCost(o.items));
-  const grossCost = costs.reduce((sum: number, c) => sum + (c ?? 0), 0);
-  const missingCostCount = costs.filter((c) => c == null).length;
-
-  const hasSettledData = pnl.byOperationType.some(
-    (t) => !/redistribution|acquiring/i.test(t.operationType),
-  );
+  const { orders, total } = await listOrders({
+    status: showInvoicedToday ? undefined : params.status,
+    invoicedSince: showInvoicedToday ? todayRange.start : undefined,
+    invoicedTo: showInvoicedToday ? todayRange.end : undefined,
+    skip: (page - 1) * 50,
+    take: 50,
+  });
 
   return (
     <div className="page-wide">
       <div className="topbar">
         <h1>Siparişler</h1>
         <OrdersToolbar />
-      </div>
-
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h3 style={{ marginTop: 0 }}>Son 30 Gün Brüt Kâr (ürün bazlı — komisyon/kargo kesintisi hariç)</h3>
-        <div className="hint" style={{ marginBottom: 16 }}>
-          Bu kâr sipariş anında hesaplanıyor, Ozon'un komisyon/kargo muhasebeleştirmesini
-          beklemiyor — alış fiyatı × adet, satış tutarından düşülüyor.
-          {missingCostCount > 0 && ` ${missingCostCount} siparişte alış fiyatı eksik, hesaba dahil edilmedi.`}
-        </div>
-        <div className="summary-grid">
-          <div>
-            <div className="hint">Satış Tutarı</div>
-            <div className="value">{formatMoney(grossRevenue)}</div>
-          </div>
-          <div>
-            <div className="hint">Alış Maliyeti</div>
-            <div className="value" style={{ color: "var(--danger)" }}>{formatMoney(grossCost)}</div>
-          </div>
-          <div>
-            <div className="hint">Brüt Kâr</div>
-            <div className="value" style={{ color: "var(--success)" }}>{formatMoney(grossRevenue - grossCost)}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h3 style={{ marginTop: 0 }}>Son 30 Gün PNL (Ozon finans işlemleri)</h3>
-        <div className="hint" style={{ marginBottom: 16 }}>
-          Bu kart Ozon'un finans/işlem verisinden geliyor ve <strong>₽ (RUB)</strong> cinsinden — yukarıdaki
-          "Brüt Kâr" kartıyla (bizim kendi USD fiyatımız) karıştırılmasın.
-        </div>
-        {!hasSettledData && (
-          <div className="hint" style={{ marginBottom: 16, color: "var(--muted)" }}>
-            Ozon, komisyon/kargo/diğer kesintileri sipariş <strong>teslim edildikten</strong> sonra
-            muhasebeleştiriyor. Henüz teslim edilmiş/kesinleşmiş bir işlem yok — aşağıdaki tutar
-            sadece ödeme altyapısının küçük düzeltme işlemlerini (aşağıdaki dökümde görülür)
-            yansıtıyor, gerçek satış/komisyon verisi değil.
-          </div>
-        )}
-        <div className="summary-grid" style={{ marginBottom: 16 }}>
-          <div>
-            <div className="hint">Toplam Tutar</div>
-            <div className="value">{formatRub(pnl.amount)}</div>
-          </div>
-          <div>
-            <div className="hint">Komisyon</div>
-            <div className="value" style={{ color: "var(--danger)" }}>{formatRub(pnl.commission)}</div>
-          </div>
-          <div>
-            <div className="hint">Kargo</div>
-            <div className="value" style={{ color: "var(--danger)" }}>{formatRub(pnl.delivery)}</div>
-          </div>
-          <div>
-            <div className="hint">Diğer Kesintiler</div>
-            <div className="value" style={{ color: "var(--danger)" }}>{formatRub(pnl.other)}</div>
-          </div>
-          <div>
-            <div className="hint">Net</div>
-            <div className="value" style={{ color: pnl.net >= 0 ? "var(--success)" : "var(--danger)" }}>
-              {formatRub(pnl.net)}
-            </div>
-          </div>
-        </div>
       </div>
 
       <div className="card" style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>

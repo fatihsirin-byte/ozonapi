@@ -279,7 +279,6 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
         <OrderDetailModal
           postingNumber={openPosting}
           items={openOrderItems}
-          allRows={rows}
           onClose={() => setOpenPosting(null)}
         />
       )}

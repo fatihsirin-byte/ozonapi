@@ -42,13 +42,23 @@ export default async function PnlPage({
 
   const fetchedRows = await getPnlRows();
   // "Mütabık olunmayan kargoları tahminle değiştir" checkbox'ı — bu satırlarda gerçek kargo
-  // yok sayılıp ağırlık tahminine düşülür, TÜM aşağıdaki hesaplar (Özet, tablo, filtre sayıları,
-  // CSV) bunun üzerinden devam eder (2026-09-09, kullanıcı talebi).
+  // yok sayılıp ağırlık tahminine düşülür, TÜM aşağıdaki hesaplar (Özet, tablo, CSV) bunun
+  // üzerinden devam eder (2026-09-09, kullanıcı talebi).
   const allRows = useEstimateForDisputed ? overrideDisputedShippingWithEstimate(fetchedRows) : fetchedRows;
 
-  const shippingLossRows = filterShippingLoss(allRows);
-  const shippingMismatchRows = filterShippingMismatch(allRows);
-  const rows = showShippingLossOnly ? shippingLossRows : showShippingMismatchOnly ? shippingMismatchRows : allRows;
+  // ÖNEMLİ: filtre kontrollerinin (buton/checkbox) görünürlüğü HER ZAMAN ham veriden (override
+  // uygulanmamış fetchedRows) hesaplanır — checkbox'ı işaretleyince "mütabık olunmayan" kalem
+  // sayısı 0'a düşüyor (zaten o yüzden işaretlendi), bu sayıya bağlı kalınsaydı checkbox/butonlar
+  // işaretlenir işaretlenmez ekrandan kaybolur, bir daha kapatılamazdı (2026-09-09'da kullanıcı
+  // bulgusu — "diğer seçenekler gitti").
+  const shippingLossRowsForControls = filterShippingLoss(fetchedRows);
+  const shippingMismatchRowsForControls = filterShippingMismatch(fetchedRows);
+
+  const rows = showShippingLossOnly
+    ? filterShippingLoss(allRows)
+    : showShippingMismatchOnly
+      ? filterShippingMismatch(allRows)
+      : allRows;
   const totals = summarizePnlRows(rows);
   const missingCostGroups = groupMissingCostPrice(rows);
 
@@ -108,8 +118,8 @@ export default async function PnlPage({
         <PnlFilterControls
           missingCostCount={totals.missingCostCount}
           missingCostGroupCount={missingCostGroups.length}
-          shippingLossCount={shippingLossRows.length}
-          shippingMismatchCount={shippingMismatchRows.length}
+          shippingLossCount={shippingLossRowsForControls.length}
+          shippingMismatchCount={shippingMismatchRowsForControls.length}
         />
       </div>
 

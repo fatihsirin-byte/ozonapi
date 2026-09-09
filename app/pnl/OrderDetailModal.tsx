@@ -1,8 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
 import Link from "next/link";
-import { computeRowMetrics, type PnlRow } from "@/modules/finance/pnl-report.service";
+import { computeRowMetrics, type PnlRow, type PnlRowMetrics } from "@/modules/finance/pnl-report.service";
 import { CopyableProductName } from "./CopyableProductName";
 
 function fmtMoney(n: number) {
@@ -14,71 +13,93 @@ function fmtPct(n: number | null) {
   return `${n.toLocaleString("tr-TR", { maximumFractionDigits: 1 })}%`;
 }
 
-// Bağımlılık eklemeden basit bir aylık trend çubuk grafiği — ürünün TÜM siparişleri (bu
-// modal'daki tek siparişle sınırlı değil) üzerinden ay bazında net kâr toplamı.
-function MonthlyTrendChart({ allRows, offerId }: { allRows: PnlRow[]; offerId: string }) {
-  const monthly = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const r of allRows) {
-      if (r.offerId !== offerId || !r.orderDate) continue;
-      const m = computeRowMetrics(r);
-      if (m.profit == null) continue;
-      const month = r.orderDate.slice(0, 7);
-      map.set(month, (map.get(month) ?? 0) + m.profit);
-    }
-    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [allRows, offerId]);
+const DONUT_COLORS = {
+  cost: "var(--danger)",
+  shipping: "#f0ad4e",
+  fees: "#8884d8",
+  profit: "var(--success)",
+};
 
-  if (monthly.length === 0) {
-    return <div className="hint">Bu ürün için henüz aylık kâr verisi yok.</div>;
-  }
+// Bağımlılık eklemeden CSS conic-gradient ile halka (donut) kırılım grafiği — kullanıcı talebi
+// "halka grafik, %sel olarak renklerle kırılımı çemberde göster" (2026-09-09). Aylık trend çubuğu
+// değil, TEK bir kalemin satış tutarının alış/kargo/komisyon+lojistik+banka/net kâr olarak
+// yüzdesel dağılımı.
+function BreakdownDonut({ m }: { m: PnlRowMetrics }) {
+  const cost = m.totalCost ?? 0;
+  const shipping = m.shipping ?? 0;
+  const fees = m.commission + m.logistics + m.bankFee;
+  const positiveProfit = m.profit != null && m.profit > 0 ? m.profit : 0;
+  const base = cost + shipping + fees + positiveProfit;
 
-  const width = 320;
-  const height = 90;
-  const midY = height / 2;
-  const barGap = 4;
-  const barWidth = width / monthly.length;
-  const maxAbs = Math.max(...monthly.map(([, v]) => Math.abs(v)), 0.01);
+  if (base <= 0) return <div className="hint">Kırılım için yeterli veri yok.</div>;
+
+  const segments = [
+    { label: "Alış", value: cost, color: DONUT_COLORS.cost },
+    { label: "Kargo", value: shipping, color: DONUT_COLORS.shipping },
+    { label: "Komisyon+Lojistik+Banka", value: fees, color: DONUT_COLORS.fees },
+    { label: "Net Kâr", value: positiveProfit, color: DONUT_COLORS.profit },
+  ].filter((s) => s.value > 0);
+
+  let cursor = 0;
+  const stops = segments
+    .map((s) => {
+      const pct = (s.value / base) * 100;
+      const from = cursor;
+      cursor += pct;
+      return `${s.color} ${from}% ${cursor}%`;
+    })
+    .join(", ");
+
+  const size = 72;
 
   return (
-    <svg width={width} height={height + 16} role="img" aria-label="Aylık kâr trendi">
-      <line x1={0} y1={midY} x2={width} y2={midY} stroke="var(--border)" strokeWidth={1} />
-      {monthly.map(([month, profit], i) => {
-        const barHeight = (Math.abs(profit) / maxAbs) * (midY - 4);
-        const isPositive = profit >= 0;
-        const x = i * barWidth + barGap / 2;
-        const y = isPositive ? midY - barHeight : midY;
-        return (
-          <g key={month}>
-            <rect
-              x={x}
-              y={y}
-              width={Math.max(barWidth - barGap, 2)}
-              height={Math.max(barHeight, 1)}
-              fill={isPositive ? "var(--success)" : "var(--danger)"}
-              rx={2}
-            >
-              <title>{`${month}: ${fmtMoney(profit)}`}</title>
-            </rect>
-            <text x={x + (barWidth - barGap) / 2} y={height + 12} fontSize={9} textAnchor="middle" fill="var(--muted)">
-              {month.slice(5)}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+        <div style={{ width: size, height: size, borderRadius: "50%", background: `conic-gradient(${stops})` }} />
+        <div
+          style={{
+            position: "absolute",
+            inset: size * 0.26,
+            borderRadius: "50%",
+            background: "var(--surface)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 11,
+            fontWeight: 600,
+            textAlign: "center",
+            color: m.profit == null ? "var(--muted)" : m.profit >= 0 ? "var(--success)" : "var(--danger)",
+          }}
+        >
+          {fmtPct(m.marginPct)}
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, minWidth: 0 }}>
+        {segments.map((s) => (
+          <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flexShrink: 0, display: "inline-block" }} />
+            <span className="hint">
+              {s.label}: {fmtMoney(s.value)} ({((s.value / base) * 100).toFixed(0)}%)
+            </span>
+          </div>
+        ))}
+        {m.profit != null && m.profit < 0 && (
+          <div className="hint" style={{ color: "var(--danger)" }}>
+            Zarar: {fmtMoney(m.profit)}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
 export function OrderDetailModal({
   postingNumber,
   items,
-  allRows,
   onClose,
 }: {
   postingNumber: string;
   items: PnlRow[];
-  allRows: PnlRow[];
   onClose: () => void;
 }) {
   const metrics = items.map((row) => ({ row, m: computeRowMetrics(row) }));
@@ -98,7 +119,11 @@ export function OrderDetailModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card" style={{ maxWidth: 640, width: "90vw", maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal-card"
+        style={{ maxWidth: 980, width: "95vw", maxHeight: "92vh", overflowY: "auto" }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
             <strong style={{ fontSize: 18 }}>{postingNumber}</strong>
@@ -116,69 +141,64 @@ export function OrderDetailModal({
           </div>
         </div>
 
-        {metrics.map(({ row, m }) => (
-          <div key={row.offerId} style={{ display: "flex", gap: 12, padding: "12px 0", borderTop: "1px solid var(--border)" }}>
-            {row.productImage && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={row.productImage}
-                alt=""
-                width={64}
-                height={64}
-                style={{ objectFit: "cover", borderRadius: 6, flexShrink: 0 }}
-              />
-            )}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div>
-                <CopyableProductName name={row.productName} nameRu={row.productNameRu} />
-              </div>
-              <div className="hint">
-                {row.offerId}
-                {row.ozonSku && (
-                  <>
-                    {" · "}
-                    <a href={`https://www.ozon.ru/context/detail/id/${row.ozonSku}/`} target="_blank" rel="noopener noreferrer">
-                      Ozon'da gör ↗
-                    </a>
-                  </>
-                )}
-              </div>
-              <div className="hint" style={{ marginTop: 4 }}>
-                Adet: {row.quantity} · Net ağırlık: {row.netWeightGrams != null ? `${row.netWeightGrams}g` : "-"} · Kargo ağırlığı:{" "}
-                {row.cargoWeightGrams != null ? `${Math.round(row.cargoWeightGrams)}g` : "-"}
-                {row.widthCm != null && row.heightCm != null && row.depthCm != null && (
-                  <> · Boyut: {row.widthCm}×{row.heightCm}×{row.depthCm} cm</>
-                )}
-              </div>
-              <div style={{ display: "flex", gap: 16, marginTop: 6 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 12 }}>
+          {metrics.map(({ row, m }) => (
+            <div key={row.offerId} style={{ display: "flex", gap: 12, padding: 12, border: "1px solid var(--border)", borderRadius: 8 }}>
+              {row.productImage && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={row.productImage}
+                  alt=""
+                  width={56}
+                  height={56}
+                  style={{ objectFit: "cover", borderRadius: 6, flexShrink: 0 }}
+                />
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div>
-                  <div className="hint">Satış</div>
-                  <div>{fmtMoney(m.totalSale)}</div>
+                  <CopyableProductName name={row.productName} nameRu={row.productNameRu} />
                 </div>
-                <div>
-                  <div className="hint">Alış</div>
-                  <div>{m.totalCost != null ? fmtMoney(m.totalCost) : <Link href="/pnl?missingCost=1">eksik</Link>}</div>
+                <div className="hint">
+                  {row.offerId}
+                  {row.ozonSku && (
+                    <>
+                      {" · "}
+                      <a href={`https://www.ozon.ru/context/detail/id/${row.ozonSku}/`} target="_blank" rel="noopener noreferrer">
+                        Ozon'da gör ↗
+                      </a>
+                    </>
+                  )}
                 </div>
-                <div>
-                  <div className="hint">Net Kâr</div>
-                  <div style={{ color: m.profit == null ? undefined : m.profit >= 0 ? "var(--success)" : "var(--danger)" }}>
-                    {m.profit != null ? fmtMoney(m.profit) : "-"}
+                <div className="hint" style={{ marginTop: 4 }}>
+                  Adet: {row.quantity} · Net: {row.netWeightGrams != null ? `${row.netWeightGrams}g` : "-"} · Kargo:{" "}
+                  {row.cargoWeightGrams != null ? `${Math.round(row.cargoWeightGrams)}g` : "-"}
+                  {row.widthCm != null && row.heightCm != null && row.depthCm != null && (
+                    <> · {row.widthCm}×{row.heightCm}×{row.depthCm} cm</>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 14, marginTop: 6, marginBottom: 8 }}>
+                  <div>
+                    <div className="hint">Satış</div>
+                    <div>{fmtMoney(m.totalSale)}</div>
+                  </div>
+                  <div>
+                    <div className="hint">Alış</div>
+                    <div>{m.totalCost != null ? fmtMoney(m.totalCost) : <Link href="/pnl?missingCost=1">eksik</Link>}</div>
+                  </div>
+                  <div>
+                    <div className="hint">Net Kâr</div>
+                    <div style={{ color: m.profit == null ? undefined : m.profit >= 0 ? "var(--success)" : "var(--danger)" }}>
+                      {m.profit != null ? fmtMoney(m.profit) : "-"}
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <div className="hint">Marj</div>
-                  <div>{fmtPct(m.marginPct)}</div>
-                </div>
-              </div>
-              <div style={{ marginTop: 10 }}>
-                <div className="hint" style={{ marginBottom: 4 }}>Aylık kâr trendi (bu ürünün tüm siparişleri)</div>
-                <MonthlyTrendChart allRows={allRows} offerId={row.offerId} />
+                <BreakdownDonut m={m} />
               </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
 
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+        <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
           <strong>Sipariş Toplamı</strong>
           <div className="breakdown-grid" style={{ marginTop: 8 }}>
             <div>

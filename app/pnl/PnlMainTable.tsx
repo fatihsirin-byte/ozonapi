@@ -192,10 +192,10 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
                           </div>
                           <div className="hint">
                             {row.offerId}
-                            {row.ozonProductId && (
+                            {row.ozonSku && (
                               <>
                                 {" · "}
-                                <a href={`https://www.ozon.ru/product/${row.ozonProductId}/`} target="_blank" rel="noopener noreferrer">
+                                <a href={`https://www.ozon.ru/context/detail/id/${row.ozonSku}/`} target="_blank" rel="noopener noreferrer">
                                   Ozon'da gör ↗
                                 </a>
                               </>
@@ -233,13 +233,14 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
                         </>
                       )}
                     </td>
-                    <td className="hint" style={{ whiteSpace: "nowrap" }}>
+                    <td style={{ whiteSpace: "nowrap", fontSize: 15 }}>
                       {e.estimatedShippingUsd != null ? fmtMoney(e.estimatedShippingUsd) : "-"}
                     </td>
                     <td
-                      className="hint"
                       style={{
                         whiteSpace: "nowrap",
+                        fontSize: 16,
+                        fontWeight: 600,
                         color: e.shippingDiff == null ? undefined : e.shippingDiff > 0 ? "var(--danger)" : "var(--success)",
                       }}
                     >

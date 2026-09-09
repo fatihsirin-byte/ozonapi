@@ -19,11 +19,16 @@ export interface PnlRow {
   productNameRu: string | null;
   productImage: string | null;
   ozonProductId: string | null;
+  ozonSku: string | null;
   quantity: number;
   unitSalePrice: number;
   unitCostPrice: number | null;
   weightSource: "measured" | "estimated" | "unknown";
   cargoWeightGrams: number | null;
+  netWeightGrams: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+  depthCm: number | null;
   // Ozon'un o posting için GERÇEKTEN kestiği kargo ücreti (₽, RUB) — sadece teslimattan sonra
   // dolar (bkz. finance.service.ts açıklaması). Posting'te tek ürün varsa tutarın tamamı, birden
   // fazla farklı ürün varsa satış tutarı payına göre ORANTILI dağıtılmış hali (approximatePosting
@@ -43,6 +48,7 @@ export interface MissingCostPriceGroup {
   productNameRu: string | null;
   productImage: string | null;
   ozonProductId: string | null;
+  ozonSku: string | null;
   orderCount: number;
 }
 
@@ -65,6 +71,7 @@ export function groupMissingCostPrice(rows: PnlRow[]): MissingCostPriceGroup[] {
         productNameRu: row.productNameRu,
         productImage: row.productImage,
         ozonProductId: row.ozonProductId,
+        ozonSku: row.ozonSku,
         orderCount: 1,
       });
     }
@@ -178,11 +185,19 @@ export async function getPnlRows(params?: { since?: Date; to?: Date }): Promise<
         productNameRu: product?.nameRu ?? null,
         productImage: Array.isArray(product?.images) ? ((product.images as string[])[0] ?? null) : null,
         ozonProductId: product?.ozonProductId ?? null,
+        // Ozon'un canlı mağaza sayfası product_id ile DEĞİL sku ile açılıyor
+        // (https://www.ozon.ru/context/detail/id/{sku} — Ozon'un kendi dokümantasyonunda böyle;
+        // product_id ile denenince 404 verdiği 2026-09-09'da kullanıcı tarafından teyit edildi).
+        ozonSku: item.ozonSku != null ? item.ozonSku.toString() : null,
         quantity: item.quantity,
         unitSalePrice: Number(item.price),
         unitCostPrice: product?.costPrice != null ? Number(product.costPrice) : null,
         weightSource: product?.weightConfirmed ? "measured" : product?.weightGrams != null ? "estimated" : "unknown",
         cargoWeightGrams: effectiveCargoWeightGrams(product),
+        netWeightGrams: product?.weightGrams ?? null,
+        widthCm: product?.widthCm ?? null,
+        heightCm: product?.heightCm ?? null,
+        depthCm: product?.depthCm ?? null,
         realShippingRub,
         realShippingUsd: realShippingRub != null && usdToRubRate != null ? realShippingRub / usdToRubRate : null,
         approximateShippingSplit,
@@ -203,6 +218,22 @@ export async function getShippingReviewRows(params?: { since?: Date; to?: Date }
 
 export function estimateShippingForWeight(weightGrams: number): number {
   return weightGrams <= 500 ? 0.8 + 0.0055 * weightGrams : 3.0 + 0.5 * (weightGrams / 100);
+}
+
+// Gerçek kargo (varsa) ile ağırlıktan çıkan tahmini kargo arasındaki fark ($) — pozitifse
+// gerçek maliyet tahminden fazla (fiyatlama varsayımını aşan "gizli" ek maliyet, bkz. UI'daki
+// kırmızı/yeşil renklendirme), ikisinden biri yoksa null.
+export function computeShippingDiffUsd(row: PnlRow): number | null {
+  if (row.realShippingUsd == null || row.cargoWeightGrams == null) return null;
+  const estimated = estimateShippingForWeight(row.cargoWeightGrams * row.quantity);
+  return row.realShippingUsd - estimated;
+}
+
+// "Sadece zarar edilmiş kargoları göster" filtresi — hem UI'da (bkz. app/pnl/page.tsx) hem
+// CSV export'ta (bkz. app/api/orders/pnl-report/csv/route.ts) aynı mantık kullanılsın diye
+// tek yerden (2026-09-09, kullanıcı talebi: "csv her zaman filtrelere göre çalışsın").
+export function filterShippingLoss(rows: PnlRow[]): PnlRow[] {
+  return rows.filter((r) => (computeShippingDiffUsd(r) ?? 0) > 0);
 }
 
 // Bir satırın kâr/zarar dökümünü JS'te hesaplar — buildPnlCsv()'nin ürettiği sheet

@@ -1,12 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 export function PnlToolbar() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  // CSV her zaman o an ekranda aktif olan filtreyi (missingCost/shippingLoss) yansıtsın diye
+  // sayfanın kendi query string'i aynen CSV route'una da taşınıyor (2026-09-09, kullanıcı talebi).
+  const csvHref = `/api/orders/pnl-report/csv${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
 
   async function handleSync() {
     setLoading(true);
@@ -33,7 +38,7 @@ export function PnlToolbar() {
         <button className="btn-secondary" disabled={loading} onClick={handleSync}>
           {loading ? "Senkronize ediliyor..." : "Senkronize Et (son 30 gün)"}
         </button>
-        <a href="/api/orders/pnl-report/csv">
+        <a href={csvHref}>
           <button className="btn-primary">CSV İndir</button>
         </a>
       </div>

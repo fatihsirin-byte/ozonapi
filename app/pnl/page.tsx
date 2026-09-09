@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getPnlRows, summarizePnlRows, groupMissingCostPrice } from "@/modules/finance/pnl-report.service";
+import { getPnlRows, summarizePnlRows, groupMissingCostPrice, filterShippingLoss } from "@/modules/finance/pnl-report.service";
 import { PnlToolbar } from "./PnlToolbar";
 import { CostPriceCell } from "./CostPriceCell";
 import { CopyableProductName } from "./CopyableProductName";
@@ -20,12 +20,15 @@ function fmtPct(n: number | null) {
 export default async function PnlPage({
   searchParams,
 }: {
-  searchParams: Promise<{ missingCost?: string }>;
+  searchParams: Promise<{ missingCost?: string; shippingLoss?: string }>;
 }) {
   const params = await searchParams;
   const showMissingCostOnly = params.missingCost === "1";
+  const showShippingLossOnly = params.shippingLoss === "1";
 
-  const rows = await getPnlRows();
+  const allRows = await getPnlRows();
+  const shippingLossRows = filterShippingLoss(allRows);
+  const rows = showShippingLossOnly ? shippingLossRows : allRows;
   const totals = summarizePnlRows(rows);
   const missingCostGroups = groupMissingCostPrice(rows);
 
@@ -93,6 +96,17 @@ export default async function PnlPage({
             </Link>
           </div>
         )}
+        {shippingLossRows.length > 0 && (
+          <div className="hint" style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+            {shippingLossRows.length} kalemde gerçek kargo, ağırlıktan çıkan tahminden daha yüksek
+            (kırmızı "Fark").
+            <Link href={showShippingLossOnly ? "/pnl" : "/pnl?shippingLoss=1"}>
+              <button className="btn-secondary" style={{ padding: "2px 10px", fontSize: 12 }}>
+                {showShippingLossOnly ? "Tüm listeye dön" : "Sadece zarar edilen kargoları göster"}
+              </button>
+            </Link>
+          </div>
+        )}
       </div>
 
       {showMissingCostOnly ? (
@@ -134,11 +148,11 @@ export default async function PnlPage({
                           </div>
                           <div className="hint">
                             {g.offerId}
-                            {g.ozonProductId && (
+                            {g.ozonSku && (
                               <>
                                 {" · "}
                                 <a
-                                  href={`https://www.ozon.ru/product/${g.ozonProductId}/`}
+                                  href={`https://www.ozon.ru/context/detail/id/${g.ozonSku}/`}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                 >

@@ -1,5 +1,5 @@
 import { prisma } from "../../db/prisma";
-import { importProducts, getImportStatus, updatePrices, updateStocks, getProductAttributes, getProductInfoList } from "../../ozon/products";
+import { importProducts, getImportStatus, updatePrices, updateStocks, getProductAttributes, getProductInfoList, listProducts } from "../../ozon/products";
 import { getCategoryAttributes } from "../../ozon/categories";
 import { selectWarehouseId } from "../../ozon/warehouses";
 import { buildRichContentJson } from "../../ozon/rich-content";
@@ -556,6 +556,14 @@ export async function backfillMissingStock(stock: number) {
   return { total: products.length, updated: updatedOfferIds.length, results };
 }
 
+// Sadece bizim DB'mizdeki alış fiyatını kaydeder — updateProductPrice'ın aksine Ozon'a HİÇBİR
+// şey göndermez (satış/min fiyatı değiştirmez). Kâr/Zarar raporunda (bkz. /pnl) alış fiyatı
+// boş kalmış ürünleri tek tek ürün sayfasına gitmeden, orada doldurabilmek için — amaç sadece
+// geçmiş kâr hesabını tamamlamak, canlı listeleme fiyatını etkilememek (2026-08-24, kullanıcı talebi).
+export async function setCostPriceOnly(offerId: string, costPrice: string) {
+  return prisma.product.update({ where: { offerId }, data: { costPrice } });
+}
+
 // priceOverride verilirse (Fiyat Hesaplayıcı modalında elle girilen satış fiyatı) formülü
 // yeniden hesaplamadan doğrudan o fiyat Ozon'a gönderilir — aksi halde costPrice'tan
 // formülle hesaplanan önerilen fiyat kullanılır (mevcut davranış).
@@ -909,4 +917,52 @@ export async function importFromOzon(offerId: string) {
   });
 
   return product;
+}
+
+// syncFbsOrders her 15 dakikada bir (cron) VE her elle "Senkronize Et" tıklamasında çalışıyor —
+// tam katalog taraması (aşağıda) her seferinde çalışırsa katalog büyüdükçe sync süresini ve Ozon
+// API yükünü sürekli artırır. Bu yüzden gerçek taramayı en fazla bu sıklıkta yapıyoruz; process
+// içi bellekte tutuluyor (process yeniden başlayınca sıfırlanır, sakıncası yok — sadece bir
+// sonraki çağrıda taramayı tekrar tetikler).
+let lastFullCatalogScanAt = 0;
+const FULL_CATALOG_SCAN_MIN_INTERVAL_MS = 60 * 60 * 1000; // 1 saat
+
+// Ozon panelinden doğrudan (bu uygulamadan geçmeden) açılmış ürünleri tespit edip içeri alır.
+// Ozon'daki TÜM offer_id listesi sayfalanarak çekilir, yerelde kaydı olmayanlar için importFromOzon
+// çağrılır (costPrice boş kalır — mevcut "alış fiyatı girilmemiş" akışı bunu zaten yakalıyor).
+// Her sipariş senkronizasyonunda (elle buton + 15dk cron) otomatik çalışsın diye syncFbsOrders
+// sonunda çağrılıyor (2026-09-09, kullanıcı talebi) — ama yukarıdaki throttle nedeniyle gerçek
+// tarama saatte bir kez yapılır, ara sync'lerde atlanır.
+export async function syncMissingProductsFromOzon(): Promise<{ checked: number; imported: number; skipped: boolean }> {
+  if (Date.now() - lastFullCatalogScanAt < FULL_CATALOG_SCAN_MIN_INTERVAL_MS) {
+    return { checked: 0, imported: 0, skipped: true };
+  }
+  lastFullCatalogScanAt = Date.now();
+
+  const existingOfferIds = new Set((await prisma.product.findMany({ select: { offerId: true } })).map((p) => p.offerId));
+
+  const missingOfferIds: string[] = [];
+  let lastId = "";
+  let checked = 0;
+  while (true) {
+    const { result } = await listProducts(lastId, 100);
+    for (const item of result.items) {
+      checked += 1;
+      if (!existingOfferIds.has(item.offer_id)) missingOfferIds.push(item.offer_id);
+    }
+    if (result.items.length < 100 || !result.last_id || result.last_id === lastId) break;
+    lastId = result.last_id;
+  }
+
+  let imported = 0;
+  for (const offerId of missingOfferIds) {
+    try {
+      await importFromOzon(offerId);
+      imported += 1;
+    } catch (error) {
+      console.error(`[syncMissingProductsFromOzon] ${offerId} içe aktarılamadı:`, error);
+    }
+  }
+
+  return { checked, imported, skipped: false };
 }

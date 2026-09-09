@@ -326,25 +326,22 @@ export function HandleEditor({ handle }: { handle: string }) {
   // Henüz Ozon'a hiç gönderilmemiş bir handle için, önceki oturumdan kalan taslak
   // kategori/attribute seçimi varsa geri yükle (yukarıdaki clone-data zaten gönderilmiş
   // ürünler için gerçek veriyi çekiyor — bu sadece o durum geçerli değilken çalışır).
-  // Öncelik: bu tarayıcıdaki localStorage taslağı > sunucuda (bulk/toplu doldurma ile)
-  // kaydedilmiş draftAttributes — ikincisi ekip arkadaşları farklı tarayıcıdan da görsün diye.
+  // Sunucudaki draftAttributes (bulk/toplu doldurma) TABAN olarak yükleniyor, localStorage
+  // taslağı üstüne BİRLEŞTİRİLİYOR (localStorage'daki alanlar kazanıyor, dokunulmamış alanlar
+  // sunucudan geliyor) — eskiden localStorage varsa sunucuyu tamamen görmezden geliyordu, bu da
+  // önceden bir kere açılıp elle bir şey yazılmış (ya da yarım kalmış) her handle'da toplu
+  // doldurmayı görünmez kılıyordu (2026-08-14'te canlıda tespit edildi).
   useEffect(() => {
     if (!variants || draftRestoredRef.current) return;
     const alreadySubmitted = variants.some((v) => v.ozonProductId);
     draftRestoredRef.current = true;
     if (alreadySubmitted) return;
     try {
-      const raw = localStorage.getItem(draftKey);
-      if (raw) {
-        const draft = JSON.parse(raw) as { category?: CategoryOption; attributeAnswers?: Record<number, unknown> };
-        if (draft.category) setCategory(draft.category);
-        if (draft.attributeAnswers) setAttributeAnswers(draft.attributeAnswers as never);
-        return;
-      }
       const serverDraft = variants[0]?.draftAttributes;
+      let category: CategoryOption | undefined;
+      const answers: Record<number, { value?: string; dictionaryValueId?: number; displayValue?: string }> = {};
       if (serverDraft) {
-        setCategory(serverDraft.category);
-        const answers: Record<number, { value?: string; dictionaryValueId?: number; displayValue?: string }> = {};
+        category = serverDraft.category;
         for (const attr of serverDraft.attributes) {
           answers[attr.id] = {
             value: attr.value,
@@ -352,8 +349,15 @@ export function HandleEditor({ handle }: { handle: string }) {
             displayValue: attr.displayValue ?? attr.value,
           };
         }
-        setAttributeAnswers(answers as never);
       }
+      const raw = localStorage.getItem(draftKey);
+      if (raw) {
+        const draft = JSON.parse(raw) as { category?: CategoryOption; attributeAnswers?: Record<number, unknown> };
+        if (draft.category) category = draft.category;
+        if (draft.attributeAnswers) Object.assign(answers, draft.attributeAnswers);
+      }
+      if (category) setCategory(category);
+      if (Object.keys(answers).length > 0) setAttributeAnswers(answers as never);
     } catch {
       // bozuk/eski taslak — yok say
     }
@@ -387,6 +391,17 @@ export function HandleEditor({ handle }: { handle: string }) {
   );
 
   const modelGroup = variants?.find((v) => v.modelGroup)?.modelGroup ?? null;
+
+  // Ürün Ozon'da bir kere oluşturulduktan sonra fiyat/stok DIŞINDAKİ alanları (görsel, kategori,
+  // özellikler) burada kilitliyoruz — bkz. ProductEditForm.tsx'teki aynı gerekçe (tam resend'in
+  // Ozon panelinden yapılmış elle düzeltmeleri sessizce ezme riski). (2026-08-17, kullanıcı talebi.)
+  const alreadySubmittedAny = variants?.some((v) => v.ozonProductId) ?? false;
+  // Grup içindeki bazı varyantlar başarıyla gönderilip bazıları hata almışsa (ör. attribute
+  // doğrulama hatası), "Ozon'a Gönder" butonunu SADECE alreadySubmittedAny'e bağlarsak hiç
+  // gösterilmez ve başarısız kalanları tekrar göndermenin bir yolu kalmaz — submitHandleToOzon
+  // zaten her varyantı offer_id ile upsert ettiği için (bkz. createProduct/importProducts) bunu
+  // tekrar çağırmak zaten başarılı olanlara zarar vermiyor (2026-09-09, code review bulgusu).
+  const hasUnsubmittedVariant = variants?.some((v) => !v.ozonProductId) ?? true;
 
   useEffect(() => {
     if (!query.trim()) {
@@ -778,18 +793,21 @@ export function HandleEditor({ handle }: { handle: string }) {
 
       <div className="card" style={{ marginBottom: 16 }}>
         <label>Görseller</label>
+        {alreadySubmittedAny ? (
+          <div className="hint" style={{ marginBottom: 8 }}>
+            Ürün Ozon'da zaten oluşturulmuş — görseller burada kilitli, Ozon panelinden düzenleyin.
+          </div>
+        ) : null}
         <ImageReplaceGrid
           originalImages={asStringArray(variants[0]?.originalImages)}
           images={images}
           onChange={setImages}
+          disabled={alreadySubmittedAny}
         />
-        <button className="btn-primary" style={{ marginTop: 12 }} disabled={savingImages} onClick={saveImages}>
-          {savingImages ? "Kaydediliyor..." : "Görselleri Kaydet"}
-        </button>
-        {variants.some((v) => v.ozonProductId) && (
-          <div className="hint" style={{ marginTop: 8 }}>
-            Bu ürün zaten Ozon'a gönderilmiş — kaydedince görseller Ozon'a da yeniden gönderilir.
-          </div>
+        {!alreadySubmittedAny && (
+          <button className="btn-primary" style={{ marginTop: 12 }} disabled={savingImages} onClick={saveImages}>
+            {savingImages ? "Kaydediliyor..." : "Görselleri Kaydet"}
+          </button>
         )}
         {imageSaveError && <div className="hint" style={{ color: "var(--danger)", marginTop: 8 }}>{imageSaveError}</div>}
       </div>
@@ -1227,7 +1245,13 @@ export function HandleEditor({ handle }: { handle: string }) {
         <div className="hint" style={{ marginTop: -8, marginBottom: 16 }}>
           Kategori seçerken Type'ı, Marka (Brand) attribute'unu doldururken Vendor'ı referans alabilirsiniz.
         </div>
-        <CategoryPicker selected={category} onSelect={setCategory} />
+        {alreadySubmittedAny && (
+          <div className="hint" style={{ marginBottom: 12 }}>
+            Ürün Ozon'da zaten oluşturulmuş — kategori/özellikler burada kilitli, Ozon panelinden düzenleyin. Sadece
+            fiyat/ağırlık ("Adet/Ağırlık" alanları) buradan güncellenebilir.
+          </div>
+        )}
+        <CategoryPicker selected={category} onSelect={setCategory} disabled={alreadySubmittedAny} />
         {attributesLoading && <div className="hint">Kategori özellikleri yükleniyor...</div>}
         {category && mandatoryAttributes.length > 0 && (
           <>
@@ -1239,6 +1263,7 @@ export function HandleEditor({ handle }: { handle: string }) {
                 category={category}
                 answer={attributeAnswers[attr.id]}
                 onChange={(answer) => setAttributeAnswers((prev) => ({ ...prev, [attr.id]: answer }))}
+                disabled={alreadySubmittedAny}
               />
             ))}
           </>
@@ -1256,14 +1281,23 @@ export function HandleEditor({ handle }: { handle: string }) {
                 category={category}
                 answer={attributeAnswers[attr.id]}
                 onChange={(answer) => setAttributeAnswers((prev) => ({ ...prev, [attr.id]: answer }))}
+                disabled={alreadySubmittedAny}
               />
             ))}
           </>
         )}
 
-        <button className="btn-primary" disabled={!canSubmit || submitting} onClick={submit} style={{ marginTop: 12 }}>
-          {submitting && translating ? "Rusça'ya çevriliyor..." : submitting ? "Gönderiliyor..." : "Ozon'a Gönder"}
-        </button>
+        {hasUnsubmittedVariant && (
+          <button className="btn-primary" disabled={!canSubmit || submitting} onClick={submit} style={{ marginTop: 12 }}>
+            {submitting && translating
+              ? "Rusça'ya çevriliyor..."
+              : submitting
+                ? "Gönderiliyor..."
+                : alreadySubmittedAny
+                  ? "Kalanları Ozon'a Gönder"
+                  : "Ozon'a Gönder"}
+          </button>
+        )}
 
         {submitResults && (
           <div style={{ marginTop: 16 }}>

@@ -54,7 +54,10 @@ export default async function OrderDetailPage({
     },
     { amount: 0, commission: 0, delivery: 0, other: 0 },
   );
-  const net = totals.amount + totals.commission + totals.delivery + totals.other;
+  // Yeni accrual verisinde her satır TEK bir kategoriye giriyor, yani totals.amount zaten
+  // commission+delivery+other'ın toplamı — net = amount + (bunların toplamı) iki kere sayardı
+  // (bkz. finance.service.ts getPnlSummary'deki aynı düzeltme, 2026-09-09).
+  const net = totals.amount;
   const raw = order.rawPayload as OrderRawPayload | null;
   const city = raw?.customer?.address?.city;
   const region = raw?.customer?.address?.region;

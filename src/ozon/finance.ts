@@ -40,6 +40,43 @@ export function listTransactions(params: {
   });
 }
 
+// /v3/finance/transaction/list Ozon tarafından kapatıldı ("obsolete method cannot be used",
+// 2026-09-09'da canlıda doğrulandı). Yerine posting_number bazlı çalışan bu iki uç nokta var —
+// tarih aralığı DEĞİL, doğrudan posting_number listesi alıyor (bkz. finance.service.ts).
+export interface OzonAccrualType {
+  id: number;
+  name: string;
+  description: string;
+}
+
+export interface OzonAccrualTypesResponse {
+  accrual_types: OzonAccrualType[];
+}
+
+export function getAccrualTypes() {
+  return ozonPost<OzonAccrualTypesResponse>("/v1/finance/accrual/types", {});
+}
+
+export interface OzonPostingAccrualLine {
+  type_id: number;
+  accrued: { amount: string; currency: string };
+  accrual_date: string;
+  seller_price?: { amount: string; currency: string } | null;
+  sku?: number;
+  quantity?: number;
+}
+
+export interface OzonPostingAccrualsResponse {
+  posting_accruals: Array<{ posting_number: string; accruals: OzonPostingAccrualLine[] }>;
+}
+
+// Ozon en fazla 200 posting_number kabul ediyor — çağıran taraf (finance.service.ts) parçalıyor.
+export function getAccrualsForPostings(postingNumbers: string[]) {
+  return ozonPost<OzonPostingAccrualsResponse>("/v1/finance/accrual/postings", {
+    posting_numbers: postingNumbers,
+  });
+}
+
 export interface OzonFinanceTotalsResponse {
   result: {
     accruals_for_sale: number;

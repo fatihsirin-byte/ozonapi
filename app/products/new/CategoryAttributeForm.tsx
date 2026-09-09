@@ -36,9 +36,11 @@ export function useDebouncedValue<T>(value: T, delayMs: number): T {
 export function CategoryPicker({
   selected,
   onSelect,
+  disabled,
 }: {
   selected: CategoryOption | null;
   onSelect: (category: CategoryOption | null) => void;
+  disabled?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 300);
@@ -85,10 +87,21 @@ export function CategoryPicker({
         <label>Kategori</label>
         <div className="selected-pill">
           <strong>{selected.typeName}</strong>&nbsp;({selected.path})
-          <button className="btn-secondary" onClick={() => onSelect(null)} type="button">
-            Değiştir
-          </button>
+          {!disabled && (
+            <button className="btn-secondary" onClick={() => onSelect(null)} type="button">
+              Değiştir
+            </button>
+          )}
         </div>
+      </div>
+    );
+  }
+
+  if (disabled) {
+    return (
+      <div className="field">
+        <label>Kategori</label>
+        <div className="hint">Ürün oluşturulduktan sonra kategori kilitli — Ozon panelinden düzenleyin.</div>
       </div>
     );
   }
@@ -133,11 +146,13 @@ export function AttributeValuePicker({
   category,
   answer,
   onChange,
+  disabled,
 }: {
   attribute: RequiredAttribute;
   category: CategoryOption;
   answer: AttributeAnswer | undefined;
   onChange(answer: AttributeAnswer): void;
+  disabled?: boolean;
 }) {
   const [query, setQuery] = useState(answer?.displayValue ?? "");
   const debouncedQuery = useDebouncedValue(query, 300);
@@ -181,13 +196,14 @@ export function AttributeValuePicker({
         type="text"
         value={query}
         placeholder="Ara ve seç..."
-        onFocus={() => setOpen(true)}
+        disabled={disabled}
+        onFocus={() => !disabled && setOpen(true)}
         onChange={(e) => {
           setQuery(e.target.value);
           setOpen(true);
         }}
       />
-      {open && results.length > 0 && (
+      {!disabled && open && results.length > 0 && (
         <div className="search-results">
           {results.map((v) => (
             <div
@@ -231,14 +247,18 @@ export function AttributeField({
   category,
   answer,
   onChange,
+  disabled,
 }: {
   attr: RequiredAttribute;
   category: CategoryOption;
   answer: AttributeAnswer | undefined;
   onChange(answer: AttributeAnswer): void;
+  disabled?: boolean;
 }) {
   if (attr.dictionary_id > 0) {
-    return <AttributeValuePicker attribute={attr} category={category} answer={answer} onChange={onChange} />;
+    return (
+      <AttributeValuePicker attribute={attr} category={category} answer={answer} onChange={onChange} disabled={disabled} />
+    );
   }
   const isHashtagField = HASHTAG_NAME_PATTERN.test(attr.name);
   return (
@@ -247,6 +267,7 @@ export function AttributeField({
       <input
         type="text"
         value={answer?.value ?? ""}
+        disabled={disabled}
         onChange={(e) => onChange({ value: e.target.value })}
         onBlur={(e) => {
           if (isHashtagField && e.target.value.trim()) {

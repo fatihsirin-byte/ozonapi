@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/fiyat", label: "Fiyat" },
   { href: "/analitik", label: "Analitik" },
   { href: "/kampanyalar", label: "Kampanyalar" },
+  { href: "/pnl", label: "Kâr/Zarar" },
 ];
 
 export function Nav() {

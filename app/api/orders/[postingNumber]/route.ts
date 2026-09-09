@@ -10,7 +10,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ pos
 
   const serialized = {
     ...order,
-    transactions: order.transactions.map((t) => ({ ...t, operationId: t.operationId.toString() })),
+    transactions: order.transactions.map((t) => ({ ...t, operationId: t.operationId?.toString() ?? null })),
   };
 
   return NextResponse.json({ order: serialized });
@@ -29,6 +29,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
   }
   return NextResponse.json({
-    order: { ...order, transactions: order.transactions.map((t) => ({ ...t, operationId: t.operationId.toString() })) },
+    order: { ...order, transactions: order.transactions.map((t) => ({ ...t, operationId: t.operationId?.toString() ?? null })) },
   });
 }

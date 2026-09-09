@@ -119,6 +119,10 @@ model OrderItem {
   quantity  Int
   price     String
 
+  // Kargo Kontrolü sekmesinde kullanıcı bu kalemin gerçek kargo kesintisini gözden geçirip
+  // işaretlediğinde true olur — resync'te upsert ile korunur (bkz. syncFbsOrders), üzerine yazılmaz.
+  shippingReviewed Boolean @default(false)
+
   // Aynı sipariş senkronize edilirken kalemler silinip yeniden oluşturuluyor (bkz. syncFbsOrders),
   // bu yüzden id yerine bu ikili üzerinden idempotentlik garanti edilmiyor ama tekilliği sağlıyor.
   @@unique([orderId, offerId])
@@ -129,16 +133,28 @@ model OrderItem {
 // bedeli, FBO vb.) sipariş senkronizasyon penceremizin dışındaki veya hiç Order'a düşmeyen
 // posting'lere referans verebiliyor; FK zorunlu olsaydı bu satırlar sync'i patlatırdı.
 // Order ile ilişki uygulama katmanında postingNumber üzerinden manuel join edilir (bkz. getOrderDetail).
+//
+// 2026-09-09: Ozon, bu tabloyu beslediğimiz /v3/finance/transaction/list uç noktasını KAPATTI
+// ("obsolete method cannot be used" — 6 Temmuz 2026'da duyurulmuş, bu hesapta ~23 Ağustos'ta
+// devreye girmiş). Yerine posting_number bazlı /v1/finance/accrual/postings kullanılıyor (bkz.
+// finance.service.ts, syncAccrualsForPostings). O uç nokta operation_id vermiyor (idempotentlik
+// için artık senkronize edilen postingNumber'lar için satırlar silinip yeniden yazılıyor, upsert
+// değil) ve tek bir "operasyon" yerine tek tek "accrual" (tahakkuk) satırları veriyor — her satır
+// tek bir kategoriye (komisyon/kargo/diğer) giriyor, bu yüzden commissionAmount/deliveryCharge/
+// otherCharges üçünden sadece biri dolu oluyor artık (eskiden aynı operasyonda ikisi birden dolu
+// olabiliyordu). Alan isimleri ve bu tabloyu okuyan sayfalar (orders/page.tsx, order detail,
+// getPnlSummary) değişmeden kalsın diye şekli korundu.
 model FinanceTransaction {
   id             String   @id @default(cuid())
   postingNumber  String
-  operationId    BigInt   @unique // Ozon'un operation_id'si — yeniden senkronizasyonda tekrar satır oluşmasını (upsert) engellemek için
+  operationId    BigInt?  // yeni accrual uç noktası artık vermiyor — eski (Ağustos öncesi) satırlarda var
   operationType  String
   operationDate  DateTime
   amount         Float
   commissionAmount Float?
   deliveryCharge Float?
   otherCharges   Float?
+  currency       String?  // Ozon artık bunu açıkça veriyor (RUB) — eski uç nokta hiç vermiyordu
   rawPayload     Json?
   createdAt      DateTime @default(now())
 

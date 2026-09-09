@@ -43,6 +43,13 @@ const TABS = ["Genel", "Fiyat", "Görseller", "Kategori & Özellikler"] as const
 type Tab = (typeof TABS)[number];
 
 export function ProductEditForm({ product }: { product: ProductData }) {
+  // Ürün bir kere Ozon'da oluşturulduktan sonra fiyat/stok DIŞINDAKİ her şeyi (ağırlık/boyut,
+  // görseller, kategori/özellikler) burada kilitliyoruz — sebep: bu alanlar Ozon'a "tam ürün
+  // resend" (/v3/product/import) ile gidiyor ve bu istek TAM REPLACE yapıyor; Ozon panelinden
+  // elle yapılmış bir düzeltmeyi (görsel, attribute, ağırlık) sessizce geri alabiliyor. Fiyat
+  // ise ayrı, dar kapsamlı bir uç noktadan (/v1/product/import/prices) gidiyor ve hiçbir zaman
+  // bu riski taşımıyor, o yüzden kilitli değil. (2026-08-17, kullanıcı talebi.)
+  const alreadyCreated = Boolean(product.ozonProductId);
   const [tab, setTab] = useState<Tab>("Genel");
   const [costPrice, setCostPrice] = useState(product.costPrice ?? "");
   const [priceOverride, setPriceOverride] = useState<string | null>(null);
@@ -295,12 +302,19 @@ export function ProductEditForm({ product }: { product: ProductData }) {
             <label>Ürün adı</label>
             {product.name}
           </div>
+          {alreadyCreated && (
+            <div className="hint" style={{ marginBottom: 12 }}>
+              Ürün Ozon'da zaten oluşturulmuş — ağırlık/boyut burada kilitli, Ozon panelinden düzenleyin. Sadece
+              "Fiyat" sekmesi buradan güncellenebilir.
+            </div>
+          )}
           <div className="row">
             <div className="field">
               <label>Net Ağırlık (g)</label>
               <input
                 type="number"
                 value={weightGrams ?? ""}
+                disabled={alreadyCreated}
                 onChange={(e) => {
                   const next = e.target.value ? Number(e.target.value) : null;
                   setWeightGrams(next);
@@ -314,17 +328,22 @@ export function ProductEditForm({ product }: { product: ProductData }) {
               <input
                 type="number"
                 value={cargoWeightGrams ?? ""}
+                disabled={alreadyCreated}
                 onChange={(e) => setCargoWeightGrams(e.target.value ? Number(e.target.value) : null)}
               />
               <div className="hint">Otomatik hesaplanır (paketleme payı + gerekirse hacimsel), elle düzeltilebilir.</div>
             </div>
           </div>
-          <div style={{ marginBottom: 16 }}>
-            <button className="btn-primary" disabled={savingWeight} onClick={saveWeight}>
-              {savingWeight ? "Kaydediliyor..." : "Ağırlığı Kaydet"}
-            </button>
-          </div>
-          <div className="hint">Kategori/özellik bilgilerini "Kategori & Özellikler" sekmesinden düzenleyebilirsiniz.</div>
+          {!alreadyCreated && (
+            <div style={{ marginBottom: 16 }}>
+              <button className="btn-primary" disabled={savingWeight} onClick={saveWeight}>
+                {savingWeight ? "Kaydediliyor..." : "Ağırlığı Kaydet"}
+              </button>
+            </div>
+          )}
+          {!alreadyCreated && (
+            <div className="hint">Kategori/özellik bilgilerini "Kategori & Özellikler" sekmesinden düzenleyebilirsiniz.</div>
+          )}
         </>
       )}
 
@@ -415,21 +434,33 @@ export function ProductEditForm({ product }: { product: ProductData }) {
 
       {tab === "Görseller" && (
         <>
+          {alreadyCreated && (
+            <div className="hint" style={{ marginBottom: 12 }}>
+              Ürün Ozon'da zaten oluşturulmuş — görseller burada kilitli, Ozon panelinden düzenleyin.
+            </div>
+          )}
           <div className="field">
-            <ImageDropzone images={images} onChange={setImages} />
+            <ImageDropzone images={images} onChange={setImages} disabled={alreadyCreated} />
           </div>
-          <button className="btn-primary" disabled={saving || images.length === 0} onClick={saveImages}>
-            Görselleri Kaydet
-          </button>
+          {!alreadyCreated && (
+            <button className="btn-primary" disabled={saving || images.length === 0} onClick={saveImages}>
+              Görselleri Kaydet
+            </button>
+          )}
         </>
       )}
 
       {tab === "Kategori & Özellikler" && (
         <>
+          {alreadyCreated && (
+            <div className="hint" style={{ marginBottom: 12 }}>
+              Ürün Ozon'da zaten oluşturulmuş — kategori/özellikler burada kilitli, Ozon panelinden düzenleyin.
+            </div>
+          )}
           {specLoading && <div className="hint">Mevcut kategori/özellikler Ozon'dan çekiliyor...</div>}
           {!specLoading && (
             <>
-              <CategoryPicker selected={category} onSelect={setCategory} />
+              <CategoryPicker selected={category} onSelect={setCategory} disabled={alreadyCreated} />
               {attributesLoading && <div className="hint">Kategori özellikleri yükleniyor...</div>}
               {category && mandatoryAttributes.length > 0 && (
                 <>
@@ -441,6 +472,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
                       category={category}
                       answer={attributeAnswers[attr.id]}
                       onChange={(answer) => setAttributeAnswers((prev) => ({ ...prev, [attr.id]: answer }))}
+                      disabled={alreadyCreated}
                     />
                   ))}
                 </>
@@ -457,13 +489,16 @@ export function ProductEditForm({ product }: { product: ProductData }) {
                       category={category}
                       answer={attributeAnswers[attr.id]}
                       onChange={(answer) => setAttributeAnswers((prev) => ({ ...prev, [attr.id]: answer }))}
+                      disabled={alreadyCreated}
                     />
                   ))}
                 </>
               )}
-              <button className="btn-primary" disabled={saving || !canSaveSpec} onClick={saveSpec} style={{ marginTop: 12 }}>
-                Özellikleri Kaydet
-              </button>
+              {!alreadyCreated && (
+                <button className="btn-primary" disabled={saving || !canSaveSpec} onClick={saveSpec} style={{ marginTop: 12 }}>
+                  Özellikleri Kaydet
+                </button>
+              )}
             </>
           )}
         </>

@@ -1,6 +1,7 @@
 import { prisma } from "../../db/prisma";
 import { listFbsPostings, type OzonFbsPosting } from "../../ozon/orders";
 import { getProductAttributes } from "../../ozon/products";
+import { importFromOzon, syncMissingProductsFromOzon } from "../products/products.service";
 import {
   uploadInvoiceFile,
   createOrUpdateInvoice,
@@ -55,7 +56,20 @@ export async function syncFbsOrders(params: { since: string; to: string; status?
       });
 
       for (const item of posting.products ?? []) {
-        const product = await prisma.product.findUnique({ where: { offerId: item.offer_id } });
+        let product = await prisma.product.findUnique({ where: { offerId: item.offer_id } });
+        // Ürün panelden değil, doğrudan Ozon'un kendi arayüzünden açıldıysa bizim DB'mizde hiç
+        // kaydı olmuyor — görsel/isim panelde boş kalıyordu. Bu durumda Ozon'dan aynı
+        // importFromOzon() ile (bkz. products.service.ts, "Ozon'dan içe aktar" butonuyla aynı
+        // mantık) canlı ürün bilgisini çekip otomatik bir Product kaydı açıyoruz (2026-08-24,
+        // kullanıcı talebi). costPrice bilinmediği için boş kalır — kâr hesabı bunu bekleyene
+        // kadar "bilinmiyor" döner, sipariş senkronizasyonunu engellemez.
+        if (!product) {
+          try {
+            product = await importFromOzon(item.offer_id);
+          } catch (error) {
+            console.error(`[syncFbsOrders] ${item.offer_id} Ozon'dan otomatik içe aktarılamadı:`, error);
+          }
+        }
         await prisma.orderItem.upsert({
           where: { orderId_offerId: { orderId: order.id, offerId: item.offer_id } },
           create: {
@@ -80,6 +94,18 @@ export async function syncFbsOrders(params: { since: string; to: string; status?
 
     hasNext = result.has_next;
     offset += limit;
+  }
+
+  // Ozon panelinden doğrudan açılmış, henüz hiçbir siparişe düşmemiş ürünleri de yakalamak için —
+  // bir siparişi beklemeden, her senkronizasyonda tam katalog taraması yapılır (2026-09-09,
+  // kullanıcı talebi). Bu adım başarısız olursa sipariş senkronizasyonunu engellemesin diye ayrı try/catch.
+  try {
+    const { checked, imported } = await syncMissingProductsFromOzon();
+    if (imported > 0) {
+      console.log(`[syncFbsOrders] Ozon kataloğu tarandı (${checked} ürün), ${imported} yeni ürün içeri alındı`);
+    }
+  } catch (error) {
+    console.error("[syncFbsOrders] Ozon katalog taraması başarısız:", error);
   }
 
   return synced;
@@ -151,6 +177,37 @@ export async function getOrderDetail(postingNumber: string) {
   });
 
   return { ...order, transactions };
+}
+
+// Kargo Kontrolü sekmesindeki checkbox'lar için — (postingNumber, offerId) ikilileriyle gelen
+// kalemleri toplu olarak işaretler/işaretini kaldırır. OrderItem'ın gerçek unique anahtarı
+// (orderId, offerId) olduğundan önce postingNumber -> orderId çözülüyor.
+export async function setShippingReviewed(items: Array<{ postingNumber: string; offerId: string }>, reviewed: boolean) {
+  const postingNumbers = [...new Set(items.map((i) => i.postingNumber))];
+  const orders = await prisma.order.findMany({
+    where: { postingNumber: { in: postingNumbers } },
+    select: { id: true, postingNumber: true },
+  });
+  const orderIdByPosting = new Map(orders.map((o) => [o.postingNumber, o.id]));
+
+  const offerIdsByOrderId = new Map<string, string[]>();
+  for (const item of items) {
+    const orderId = orderIdByPosting.get(item.postingNumber);
+    if (!orderId) continue;
+    const list = offerIdsByOrderId.get(orderId) ?? [];
+    list.push(item.offerId);
+    offerIdsByOrderId.set(orderId, list);
+  }
+
+  let updated = 0;
+  for (const [orderId, offerIds] of offerIdsByOrderId) {
+    const result = await prisma.orderItem.updateMany({
+      where: { orderId, offerId: { in: offerIds } },
+      data: { shippingReviewed: reviewed },
+    });
+    updated += result.count;
+  }
+  return updated;
 }
 
 // Bizim kendi takibimiz için — tedarikçiden aldığımız alış faturasının numarası, Ozon'a gitmiyor.

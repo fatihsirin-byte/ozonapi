@@ -6,12 +6,13 @@ interface Props {
   originalImages: string[];
   images: string[];
   onChange(images: string[]): void;
+  disabled?: boolean;
 }
 
 // Görsel değiştirme arayüzü: eski (Shopify) görseller büyük kartlarla gösterilir, her birinde
 // "Kopyala" (URL) ve "Kullan/Kullanma" var. Altta yeni görsel için mevcut sürükle-bırak yükleme var.
 // Amaç: eski görselleri Rusça bilgilendirici görsellerle değiştirirken referans/karşılaştırma kolay olsun.
-export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
+export function ImageReplaceGrid({ originalImages, images, onChange, disabled }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +120,29 @@ export function ImageReplaceGrid({ originalImages, images, onChange }: Props) {
   }
 
   const newImages = images.filter((url) => !originalImages.includes(url));
+
+  // Ürün Ozon'da zaten oluşturulmuşsa sadece salt-okunur görüntüleme — yükleme/kaldırma/sıralama/
+  // "kullan-kullanma" gibi hiçbir düzenleme affordance'ı gösterilmiyor.
+  if (disabled) {
+    return (
+      <div>
+        {images.length > 0 ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 10 }}>
+            {images.map((url) => (
+              <img
+                key={url}
+                src={url}
+                alt=""
+                style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "contain", borderRadius: 8, background: "#fff" }}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="hint">Görsel yok.</div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>

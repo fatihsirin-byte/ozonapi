@@ -540,11 +540,17 @@ export interface SubmitHandleInput {
 // Bir handle'ın tüm varyantlarını (aynı kategori/attribute seçimiyle) Ozon'a gönderir.
 // Model grubu varsa hepsine aynı 9048 değeri yazılır, ki Ozon bunları tek kartta göstersin.
 export async function submitHandleToOzon(input: SubmitHandleInput) {
+  // ozonProductId zaten dolu olan varyantlar (bir önceki gönderimde başarılı olmuş) hariç
+  // tutuluyor — bu fonksiyon tam bir "import" (kategori/attribute/görsel/fiyat hepsi birden)
+  // gönderiyor, tekrar çağırmak Ozon panelinden yapılmış elle düzeltmeleri sessizce ezerdi
+  // (aynı gerekçeyle ProductEditForm.tsx/HandleEditor.tsx'te zaten kilitlenen alanlar — bkz.
+  // "alreadySubmittedAny" yorumları). Kısmi başarısızlık sonrası "Kalanları Ozon'a Gönder" bu
+  // yüzden sadece gerçekten gönderilmemiş varyantları tekrar dener (2026-09-09, code review bulgusu).
   const variants = await prisma.product.findMany({
-    where: { shopifyHandle: input.handle, excludedFromSubmit: false },
+    where: { shopifyHandle: input.handle, excludedFromSubmit: false, ozonProductId: null },
     include: { modelGroup: true },
   });
-  if (variants.length === 0) throw new Error("Bu handle için gönderilecek (pasif olmayan) varyant bulunamadı");
+  if (variants.length === 0) throw new Error("Bu handle için gönderilecek (pasif olmayan, henüz gönderilmemiş) varyant bulunamadı");
 
   const results: { offerId: string; taskId?: string; error?: string }[] = [];
 

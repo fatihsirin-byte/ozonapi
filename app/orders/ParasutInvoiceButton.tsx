@@ -55,6 +55,10 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
       const data = await res.json();
       if (data.status === "ready" && data.pdfUrl) {
         setPdfUrl(data.pdfUrl);
+        // Sunucu bu sırada gerçek (GİB'e göre yeniden atanmış) fatura numarasını da okuyup
+        // döndürebiliyor — yoksa DB'ye yazılan doğru numara sayfa yenilenene kadar görünmezdi
+        // (2026-09-10'da code review'da tespit edildi).
+        if (data.invoiceNo) setInvoiceNo(data.invoiceNo);
         setPdfStatus("ready");
       } else {
         setPdfStatus("processing");

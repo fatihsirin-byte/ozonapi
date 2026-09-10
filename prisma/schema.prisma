@@ -7,17 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Paraşüt fatura sıra numarası sayacı — "key" ör. "GZN2026". Her fatura kesiminde ATOMİK olarak
-// artırılır ve BİR DAHA GERİ ALINMAZ; Paraşüt'ün canlı fatura listesini tarayarak "en yüksek
-// numara"yı bulmak yerine bu kullanılıyor, çünkü bir fatura silinince Paraşüt listesinden
-// kaybolduğu için tarama o numarayı "boş" sanıp BAŞKA bir faturaya tekrar veriyordu — bu, gerçek
-// bir siparişin faturasının, silinmiş bir test faturasıyla AYNI sıra numarasını almasına yol açtı
-// (2026-09-09'da canlıda tespit edildi, bkz. src/parasut/orderInvoice.ts).
-model ParasutInvoiceSequence {
-  key          String @id
-  lastSequence Int
-}
-
 // Ozon'daki ürünü cache'ler. offerId bizim SKU'muz, ozonProductId Ozon tarafındaki id.
 model Product {
   id                    String    @id @default(cuid())
@@ -121,6 +110,14 @@ model Order {
   // ikinci bir e-Arşiv başvurusuna yol açabilir (2026-09-09'da code review'da tespit edildi), bu
   // yüzden false iken sadece "hazır olana kadar bekle" denir, yeniden gönderim denenmez.
   parasutEArchiveFailed Boolean @default(false)
+  // false ise parasutInvoiceNo hâlâ GEÇİCİ olabilir — e-Arşiv oluşunca Paraşüt faturayı GİB'e
+  // kayıtlı KENDİ resmi seriyle yeniden numaralandırıyor (bkz. src/parasut/orderInvoice.ts) ama bu
+  // ANINDA olmuyor. true olana kadar PDF durumu her kontrol edildiğinde gerçek numara TEKRAR
+  // denenir (bkz. app/api/orders/[postingNumber]/parasut-invoice/pdf/route.ts) — süreye dayalı bir
+  // pencere (ör. "ilk 30 dakika") KULLANILMIYOR, çünkü GİB o gün yavaşsa numara kalıcı olarak yanlış
+  // kalabilirdi (2026-09-10'da code review'da tespit edildi). true olduktan sonra bir daha
+  // denenmez — zaten kesin numara elde edilmiş, gereksiz Paraşüt isteği atılmaz.
+  parasutInvoiceNoConfirmed Boolean @default(false)
   // "Bugün faturası kesilenler" filtresi (TSİ bazında) için — createdAt/updatedAt başka
   // sebeplerle de değişebildiğinden fatura anını ayrı tutuyoruz (2026-09-09, kullanıcı talebi).
   parasutInvoicedAt DateTime?

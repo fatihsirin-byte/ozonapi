@@ -7,32 +7,6 @@ import { searchProductsByCode, createProduct, updateProduct } from "./products";
 import { getUsdToTryRate } from "../pricing/fx-rate";
 import { transliterateRussian } from "../utils/transliterate";
 
-// Ozon siparişleri için kullanıcının elle kestiği gerçek faturaların hepsi bu seriden
-// (GZN2026000000001, ...000000467 vb. — 2026-09-09'da canlıda doğrulandı; "GZG" serisi ayrı/
-// ilgisiz bir iş akışı). Paraşüt API üzerinden fatura oluşturulurken seri+sıra no verilmezse
-// fatura numarası atanmıyor (boş kalıyor) — bu yüzden bir sonraki sırayı kendimiz buluyoruz.
-const INVOICE_SERIES_PREFIX = "GZN";
-
-function currentInvoiceSeries(): string {
-  return `${INVOICE_SERIES_PREFIX}${new Date().getFullYear()}`;
-}
-
-// ÖNEMLİ (2026-09-09'da canlıda tespit edilen hata): sırayı Paraşüt'ün canlı fatura listesini
-// tarayarak bulmak GÜVENLİ DEĞİL — bir fatura (ör. test amaçlı) silinince listeden kaybolduğu
-// için bir sonraki tarama o numarayı "boş" sanıp BAŞKA (gerçek) bir faturaya tekrar veriyor; bu
-// yüzden gerçek bir sipariş faturası, daha önce silinmiş bir test faturasıyla AYNI numarayı aldı.
-// Bunun yerine ParasutInvoiceSequence tablosunda ATOMİK olarak artan, asla geri alınmayan kalıcı
-// bir sayaç tutuluyor — bir fatura sonradan silinse bile o numara bir daha kullanılmıyor.
-async function getNextInvoiceSequence(): Promise<string> {
-  const series = currentInvoiceSeries();
-  const row = await prisma.parasutInvoiceSequence.upsert({
-    where: { key: series },
-    create: { key: series, lastSequence: 1 },
-    update: { lastSequence: { increment: 1 } },
-  });
-  return String(row.lastSequence).padStart(9, "0");
-}
-
 interface OrderRawPayload {
   customer?: {
     name?: string;
@@ -195,8 +169,15 @@ async function doCreateInvoiceForOzonOrder(postingNumber: string) {
   // düz metin — ETGB numarasını fatura kesilirken ayrıca çekmeye gerek yok).
   const invoiceNote = `ETGB - ${postingNumber}`;
 
-  const nextSequence = await getNextInvoiceSequence();
   const issueDate = new Date().toISOString().slice(0, 10);
+  // ÖNEMLİ (2026-09-10'da canlıda doğrulandı, showSalesInvoice ile birebir sorgulanarak): burada
+  // kendi seri/sıra numaramızı GÖNDERMİYORUZ — daha önce "GZN2026 470" gibi kendimiz bir numara
+  // atamaya çalışıyorduk, ama e-Arşiv oluşunca (aşağıdaki createEArchive) Paraşüt zaten GİB'e
+  // kayıtlı KENDİ resmi e-Arşiv serisine göre faturayı YENİDEN NUMARALANDIRIYOR (ör.
+  // "GZ02026000000004") ve bizim gönderdiğimiz seri/sıra tamamen yok sayılıyor. Yani bizim
+  // numaralandırma çabamızın gerçek faturada hiçbir karşılığı yoktu — kullanıcı talebiyle (2026-09-10:
+  // "bırak Paraşüt doğrusunu yapsın, müdahale etme") tamamen kaldırıldı; numarayı Paraşüt kendi
+  // atıyor, biz aşağıda e-Arşiv başarılı olduktan sonra GERÇEK invoice_no'yu okuyup kaydediyoruz.
   const invoiceRes = await createSalesInvoice({
     itemType: "invoice",
     issueDate,
@@ -207,16 +188,6 @@ async function doCreateInvoiceForOzonOrder(postingNumber: string) {
     description: postingNumber,
     invoiceNote,
     details,
-    // BİLİNEN SORUN (2026-09-09, canlıda test edildi): gerçek referans faturalarda invoice_no
-    // TEK PARÇA bir string ("GZN2026000000001"), invoice_series/invoice_id ikisi de null —
-    // yani Paraşüt'ün kendi web arayüzü bu numarayı API'nin dışında bir mekanizmayla atıyor.
-    // API üzerinden ne seri+sıra ayrı gönderilince (araya boşluk koyup sıfır dolgusunu atıyor,
-    // "GZN2026 467" gibi) ne de invoice_no doğrudan gönderilince (yok sayılıyor, boş kalıyor)
-    // gerçek faturalardaki formatı tam tutturabildik. Şimdilik seri+sıra gönderiliyor — en
-    // azından doğru bilgiyi taşıyor, format kullanıcı/muhasebeci tarafından Paraşüt panelinden
-    // kolayca düzeltilebilir.
-    invoiceSeries: currentInvoiceSeries(),
-    invoiceId: nextSequence,
     // Yurt dışı müşteri — automation-nextjs projesindeki çalışan entegrasyonda da bu alan
     // e-Arşiv/istisna işlenmesi için true gönderiliyor (2026-09-09).
     isAbroad: true,
@@ -239,6 +210,13 @@ async function doCreateInvoiceForOzonOrder(postingNumber: string) {
   let eArchiveFailed = false;
   try {
     await createEArchive(invoiceId);
+    // NOT: e-Arşiv oluşunca Paraşüt faturayı GİB'e kayıtlı KENDİ resmi seriyle yeniden
+    // numaralandırıyor (bkz. yukarıdaki createSalesInvoice yorumu) — ama bu renumaralandırma GİB
+    // tarafında ANINDA olmuyor (bkz. src/parasut/eArchives.ts resolveInvoicePdf — PDF'in de aynı
+    // şekilde "hemen hazır olmayabileceği" zaten ele alınıyor). Bu yüzden gerçek invoice_no'yu
+    // BURADA hemen okumuyoruz (bayat/geçici bir değer dönebilirdi, 2026-09-10'da code review'da
+    // tespit edildi) — bunun yerine PDF gerçekten "hazır" olduğu anda (en güvenilir sinyal)
+    // app/api/orders/[postingNumber]/parasut-invoice/pdf/route.ts güncel numarayı okuyup kaydeder.
   } catch (err) {
     eArchiveFailed = true;
     console.error(`[parasut] e-Arşiv oluşturma başarısız (invoice ${invoiceId}, posting ${postingNumber}):`, err);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/db/prisma";
 import { resolveInvoicePdfForOrder } from "@/parasut/eArchives";
+import { showSalesInvoice } from "@/parasut/invoices";
 import { INVOICE_CLAIM_SENTINEL } from "@/parasut/orderInvoice";
 
 // Fatura kesildikten sonra Paraşüt'ün e-Arşiv'i GİB'e gönderip resmileştirmesi (Paraşüt panelinde
@@ -17,7 +18,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const decodedPostingNumber = decodeURIComponent(postingNumber);
   const order = await prisma.order.findUnique({
     where: { postingNumber: decodedPostingNumber },
-    select: { parasutInvoiceId: true },
+    select: { parasutInvoiceId: true, parasutInvoiceNoConfirmed: true },
   });
 
   if (!order?.parasutInvoiceId || order.parasutInvoiceId === INVOICE_CLAIM_SENTINEL) {
@@ -30,5 +31,33 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ status: "processing" }, { status: 202 });
   }
 
-  return NextResponse.json({ status: "ready", pdfUrl: result.pdfUrl });
+  // PDF'in gerçekten hazır olması, e-Arşiv'in GİB tarafında tam işlendiğinin en güvenilir işareti
+  // — gerçek (GİB'e kayıtlı seriye göre yeniden atanmış) fatura numarasını burada okuyup
+  // kaydediyoruz. Fatura kesilir kesilmez okumak (eski kod) bayat/geçici bir değer dönebilirdi,
+  // çünkü GİB'in yeniden numaralandırması anında olmuyor (2026-09-10'da code review'da tespit
+  // edildi) — bkz. src/parasut/orderInvoice.ts. SÜREYE DAYALI bir pencere (ör. "ilk 30 dakika")
+  // KULLANILMIYOR — GİB o gün yavaşsa numara kalıcı olarak yanlış kalabilirdi (aynı incelemede
+  // tespit edildi). Bunun yerine parasutInvoiceNoConfirmed true OLANA KADAR her "ready" kontrolünde
+  // tekrar denenir; true olduktan sonra (gerçek numara elde edildiğinde) bir daha denenmez — aylar
+  // önce kesilmiş, numarası çoktan netleşmiş faturalar için gereksiz Paraşüt isteği atılmaz.
+  let invoiceNo: string | null = null;
+  if (!order.parasutInvoiceNoConfirmed) {
+    try {
+      const invoice = await showSalesInvoice(order.parasutInvoiceId);
+      invoiceNo = (invoice.data.attributes as { invoice_no?: string }).invoice_no ?? null;
+      if (invoiceNo) {
+        await prisma.order.update({
+          where: { postingNumber: decodedPostingNumber },
+          data: { parasutInvoiceNo: invoiceNo, parasutInvoiceNoConfirmed: true },
+        });
+      }
+    } catch {
+      // Gerçek numara okunamazsa mevcut (muhtemelen geçici) değer kalır — bir sonraki kontrolde
+      // tekrar denenir, PDF linki bu arada yine de çalışır.
+    }
+  }
+
+  // invoiceNo'yu (güncellendiyse) yanıta da ekliyoruz — aksi halde DB'ye yazılan doğru numara
+  // sayfa yeniden yüklenene kadar ön yüzde görünmezdi (2026-09-10'da code review'da tespit edildi).
+  return NextResponse.json({ status: "ready", pdfUrl: result.pdfUrl, invoiceNo });
 }

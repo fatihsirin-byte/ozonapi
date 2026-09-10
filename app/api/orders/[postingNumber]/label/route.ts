@@ -17,7 +17,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ pos
       },
     });
   } catch (error) {
-    const message = error instanceof OzonApiError ? error.message : "Etiket alınamadı";
+    // Ozon'un etiket API'si sadece sipariş "paketlenip kargoya hazır" (awaiting_deliver)
+    // durumundayken çalışıyor — daha erken (awaiting_packaging) ya da daha geç (delivering,
+    // delivered) denenirse "INVALID_ARGUMENT" ile reddediyor (2026-09-10'da canlıda test edilerek
+    // doğrulandı, bkz. src/ozon/client.ts'teki hata mesajı düzeltmesi). Bu bizim tarafımızdan bir
+    // hata değil, Ozon'un kendi kısıtı — kullanıcıya anlaşılır şekilde açıklıyoruz.
+    const message =
+      error instanceof OzonApiError && error.message === "INVALID_ARGUMENT"
+        ? "Ozon bu sipariş için henüz etiket vermiyor — etiket sadece sipariş paketlenip kargoya hazır (awaiting_deliver) durumundayken alınabiliyor."
+        : error instanceof OzonApiError
+          ? error.message
+          : "Etiket alınamadı";
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

@@ -11,6 +11,7 @@ import { RealWeightInput } from "./RealWeightInput";
 import { ParasutInvoiceButton } from "../ParasutInvoiceButton";
 import { estimateShippingForWeight, effectiveCargoWeightGrams, sumRealShippingRub } from "@/modules/finance/pnl-report.service";
 import { getUsdToRubRate } from "@/pricing/fx-rate";
+import { translateOrderStatus } from "@/utils/orderStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,11 @@ export default async function OrderDetailPage({
   const { postingNumber } = await params;
   const order = await getOrderDetail(decodeURIComponent(postingNumber));
   if (!order) notFound();
+  // Sipariş bulunduktan SONRA çekiliyor — Promise.all ile paralel yapılırsa (önceki denemede
+  // olduğu gibi) var olmayan bir sipariş için bile önbelleği boş kur çekme isteğinin bitmesini
+  // (8 saniyeye kadar) beklemek zorunda kalınıyordu, 404 gecikiyordu (2026-09-10'da code
+  // review'da tespit edildi — sadece bağımsız oldukları için paralelleştirmek yeterli değilmiş).
+  const usdToRubRate = await getUsdToRubRate();
 
   const totals = order.transactions.reduce(
     (acc, t) => {
@@ -87,7 +93,6 @@ export default async function OrderDetailPage({
   // hesaplanıyordu (komisyon/lojistik/banka bedeli hariç), liste ise komisyonu da düşüyordu; aynı
   // sipariş için iki farklı sayfada FARKLI rakamlar görünüyordu (2026-09-10'da code review'da
   // tespit edildi — kullanıcı için kafa karıştırıcı, "uygulama bozuk" izlenimi verir).
-  const usdToRubRate = await getUsdToRubRate();
   const realShippingRub = sumRealShippingRub(order.transactions);
   const realShippingUsd = realShippingRub != null && usdToRubRate ? realShippingRub / usdToRubRate : null;
   const possibleNetProfit = computeOrderEstimatedProfit(order.items, realShippingUsd);
@@ -112,7 +117,7 @@ export default async function OrderDetailPage({
       <div className="card summary-grid" style={{ marginBottom: 16 }}>
         <div>
           <div className="hint">Durum</div>
-          <span className="badge pending">{order.status}</span>
+          <span className="badge pending">{translateOrderStatus(order.status)}</span>
         </div>
         <div>
           <div className="hint">Şema</div>

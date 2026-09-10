@@ -3,6 +3,7 @@ import { listFbsPostings, type OzonFbsPosting } from "../../ozon/orders";
 import { getProductAttributes } from "../../ozon/products";
 import { importFromOzon, syncMissingProductsFromOzon } from "../products/products.service";
 import { computePriceBreakdown } from "../../pricing/formula";
+import { effectiveCargoWeightGrams, estimateShippingForWeight } from "../finance/pnl-report.service";
 import {
   uploadInvoiceFile,
   createOrUpdateInvoice,
@@ -153,15 +154,18 @@ interface EstimatedProfitItem {
 // kullanılır (2026-09-10, kullanıcı talebi: "faturası kesildiyse ... bunlardan yararlan kargo
 // fiyatında") — komisyon/lojistik/banka bedeli her zaman satış fiyatı üzerinden hesaplanmaya devam eder.
 export function computeOrderEstimatedProfit(items: EstimatedProfitItem[], realShippingUsd?: number | null): number | null {
+  // Kalemsiz bir sipariş için hesaplanacak bir şey yok — bu koruma olmadan aşağıdaki tarife
+  // formülü 0 gram için bile sabit taban ücreti (ör. -$0.80) döndürüp "kalemsiz sipariş zararda"
+  // gibi hayalet bir rakam gösterirdi (2026-09-10'da code review'da tespit edildi).
+  if (items.length === 0) return null;
+
   let totalBeforeShipping = 0;
-  let totalEstimatedShipping = 0;
+  let totalBillingWeightGrams = 0;
+  let anyWeightMissing = false;
+
   for (const item of items) {
     const product = item.product;
     if (!product?.costPrice) return null;
-    // computePriceBreakdown ağırlık yoksa kargoyu sessizce $0 sayıyor (bkz. formula.ts) — gerçek
-    // kargo verisi de yoksa burada "bilinmiyor" (null) olarak işaretliyoruz, aksi halde kâr
-    // olduğundan yüksek görünür. Gerçek kargo verisi VARSA ağırlık eksikliği önemli değil.
-    if (realShippingUsd == null && product.weightGrams == null && product.cargoWeightGrams == null) return null;
     const breakdown = computePriceBreakdown(
       product.costPrice,
       product.weightGrams,
@@ -171,10 +175,40 @@ export function computeOrderEstimatedProfit(items: EstimatedProfitItem[], realSh
       product.cargoWeightGrams,
     );
     if (!breakdown) return null;
+    // Kargo/komisyon dışındaki kısım (satış - alış - komisyon - lojistik - banka bedeli) adet
+    // bazında doğrusal ölçekleniyor, bu yüzden quantity ile çarpılabilir.
     totalBeforeShipping += (breakdown.profitUsd + breakdown.shippingUsd) * item.quantity;
-    totalEstimatedShipping += breakdown.shippingUsd * item.quantity;
+
+    // ÖNEMLİ: kargo tarifesinin sabit taban ücreti (ör. $0.80) paket başına BİR KEZ uygulanır —
+    // birim ağırlığı quantity ile çarpıp tarifeyi TEK SEFERDE toplam ağırlığa uyguluyoruz, aksi
+    // halde (computePriceBreakdown'ın birim bazlı shippingUsd'sini quantity ile çarpmak gibi) taban
+    // ücret adet sayısı kadar tekrarlanıp kargo maliyeti olduğundan yüksek çıkardı (2026-09-10'da
+    // code review'da tespit edildi — pnl-report.service.ts'teki 2026-08-24 tarihli aynı düzeltmeyle
+    // tutarlı: "kalemlerin toplam ağırlığı TEK SEFERDE formüle uygulanıyor"). Ağırlık "var mı" kararı
+    // için effectiveCargoWeightGrams KULLANILIYOR — sipariş detay sayfasındaki bitişik "Tahmini
+    // Kargo" kartı da AYNI fonksiyonu kullanıyor; farklı bir kontrol (ör. computePriceBreakdown'ın
+    // kendi içindeki falsy kontrolü) kullanmak weightGrams=0 olan nadir bir üründe aynı sayfadaki
+    // iki kartın birbiriyle ÇELİŞMESİNE yol açıyordu (2026-09-10'da code review'da tespit edildi).
+    const unitBillingWeight = effectiveCargoWeightGrams(product);
+    if (unitBillingWeight == null) {
+      anyWeightMissing = true;
+    } else {
+      totalBillingWeightGrams += unitBillingWeight * item.quantity;
+    }
   }
-  return totalBeforeShipping - (realShippingUsd ?? totalEstimatedShipping);
+
+  if (realShippingUsd != null) return totalBeforeShipping - realShippingUsd;
+  // totalBillingWeightGrams <= 0 burada ARTIK engel değil — tüm kalemlerin ağırlığı gerçekten
+  // (cargoWeightGrams olarak) 0 girilmişse bu geçerli bir veridir, "bilinmiyor" değil; sadece
+  // anyWeightMissing (gerçekten hiç veri yoksa) null döndürülmeli (2026-09-10'da code review'da
+  // tespit edildi — önceki davranış bu durumda geçerli bir kâr rakamı dönerken bu engel "-" gösterip gerileme yaratıyordu).
+  if (anyWeightMissing) return null;
+  // pnl-report.service.ts'teki estimateShippingForWeight KULLANILIYOR (formula.ts'teki
+  // estimateShippingCostUsd DEĞİL) — sipariş detay sayfasındaki bitişik "Tahmini Kargo" kartı da
+  // bu fonksiyonu kullanıyor; aynı formül iki ayrı dosyada tekrar bakımlı kalırsa biri değişip
+  // diğeri değişmeyince aynı sayfada iki kart çelişebilirdi (2026-09-10'da code review'da tespit
+  // edildi). İkisi şu an birebir aynı formül, sadece TEK yerden geliyor olması garanti ediliyor.
+  return totalBeforeShipping - estimateShippingForWeight(totalBillingWeightGrams);
 }
 
 // Sipariş arama kutusu (2026-09-09, kullanıcı talebi): müşteri adı, Ozon sipariş no, ürün SKU'su

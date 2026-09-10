@@ -26,8 +26,28 @@ function createHttpClient(): AxiosInstance {
   http.interceptors.response.use(
     (response) => response,
     (error: AxiosError) => {
-      const message =
-        (error.response?.data as any)?.message ?? error.message ?? "Ozon API request failed";
+      let message = error.message ?? "Ozon API request failed";
+      const data = error.response?.data;
+      // Binary istekler (responseType: "arraybuffer" — bkz. ozonPostBinary/etiket indirme) hata
+      // durumunda da gövdeyi döner; ".message" o zaman undefined kalıyor ve gerçek Ozon hata
+      // mesajı kayboluyor, kullanıcıya anlamsız "Request failed with status code 400" gösteriliyordu
+      // (2026-09-10'da "Etiket Yazdır" 400 hatasında tespit edildi) — burada JSON'a çevirip gerçek
+      // mesajı çıkarıyoruz. NOT: Node'da axios "arraybuffer" için gerçekte bir Node Buffer döner,
+      // TARAYICI ortamındaki gerçek bir ArrayBuffer DEĞİL — "data instanceof ArrayBuffer" bu yüzden
+      // Node'da her zaman false çıkıyordu ve bu düzeltme hiç çalışmıyordu (2026-09-10'da code
+      // review'da tespit edildi) — Buffer.isBuffer ile de kontrol ediliyor.
+      if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
+        try {
+          const text = Buffer.isBuffer(data) ? data.toString("utf-8") : Buffer.from(data).toString("utf-8");
+          const parsed = JSON.parse(text);
+          message = parsed?.message ?? message;
+        } catch {
+          // gövde JSON değilse generic mesaj kalır
+        }
+      } else if (data && typeof data === "object" && "message" in (data as Record<string, unknown>)) {
+        const rawMessage = (data as Record<string, unknown>).message;
+        message = rawMessage != null && rawMessage !== "" ? String(rawMessage) : message;
+      }
       throw new OzonApiError(message, error.response?.status, error.response?.data);
     },
   );

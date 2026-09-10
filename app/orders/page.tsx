@@ -6,6 +6,7 @@ import { OrdersToolbar } from "./OrdersToolbar";
 import { OrdersSearchBar } from "./OrdersSearchBar";
 import { ParasutInvoiceButton } from "./ParasutInvoiceButton";
 import { InvoicedTodayZipButton } from "./InvoicedTodayZipButton";
+import { translateOrderStatus } from "@/utils/orderStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -69,7 +70,7 @@ export default async function OrdersPage({
         </Link>
         {STATUS_OPTIONS.map((s) => (
           <Link key={s} href={`/orders?status=${s}`}>
-            <button className={`btn-secondary${params.status === s ? " active" : ""}`}>{s}</button>
+            <button className={`btn-secondary${params.status === s ? " active" : ""}`}>{translateOrderStatus(s)}</button>
           </Link>
         ))}
         <Link href="/orders?invoicedToday=1">
@@ -111,7 +112,7 @@ export default async function OrdersPage({
                       <div className="hint">{o.scheme}</div>
                     </td>
                     <td>
-                      <span className="badge pending">{o.status}</span>
+                      <span className="badge pending">{translateOrderStatus(o.status)}</span>
                     </td>
                     <td>{o.orderDate ? new Date(o.orderDate).toLocaleString("tr-TR") : "-"}</td>
                     <td>{shipmentDate ? new Date(shipmentDate).toLocaleDateString("tr-TR") : "-"}</td>

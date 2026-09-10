@@ -83,6 +83,7 @@ export default async function OrderDetailPage({
             initialInvoiceNo={order.parasutInvoiceNo}
             initialPrintUrl={order.parasutPrintUrl}
             initialConfirmed={order.parasutInvoiceNoConfirmed}
+            initialPdfCached={order.parasutInvoicePdfCached}
           />
           <Link href="/orders">
             <button className="btn-secondary">← Siparişler</button>

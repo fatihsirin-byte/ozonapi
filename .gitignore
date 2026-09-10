@@ -12,4 +12,5 @@ next-env.d.ts
 *.xlsx
 public/uploads/*
 !public/uploads/.gitkeep
+private-uploads/
 *.pdf

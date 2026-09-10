@@ -213,6 +213,7 @@ export default async function OrdersPage({
                         initialInvoiceNo={o.parasutInvoiceNo}
                         initialPrintUrl={o.parasutPrintUrl}
                         initialConfirmed={o.parasutInvoiceNoConfirmed}
+                        initialPdfCached={o.parasutInvoicePdfCached}
                       />
                     </td>
                   </tr>

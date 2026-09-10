@@ -3,6 +3,7 @@ import { prisma } from "@/db/prisma";
 import { resolveInvoicePdfForOrder } from "@/parasut/eArchives";
 import { showSalesInvoice } from "@/parasut/invoices";
 import { INVOICE_CLAIM_SENTINEL } from "@/parasut/orderInvoice";
+import { cacheInvoicePdfIfMissing } from "@/parasut/pdfCache";
 
 // Fatura kesildikten sonra Paraşüt'ün e-Arşiv'i GİB'e gönderip resmileştirmesi (Paraşüt panelinde
 // "GÖNDERİLİYOR" durumu) birkaç saniye/dakika sürebiliyor — bu esnada bizim tahmini bastığımız
@@ -29,6 +30,17 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
   if (result.status === "processing") {
     return NextResponse.json({ status: "processing" }, { status: 202 });
+  }
+
+  // PDF ilk kez "hazır" göründüğü an, diske kalıcı olarak kaydediliyor (2026-09-10, kullanıcı
+  // talebi) — bundan sonra ne bu buton ne toplu ZIP indirme bu sipariş için bir daha Paraşüt'e
+  // sormak zorunda kalmıyor (bkz. src/parasut/pdfCache.ts). İndirme başarısız olursa (ör. geçici
+  // ağ hatası) fatura/PDF linkinin kendisi hâlâ çalışır — sadece bir sonraki "ready" kontrolünde
+  // tekrar denenir, bu yüzden hata burada yutuluyor.
+  try {
+    await cacheInvoicePdfIfMissing(decodedPostingNumber, result.pdfUrl);
+  } catch (err) {
+    console.error(`[parasut] PDF önbelleğe alınamadı (posting ${decodedPostingNumber}):`, err);
   }
 
   // PDF'in gerçekten hazır olması, e-Arşiv'in GİB tarafında tam işlendiğinin en güvenilir işareti

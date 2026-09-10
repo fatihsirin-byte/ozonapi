@@ -126,6 +126,13 @@ model Order {
   // talebi). Fatura kesilmemiş ya da bu alan eklenmeden önce kesilmiş siparişlerde null kalır —
   // o durumda liste ekranı günün CANLI kuruyla tahmini bir TL değeri gösterir (bkz. app/orders/page.tsx).
   parasutInvoiceFxRate Float?
+  // true ise PDF diskimize (private-uploads/parasut-invoices/{postingNumber}.pdf) bir kere
+  // indirilip kaydedildi — bir daha ASLA Paraşüt'ten canlı çekilmesine gerek yok (2026-09-10,
+  // kullanıcı talebi: "her fatura oluşunca PDF olarak içeri alsak" — hem tek tek "Faturayı Aç"
+  // butonları hem toplu ZIP indirme artık önce buraya bakıyor, bkz. src/parasut/pdfCache.ts).
+  // PDF gerçek müşteri adı/adres/tutar içerdiği için public/uploads (auth'suz) DEĞİL, sadece
+  // giriş yapmış kullanıcıya açık bir API route üzerinden servis ediliyor.
+  parasutInvoicePdfCached Boolean @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

@@ -6,6 +6,11 @@ export class ParasutApiError extends Error {
     message: string,
     public readonly status: number | undefined,
     public readonly body: unknown,
+    // 429 yanıtlarında Paraşüt'ün Retry-After header'ıyla verdiği, saniye cinsinden gerçek bekleme
+    // süresi (varsa) — kendi tahmini bekleme süremiz yerine BUNU tercih ediyoruz (2026-09-10,
+    // kullanıcı talebi: "hepsi kesin inecek mi" sorusuna karşılık — sunucunun kendi söylediği
+    // süreyi bekleyip denemek, körlemesine sabit bir süre beklemekten çok daha güvenilir).
+    public readonly retryAfterMs: number | undefined = undefined,
   ) {
     super(message);
     this.name = "ParasutApiError";
@@ -116,7 +121,17 @@ function createHttpClient(): AxiosInstance {
       const data = error.response?.data as { errors?: Array<{ title?: string; detail?: string }>; error_description?: string } | undefined;
       const message =
         data?.errors?.[0]?.detail ?? data?.errors?.[0]?.title ?? data?.error_description ?? error.message ?? "Paraşüt API isteği başarısız";
-      throw new ParasutApiError(message, error.response?.status, error.response?.data);
+      // Retry-After standart olarak saniye SAYISI ya da bir HTTP-date olabilir — sadece sayı
+      // biçimini destekliyoruz (Paraşüt'te şimdiye kadar hep bu şekilde görüldü). Ayrıştırılamazsa
+      // sessizce üstel beklemeye düşmek yerine loglanıyor ki "sunucunun önerdiği süre kullanılıyor"
+      // varsayımı bozulduğunda fark edilebilsin (2026-09-10'da code review'da tespit edildi).
+      const retryAfterHeader = error.response?.headers?.["retry-after"];
+      const retryAfterSeconds = retryAfterHeader != null ? Number(retryAfterHeader) : NaN;
+      const retryAfterMs = Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1000 : undefined;
+      if (retryAfterHeader != null && retryAfterMs === undefined) {
+        console.error(`[parasut] Retry-After header'ı sayı olarak ayrıştırılamadı, üstel beklemeye düşülüyor: "${retryAfterHeader}"`);
+      }
+      throw new ParasutApiError(message, error.response?.status, error.response?.data, retryAfterMs);
     },
   );
 
@@ -125,13 +140,29 @@ function createHttpClient(): AxiosInstance {
 
 const http = createHttpClient();
 
-const MAX_RETRIES = 3;
+// 2026-09-10'da canlıda, bugün kesilen ~40 fatura yüzünden Paraşüt'ün hız sınırına gerçekten
+// takılınca (toplu ZIP indirmede art arda 429'lar) 3 deneme yetersiz kaldı — bazı siparişlerin
+// PDF'i o çalıştırmada hiç alınamayıp "_alinamayanlar.txt"e düşüyordu. 4'e çıkarıldı (PDF önbelleğe
+// alma sayesinde artık her sipariş için bu genelde BİR KERE gerekiyor) — ama TEK bir kontrolün
+// arka arkaya BİRDEN FAZLA Paraşüt isteği zincirleyebildiği unutulmamalı (fatura no doğrulama +
+// e-Arşiv arama/oluşturma + PDF linki, bkz. eArchives.ts/pdf/route.ts) — her biri kendi bütçesini
+// harcıyor, bu yüzden 3'ten fazlasına çıkmak dikkatli yapılmalı (2026-09-10'da code review'da
+// tespit edildi: 5 + 15sn üst sınır, hız sınırı krizinde tek bir HTTP isteğini 70-100+ saniyeye
+// kadar bloke edebiliyordu).
+const MAX_RETRIES = 4;
+// Paraşüt'ün Retry-After ile bildirdiği süre kör güvenle kullanılıyordu — teoride çok büyük bir
+// değer (ör. sürdürülebilir bir hız sınırı krizinde) tek bir isteği dakikalarca bloke edebilirdi,
+// bu da toplu ZIP indirmedeki ~40 siparişlik sıralı döngüyü tamamen durdururdu (2026-09-10'da code
+// review'da tespit edildi). Üst sınır bu riski önlerken yine de sunucunun önerdiği süreye mümkün
+// olduğunca sadık kalıyor.
+const MAX_BACKOFF_MS = 10_000;
 
 // path, company_id'siz gönderilir — örn. "sales_invoices", "contacts/123" — burada otomatik
 // /v4/{company_id}/ öneki eklenir (bkz. Paraşüt'ün PHP resmi olmayan client'ındaki aynı pattern).
-// 429 (rate limit) durumunda Ozon client'ındaki gibi (bkz. src/ozon/client.ts) üstel bekleme ile
-// tekrar deniyor — sıra numarası bulmak için onlarca sayfa taranırken (bkz. orderInvoice.ts)
-// bu limite gerçekten takılıyor (2026-09-09'da canlıda tespit edildi).
+// 429 (rate limit) durumunda tekrar deniyor — sıra numarası bulmak için onlarca sayfa taranırken
+// (bkz. orderInvoice.ts) bu limite gerçekten takılıyor (2026-09-09'da canlıda tespit edildi).
+// Paraşüt'ün kendi Retry-After header'ı varsa (automation-nextjs referans projesindeki pattern,
+// bkz. ParasutApiError) o kullanılıyor — yoksa üstel beklemeye (1.5s, 3s, 6s, 12s...) düşülüyor.
 async function parasutRequest<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
   const config = requireParasutConfig();
   let attempt = 0;
@@ -150,7 +181,8 @@ async function parasutRequest<T>(method: "GET" | "POST" | "PUT" | "DELETE", path
       const status = error instanceof ParasutApiError ? error.status : undefined;
       const shouldRetry = status === 429 && attempt < MAX_RETRIES;
       if (!shouldRetry) throw error;
-      const backoffMs = 1500 * 2 ** (attempt - 1);
+      const serverHintMs = error instanceof ParasutApiError ? error.retryAfterMs : undefined;
+      const backoffMs = Math.min(serverHintMs ?? 1500 * 2 ** (attempt - 1), MAX_BACKOFF_MS);
       await new Promise((resolve) => setTimeout(resolve, backoffMs));
     }
   }

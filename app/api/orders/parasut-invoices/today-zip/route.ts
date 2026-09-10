@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { ZipArchive } from "archiver";
 import { PassThrough } from "node:stream";
-import axios from "axios";
 import { prisma } from "@/db/prisma";
 import { resolveInvoicePdfForOrder } from "@/parasut/eArchives";
+import { fetchAndCacheInvoicePdf, readCachedInvoicePdf } from "@/parasut/pdfCache";
 import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
 
 // "Bugün Faturası Kesilenler" listesindeki tüm faturaları TEK bir ZIP'te indirir — her PDF
@@ -27,14 +27,26 @@ export async function GET() {
   const failures: Array<{ postingNumber: string; error: string }> = [];
 
   for (const order of orders) {
+    // Önce diskteki önbelleğe bakılıyor — büyük çoğunluk zaten "Faturayı Aç" butonuyla en az bir
+    // kere kontrol edilmiş, dolayısıyla önbelleğe alınmış oluyor. Bu, Paraşüt'e HİÇ istek atmadan
+    // anında biter (2026-09-10, kullanıcı talebi — önceden 40 sipariş sırayla Paraşüt'e soruyordu,
+    // yoğun günlerde hız sınırına takılıp dakikalarca sürebiliyordu).
+    const cached = await readCachedInvoicePdf(order.postingNumber);
+    if (cached) {
+      pdfs.push({ postingNumber: order.postingNumber, buffer: cached });
+      continue;
+    }
     if (!order.parasutInvoiceId) continue;
     try {
+      // fetchAndCacheInvoicePdf, "Faturayı Aç" butonunun kullandığı AYNI kilitle korunuyor
+      // (2026-09-10'da code review'da tespit edildi: önceki sürümde bu rota kendi indirmesini
+      // yapıp kilidi atlıyordu, aynı siparişe aynı anda gelen iki istek diski çift yazabiliyordu).
       const result = await resolveInvoicePdfForOrder(order.postingNumber, order.parasutInvoiceId);
       if (result.status === "processing") {
         throw new Error("Fatura henüz e-Arşiv'e dönüşmedi (hâlâ işlemde olabilir)");
       }
-      const pdfResponse = await axios.get<ArrayBuffer>(result.pdfUrl, { responseType: "arraybuffer" });
-      pdfs.push({ postingNumber: order.postingNumber, buffer: Buffer.from(pdfResponse.data) });
+      const buffer = await fetchAndCacheInvoicePdf(order.postingNumber, result.pdfUrl);
+      pdfs.push({ postingNumber: order.postingNumber, buffer });
     } catch (error) {
       failures.push({ postingNumber: order.postingNumber, error: error instanceof Error ? error.message : "Bilinmeyen hata" });
     }

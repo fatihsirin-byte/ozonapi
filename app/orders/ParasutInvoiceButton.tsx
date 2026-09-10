@@ -12,6 +12,10 @@ interface Props {
   // tekrar Paraşüt'e sormaya gerek yok, TEK bir kontrol yeterli. Aksi halde (henüz hiç
   // doğrulanmamış, yeni kesilmiş faturalar) aşağıdaki otomatik yeniden deneme döngüsü çalışır.
   initialConfirmed?: boolean;
+  // true ise PDF diskimize kalıcı olarak indirilmiş (bkz. Order.parasutInvoicePdfCached) — bu
+  // durumda "Faturayı Aç" doğrudan bizim sunucumuzdaki dosyaya gider, Paraşüt panelindeki
+  // (harici, ayrı giriş gerektirebilen) linke değil.
+  initialPdfCached?: boolean;
 }
 
 type PdfStatus = "checking" | "ready" | "processing" | "error" | "stalled";
@@ -35,7 +39,7 @@ const MAX_AUTO_CHECKS = 12;
 // devam eder (2026-09-10, kullanıcı talebi + code review'da "hata sonrası otomatik kontrol tamamen
 // duruyor" bulgusuna karşılık; tekrar deneme SADECE gerçekten başarısız olduysa yeni e-Arşiv
 // başvurusu yapar, bkz. src/parasut/eArchives.ts — burası sadece PDF durumunu okur).
-export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialPrintUrl, initialConfirmed }: Props) {
+export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialPrintUrl, initialConfirmed, initialPdfCached }: Props) {
   const router = useRouter();
   // 2026-09-10'da canlıda tespit edildi: onlarca fatura kesilmiş siparişin bulunduğu bir sayfa
   // açıldığında HEPSİ aynı anda 10 saniyede bir kontrol başlatıyordu — Paraşüt'e giden eşzamanlı
@@ -53,6 +57,13 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const statusRef = useRef<PdfStatus>("checking");
   const attemptsRef = useRef(0);
+  // Sunucu tarafında bir kontrol, sırasıyla birkaç Paraşüt isteğine kadar zincirleyebiliyor
+  // (fatura no doğrulama + e-Arşiv arama/oluşturma + PDF linki) — her biri kendi yeniden deneme
+  // bütçesine sahip, hız sınırı krizinde tek bir kontrol epey uzun sürebilir (bkz. src/parasut/client.ts
+  // MAX_BACKOFF_MS yorumu). Bu yüzden önceki kontrol hâlâ cevap beklerken 10 saniyelik interval
+  // yeni bir tane daha BAŞLATMASIN diye korunuyor — aksi halde hız sınırı krizi sırasında tam da
+  // onu kötüleştirecek şekilde istekler üst üste yığılırdı (2026-09-10'da code review'da tespit edildi).
+  const isCheckingRef = useRef(false);
   // "Tekrar Dene" tıklanınca hem elle bir kontrol yapılsın hem de aşağıdaki otomatik kontrol
   // interval'ı SIFIRDAN kurulsun diye — sadece checkPdfStatus() çağırmak yetmiyordu, çünkü
   // interval yalnızca [hasInvoice] değiştiğinde kuruluyordu ve MAX_AUTO_CHECKS'e ulaşıp bir kez
@@ -61,6 +72,8 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
   const [retryTick, setRetryTick] = useState(0);
 
   async function checkPdfStatus() {
+    if (isCheckingRef.current) return;
+    isCheckingRef.current = true;
     setPdfStatus((prev) => (prev === "ready" ? prev : "checking"));
     try {
       const res = await fetch(`/api/orders/${encodeURIComponent(postingNumber)}/parasut-invoice/pdf`);
@@ -77,6 +90,8 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
       }
     } catch {
       setPdfStatus("error");
+    } finally {
+      isCheckingRef.current = false;
     }
   }
 
@@ -137,11 +152,14 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
   }
 
   // Zaten doğrulanmış faturalarda HİÇ canlı kontrol yapılmadan (yukarıdaki effect), doğrudan
-  // fatura kesilirken kaydedilmiş panel linkine giden bir "Faturayı Aç" gösteriliyor — bu
-  // faturanın PDF'i kesin var, tekrar sormaya gerek yok.
+  // "Faturayı Aç" gösteriliyor — bu faturanın PDF'i kesin var, tekrar sormaya gerek yok. PDF
+  // diske önbelleğe alınmışsa (initialPdfCached) doğrudan kendi sunucumuzdaki dosyaya, değilse
+  // yedek olarak Paraşüt panel linkine gidiyor (2026-09-10, kullanıcı talebi).
+  const cachedPdfHref = `/api/orders/${encodeURIComponent(postingNumber)}/parasut-invoice/pdf-file`;
   if (hasInvoice && !retryable) {
-    return panelUrl ? (
-      <a href={panelUrl} target="_blank" rel="noopener noreferrer">
+    const href = initialPdfCached ? cachedPdfHref : panelUrl;
+    return href ? (
+      <a href={href} target="_blank" rel="noopener noreferrer">
         <button className="btn-secondary">Faturayı Aç {invoiceNo ? `(${invoiceNo})` : ""} ↗</button>
       </a>
     ) : (

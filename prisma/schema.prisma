@@ -137,6 +137,12 @@ model Order {
   updatedAt     DateTime @updatedAt
 
   items        OrderItem[]
+
+  // Siparişler sayfasındaki filtre butonları (durum bazlı groupBy + "Bugün Faturası Kesilenler"
+  // sayacı) her sayfa yüklemesinde bu iki alanı sorguluyor — index olmadan tüm tablo taranıyordu
+  // (2026-09-10'da code review'da tespit edildi).
+  @@index([status])
+  @@index([parasutInvoicedAt])
 }
 
 model OrderItem {

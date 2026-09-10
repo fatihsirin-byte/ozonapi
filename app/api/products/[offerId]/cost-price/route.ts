@@ -3,6 +3,8 @@ import { setCostPriceOnly } from "@/modules/products/products.service";
 
 // Kâr/Zarar raporundaki (bkz. /pnl) "Alış fiyatı gir" inline alanı bunu kullanıyor — sadece
 // bizim DB'mizdeki costPrice'ı yazar, Ozon'a canlı fiyat göndermez (bkz. setCostPriceOnly yorumu).
+// route.ts'e gelen params Next tarafından zaten çözülmüş oluyor — tekrar decode ETME (bkz.
+// app/api/products/[offerId]/route.ts'teki uyarı yorumu).
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ offerId: string }> }) {
   const { offerId } = await params;
   const body = (await request.json().catch(() => ({}))) as { costPrice?: string };

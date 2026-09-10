@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PriceCalculatorModal } from "../products/[offerId]/PriceCalculatorModal";
+import { productApiPath } from "@/utils/decodeOfferId";
 
 interface PriceIndexData {
   minimal_price: string;
@@ -139,7 +140,7 @@ export function PriceList() {
     if (!active) return;
     setSaving(true);
     try {
-      await fetch(`/api/products/${encodeURIComponent(active.offerId)}`, {
+      await fetch(productApiPath(active.offerId), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ costPrice: active.costPrice, priceOverride: priceUsd, heavyPackaging: active.heavyPackaging }),

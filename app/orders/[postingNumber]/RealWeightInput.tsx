@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { productApiPath } from "@/utils/decodeOfferId";
 
 export function RealWeightInput({
   offerId,
@@ -29,7 +30,7 @@ export function RealWeightInput({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/products/${encodeURIComponent(offerId)}/confirm-weight`, {
+      const res = await fetch(productApiPath(offerId, "/confirm-weight"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ realWeightGrams: value }),

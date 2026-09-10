@@ -13,6 +13,9 @@ function serialize(product: { importTaskId: bigint | null } & Record<string, unk
   return { ...product, importTaskId: product.importTaskId?.toString() ?? null };
 }
 
+// route.ts'e gelen params Next tarafından zaten çözülmüş oluyor — tekrar decode ETME (bkz.
+// app/api/products/[offerId]/route.ts'teki uyarı yorumu; burada da önceden fazladan bir
+// decodeURIComponent vardı, offerId'de literal "%" varsa çift çözmeye yol açardı).
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ offerId: string }> }) {
   const { offerId } = await params;
   const body = (await request.json()) as {
@@ -27,13 +30,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   };
 
   if (body.excludedFromSubmit !== undefined) {
-    const product = await setVariantExcludedFromSubmit(decodeURIComponent(offerId), body.excludedFromSubmit);
+    const product = await setVariantExcludedFromSubmit(offerId, body.excludedFromSubmit);
     return NextResponse.json({ product: serialize(product) });
   }
 
   if (body.recalculateFromBase) {
     try {
-      const product = await recalculateFromBase(decodeURIComponent(offerId));
+      const product = await recalculateFromBase(offerId);
       return NextResponse.json({ product: serialize(product) });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Yeniden hesaplanamadı";
@@ -41,13 +44,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
   }
 
-  const product = await updateDraftVariant(decodeURIComponent(offerId), body);
+  const product = await updateDraftVariant(offerId, body);
   return NextResponse.json({ product: serialize(product) });
 }
 
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ offerId: string }> }) {
   const { offerId } = await params;
-  const deleted = await deleteVariant(decodeURIComponent(offerId));
+  const deleted = await deleteVariant(offerId);
   if (!deleted) {
     return NextResponse.json({ error: "Bu varyant bulunamadı" }, { status: 400 });
   }

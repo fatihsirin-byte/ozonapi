@@ -14,6 +14,7 @@ import { suggestAttributeValue } from "@/import/attribute-mapping";
 import { computeSalePrice } from "@/pricing/formula";
 import { buildRichContentJson } from "@/ozon/rich-content";
 import { PriceCalculatorModal } from "../../products/[offerId]/PriceCalculatorModal";
+import { productApiPath, variantApiPath } from "@/utils/decodeOfferId";
 
 const MODEL_NAME_ATTRIBUTE_ID = 9048;
 // "Tür" (8229) — Ozon bunu canlı attribute listesinde DÖNMÜYOR (bilgi ürünün type_id alanında
@@ -270,7 +271,7 @@ export function HandleEditor({ handle }: { handle: string }) {
     const submittedOfferId = variants.find((v) => v.ozonProductId)?.offerId;
     if (!submittedOfferId) return;
     setSpecLoaded(true);
-    fetch(`/api/products/${encodeURIComponent(submittedOfferId)}/clone-data`)
+    fetch(productApiPath(submittedOfferId, "/clone-data"))
       .then((r) => r.json())
       .then((data) => {
         if (data.category) setCategory(data.category);
@@ -285,7 +286,7 @@ export function HandleEditor({ handle }: { handle: string }) {
     if (!variants) return;
     const pendingWithTask = variants.filter((v) => v.status === "pending" && v.importTaskId);
     for (const v of pendingWithTask) {
-      fetch(`/api/products/${encodeURIComponent(v.offerId)}/status`)
+      fetch(productApiPath(v.offerId, "/status"))
         .then((r) => r.json())
         .then((data) => {
           if (data.status !== "pending") {
@@ -448,7 +449,7 @@ export function HandleEditor({ handle }: { handle: string }) {
         ? prev.map((v) => (v.offerId === offerId ? { ...v, [field]: isNumericField ? Number(value) || null : value } : v))
         : prev,
     );
-    const res = await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
+    const res = await fetch(variantApiPath(offerId), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [field]: isNumericField ? Number(value) || 0 : value }),
@@ -479,7 +480,7 @@ export function HandleEditor({ handle }: { handle: string }) {
     setVariants((prev) =>
       prev ? prev.map((v) => (v.offerId === offerId ? { ...v, heavyPackaging } : v)) : prev,
     );
-    const res = await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
+    const res = await fetch(variantApiPath(offerId), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ heavyPackaging }),
@@ -556,7 +557,7 @@ export function HandleEditor({ handle }: { handle: string }) {
 
     setRecalculating(offerId);
     try {
-      const res = await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
+      const res = await fetch(variantApiPath(offerId), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ recalculateFromBase: true }),
@@ -578,7 +579,7 @@ export function HandleEditor({ handle }: { handle: string }) {
     setVariants((prev) =>
       prev ? prev.map((v) => (v.offerId === offerId ? { ...v, excludedFromSubmit: excluded } : v)) : prev,
     );
-    await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, {
+    await fetch(variantApiPath(offerId), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ excludedFromSubmit: excluded }),
@@ -590,12 +591,12 @@ export function HandleEditor({ handle }: { handle: string }) {
       ? `${offerId} zaten Ozon'a gönderilmiş — silmek önce Ozon'da arşivleyip sonra kalıcı olarak siler. Emin misiniz?`
       : `${offerId} varyantını kalıcı olarak silmek istediğinize emin misiniz?`;
     if (!confirm(message)) return;
-    await fetch(`/api/import/variant/${encodeURIComponent(offerId)}`, { method: "DELETE" });
+    await fetch(variantApiPath(offerId), { method: "DELETE" });
     setVariants((prev) => (prev ? prev.filter((v) => v.offerId !== offerId) : prev));
   }
 
   async function applyPriceOverride(offerId: string, costPrice: string, priceUsd: string) {
-    await fetch(`/api/products/${encodeURIComponent(offerId)}`, {
+    await fetch(productApiPath(offerId), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ costPrice, priceOverride: priceUsd }),
@@ -665,7 +666,7 @@ export function HandleEditor({ handle }: { handle: string }) {
 
   function pollSubmittedVariant(offerId: string) {
     const interval = setInterval(async () => {
-      const res = await fetch(`/api/products/${encodeURIComponent(offerId)}/status`);
+      const res = await fetch(productApiPath(offerId, "/status"));
       const data = await res.json();
       if (data.status !== "pending") {
         clearInterval(interval);

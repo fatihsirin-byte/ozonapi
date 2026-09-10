@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getOrderDetail, computeOrderAmount, computeOrderCost, computeOrderEstimatedProfit } from "@/modules/orders/orders.service";
+import { productPath } from "@/utils/decodeOfferId";
 import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
 import { CopyableField } from "./CopyableField";
 import { transliterateRussian } from "@/utils/transliterate";
@@ -202,7 +203,7 @@ export default async function OrderDetailPage({
                       )}
                     </td>
                     <td>
-                      {item.product ? <Link href={`/products/${item.offerId}`}>{item.offerId}</Link> : item.offerId}
+                      {item.product ? <Link href={productPath(item.offerId)}>{item.offerId}</Link> : item.offerId}
                     </td>
                     <td>{item.product?.name ?? "-"}</td>
                     <td>{item.quantity}</td>

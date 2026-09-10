@@ -39,28 +39,41 @@ sorunu vb.) araya girdi.
    için çok hassas bir konu oldu — "kesin" ile "tahmini" değerler UI'da MUTLAKA görsel olarak ayrı
    gösterilmeli, karıştırılmamalı.
 
-## 2. "Nuri Toplar" ürününde 404 hatası (KISMEN ARAŞTIRILDI, ÇÖZÜLMEDİ)
+## 2. "Nuri Toplar" ürününde 404 hatası (YAPILDI — 2026-09-10)
 
 **Bug:** `/products/nuritoplar250fındık` (offerId'si Türkçe'ye özgü noktasız "ı" harfi içeren bir
 ürün — tam adı: "Турецкий кофе Kurukahveci Nuri Toplar со вкусом фундука, молотый, жестяная банка,
 250 г") açılınca "This page could not be found" (404) hatası veriyor.
 
-**Kullanıcının ilk tahmini (YANLIŞ çıktı):** "Sonradan fiyat girilen, yeni panelden gelen ürünlerde
-oluyor" — ama bu ürünün de alış fiyatı (`costPrice`) boş, yine de 404 veriyor. Yani fiyatla ilgisi yok.
+**Gerçek kök neden (geçici bir `console.log` ile ve kimlik doğrulamalı `curl` testleriyle
+doğrulandı):** `encodeURIComponent` tutarsızlığı hipotezi YANLIŞ çıktı — sorun link oluşturmada
+değildi. Next.js 15.5.22, `app/products/[offerId]/page.tsx`'teki dinamik route segmentini
+OTOMATİK ÇÖZMÜYOR (decode etmiyor): tarayıcı "ı" gibi Türkçe karakterleri URL'e yazarken kendiliğinden
+yüzde-kodluyor (`%C4%B1`), ama `params.offerId` bize hâlâ `"nuritoplar250f%C4%B1nd%C4%B1k"` kodlu
+haliyle geliyordu — bu, DB'deki düz `"nuritoplar250fındık"` değeriyle eşleşmediği için `getProduct`
+`null` dönüyor ve `notFound()` tetikleniyordu. (DB tarafında hiçbir sorun yoktu, offerId'nin
+bayt/kod noktaları tamamen sağlamdı — bu daha önce de doğrulanmıştı.)
 
-**Benim bulduğum ipucu (doğrulanmadı, sadece hipotez):** Ürün linkleri kod içinde tutarsız
-oluşturuluyor — bazı yerler `encodeURIComponent(offerId)` kullanıyor, bazıları kullanmıyor:
-- KULLANMIYOR: `app/products/page.tsx:40`, `app/orders/[postingNumber]/page.tsx:228`
-- KULLANIYOR: `app/analitik/AnalyticsView.tsx:268`, `app/pnl/CostPriceCell.tsx:26`
+**Çözüm (birkaç turluk code review sonrası netleşti — ÖNEMLİ bir Next.js tuhaflığı var):**
+Next.js App Router'da `page.tsx` (Server Component) ile `route.ts` (API route/Route Handler)
+dinamik route segmentini **FARKLI** ele alıyor:
+- `page.tsx`'e gelen `params` **ÇÖZÜLMEMİŞ** geliyor — bu yüzden `app/products/[offerId]/page.tsx`'te
+  `decodeURIComponent` (güvenli sarmalı: `src/utils/decodeOfferId.ts`) MUTLAKA gerekiyor.
+- `route.ts`'e gelen `params` Next tarafından **ZATEN OTOMATİK ÇÖZÜLMÜŞ** oluyor — buraya AYRICA
+  `decodeURIComponent` eklemek (bir ara turda yanlışlıkla eklenmişti, gerçek `curl` testiyle
+  yakalanıp geri alındı) offerId'de literal "%" varsa (ör. gerçek DB'de var olan
+  "TURKOBABA-100%-342G-6974") **ÇİFT ÇÖZME**'ye yol açıp ürünü bulamıyordu (cost-price/status/
+  confirm-weight/clone-data/variant route'larının hepsinde).
+- Ayrıca offerId linki oluşturan HER yerde (`app/products/page.tsx`, `app/orders/[postingNumber]/
+  page.tsx`, `ProductEditForm.tsx`, `ProductWizard.tsx`, `HandleEditor.tsx`, `CostPriceCell.tsx`,
+  `RealWeightInput.tsx`, `PriceList.tsx`, `ImportProductForm.tsx` — bazıları hiç encode etmiyordu,
+  bazıları tutarsızdı) artık ortak `productPath`/`productApiPath`/`variantApiPath` fonksiyonları
+  (`src/utils/decodeOfferId.ts`) kullanılıyor — serbest `${encodeURIComponent(offerId)}` şablonu
+  yazmayı unutmak yapısal olarak zorlaşsın diye.
 
-Doğrudan `getProduct('nuritoplar250fındık')` çağrısı (DB sorgusu) doğru çalışıyor — yani sorun DB
-tarafında değil, muhtemelen tarayıcı → Next.js yönlendirme/route eşleştirme katmanında. Kesin kök
-neden bulunamadı; `encodeURIComponent` tutarsızlığı ilk şüpheli ama doğrulanmadı.
-
-**Sonraki adım:** `app/products/[offerId]/page.tsx`'e (ya da bir API route'a) geçici bir log
-eklenip gerçek tarayıcıdan tıklanarak (ya da kimlik doğrulamalı bir `curl` ile) hangi `offerId`
-değerinin route'a ulaştığı görülmeli — beklenen "nuritoplar250fındık" ile GERÇEKTEN gelen değer
-karşılaştırılmalı.
+Yerel sunucuda hem Türkçe karakterli hem gerçek "%" içeren (iki ayrı gerçek DB kaydı) hem düz ASCII
+offerId'ler; hem sayfa hem API uçları (GET ve PATCH/POST yazma dahil) tek tek `curl` ile test edilip
+hepsinin doğru çalıştığı doğrulandı.
 
 ## 3. Ozon "Topla" (paketleme onayı + gerekirse bölme) akışı (YAPILMADI, KAPSAMLI BİR ÖZELLİK)
 
@@ -72,21 +85,44 @@ bölme seçeneği çıkıyor. Kullanıcı bunun bizim sistemimizden de yapılabi
 (Paraşüt'te) fatura kesiyoruz, Ozon'a sevkiyat/paketleme onayı gibi GERÇEK bir yazma isteği hiç
 göndermiyoruz.
 
-**Araştırılan API uçları (WebSearch ile, resmi Ozon dokümantasyonundan):**
-- `/v3/posting/multiboxqty/set` — bir gönderi için kutu sayısını ayarlamak için.
-- `/v3/posting/fbs/get` ve `/v3/posting/fbs/list` — `is_multibox` / `multi_box_qty` alanlarını
-  döndürüyor (bir siparişin bölünüp bölünmediğini görmek için).
-- Muhtemelen paketleme onayı için `/v3/posting/fbs/ship` (doğrulanmadı, tam istek gövdesi
-  araştırılmadı).
-
 **Neden yapılmadı:** Bu, sistemde OLMAYAN yeni bir yetki sınıfı — Ozon'a gerçek sevkiyat/paketleme
 onayı göndermek. Yanlış yapılırsa (yanlış kutu sayısı, yanlış ürün eşleştirmesi vb.) gerçek bir
 siparişin sevkiyat sürecini bozabilir. Kullanıcı bunun ayrı, dikkatli bir oturumda ele alınmasını
 istedi ("uzun sürecek", "ben ilerde yaparım").
 
-**Sonraki adım (bir sonraki oturumda):**
-1. Ozon'un resmi `/v3/posting/fbs/ship` (ya da güncel karşılığı) dokümantasyonu tam olarak
-   okunmalı — istenen alanlar (ürün/miktar eşleştirmesi, paket bilgisi vb.).
-2. Önce SADECE tek kutulu (bölmesiz) paketleme onayını tek bir sipariş üzerinde, kullanıcı
-   onayıyla test etmek en güvenli başlangıç noktası olur.
-3. Bölme (multi-box) özelliği ancak temel akış gerçek bir siparişte doğrulandıktan sonra eklenmeli.
+**API araştırması TAMAMLANDI (2026-09-10, henüz KOD YAZILMADI, gerçek siparişe dokunulmadı):**
+- Tek kutulu paketleme onayı: `POST /v4/posting/fbs/ship` — istek: `{ posting_number, packages:
+  [{ products: [{ product_id, quantity }] }] }`, cevap: `{ result: string[] }` (bölünürse birden
+  fazla posting numarası döner). **Not:** `src/ozon/orders.ts:58`'de zaten hiçbir yerden
+  çağrılmayan, yarım bırakılmış bir `shipFbsPosting` fonksiyonu var ama o eski `/v2/posting/fbs/ship`
+  sürümünü kullanıyor — gerçek çağrı öncesi güncel `/v4` sürümü resmi dokümantasyondan bir kez daha
+  teyit edilmeli, kaynaklar arasında sürüm numarası tutarsızlığı görüldü.
+- Kutuya bölme: ayrı bir endpoint — `POST /v3/posting/multiboxqty/set`, istek:
+  `{ posting_number, multi_box_qty }`. **Akış sırası önemli:** önce `/v3/posting/fbs/get` ile
+  siparişin `is_multibox` alanına bakılır (Ozon ağırlık/boyut tutarsızlığı tespit ederse kendisi
+  `true` yapıyor); `true` ise `ship` çağrısından ÖNCE `multiboxqty/set` ile kutu sayısı bildirilmeli.
+  Tek kutulu siparişlerde bu adım atlanıp doğrudan `ship` çağrılabilir.
+- Ayrıca `/v4/posting/fbs/ship/package` diye üçüncü, kısmi paketleme için bir endpoint daha var
+  (muhtemelen seri numarası zorunlu ürünler için) — bu özellik kapsamında şimdilik gerekli değil.
+- **Kullanıcı notu (2026-09-10):** Ozon'un kendi panelinde, "ilk durumdaki" (awaiting_packaging)
+  bir siparişte "Topla" dendiğinde, kutuya bölme seçeneği sadece paketteki ürün adedi 1'den
+  FAZLAYSA çıkıyor — tek adetlik siparişlerde bu seçenek hiç gösterilmiyor. UI tasarlanırken
+  (adım 2'deki "Topla" butonu/form) bu davranış birebir taklit edilmeli: bölme formu sadece
+  toplam ürün adedi > 1 olan siparişlerde gösterilsin.
+- **Kullanıcı notu (2026-09-10):** "Topla" işlemi siparişi 1. durumdan (awaiting_packaging) 2.
+  duruma geçiriyor — kargo etiketi ANCAK bu geçiş yapıldıktan SONRA oluşuyor. Yani `ship`
+  çağrısı sadece "paketlendi" bilgisini kaydetmiyor, aynı zamanda etiketin üretilmesini de
+  tetikliyor — bu yüzden UI'da "Topla" butonu, etiket indirme akışıyla (varsa mevcut etiket
+  kodundaki durum kontrolüyle) tutarlı olmalı.
+
+**Sonraki adım (bir sonraki oturumda, KOD YAZILACAK — hâlâ kullanıcı onayı gerekiyor):**
+1. `src/ozon/orders.ts`'teki `shipFbsPosting`'i güncel `/v4/posting/fbs/ship`'e taşı; aynı dosyaya
+   `/v3/posting/multiboxqty/set` için yeni bir fonksiyon ekle (projenin mevcut `ozonPost` istemci
+   üslubunda — bkz. `invoices.ts`).
+2. `orders.service.ts`'e bu ikisini saran, "awaiting_packaging" durumunu kontrol eden bir servis
+   fonksiyonu eklenir; `app/orders/[postingNumber]/page.tsx`'e sadece o durumdaki siparişlerde
+   görünen bir "Topla" butonu + `is_multibox=true` ise kutu sayısı giren küçük bir form eklenir.
+3. İlk gerçek test MUTLAKA kullanıcının onayıyla, tek ve önemsiz bir siparişte yapılmalı — yanlış
+   `product_id`/`quantity` eşleşmesi ya da eksik `multiboxqty/set` çağrısı gerçek bir siparişin
+   sevkiyatını bozabilir. Bölme (multi-box) özelliği ancak temel akış gerçek bir siparişte
+   doğrulandıktan sonra eklenmeli.

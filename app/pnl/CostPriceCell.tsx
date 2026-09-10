@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { productPath, productApiPath } from "@/utils/decodeOfferId";
 
 // Alış fiyatı boş kalmış kalemlerde tabloda satır içinde doldurma alanı — kaydedince sadece
 // bizim DB'mizdeki costPrice yazılır (Ozon'a canlı fiyat gönderilmez, bkz. setCostPriceOnly),
@@ -23,7 +24,7 @@ export function CostPriceCell({ offerId }: { offerId: string }) {
             burada eksik veriyle tekrar kurmak yerine, hesaplayıcının zaten çalıştığı ürün
             sayfasına yönlendiriyoruz (2026-09-09, kullanıcı talebi: "fiyat hesaplayıcıyı kullan"). */}
         <a
-          href={`/products/${encodeURIComponent(offerId)}`}
+          href={productPath(offerId)}
           target="_blank"
           rel="noopener noreferrer"
           className="hint"
@@ -39,7 +40,7 @@ export function CostPriceCell({ offerId }: { offerId: string }) {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/products/${encodeURIComponent(offerId)}/cost-price`, {
+      const res = await fetch(productApiPath(offerId, "/cost-price"), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ costPrice: value }),

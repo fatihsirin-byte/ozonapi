@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { productPath } from "@/utils/decodeOfferId";
 
 export function ImportProductForm() {
   const router = useRouter();
@@ -25,7 +26,7 @@ export function ImportProductForm() {
         setError(data.error ?? "İçe aktarılamadı");
         return;
       }
-      router.push(`/products/${offerId.trim()}`);
+      router.push(productPath(offerId.trim()));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bilinmeyen hata");
     } finally {

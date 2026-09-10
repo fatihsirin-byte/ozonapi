@@ -221,7 +221,7 @@ export function computeOrderEstimatedProfit(items: EstimatedProfitItem[], realSh
 // gömülü) "mode: insensitive" desteklemiyor (2026-09-09'da code review'da tespit edildi) — ILIKE
 // tüm alanlarda tutarlı büyük/küçük harf duyarsız arama sağlıyor. asSku'yu 18 haneyle sınırlamak
 // da Postgres bigint taşmasını (ve sayfanın çökmesini) önlüyor (aynı incelemede tespit edildi).
-async function findSearchMatchingOrderIds(search: string): Promise<string[]> {
+export async function findSearchMatchingOrderIds(search: string): Promise<string[]> {
   const trimmed = search.trim();
   // ILIKE'ın kendi joker karakterlerini (%, _) ve kaçış karakterini (\) literal arıyormuş gibi
   // kaçırıyoruz — aksi halde offerId/SKU'larda yaygın olan "_" tek karakterlik joker gibi
@@ -250,6 +250,10 @@ async function findSearchMatchingOrderIds(search: string): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
+function matchingIdsWhere(matchingIds: string[] | null) {
+  return matchingIds !== null ? { id: { in: matchingIds } } : {};
+}
+
 export async function listOrders(params: {
   status?: string;
   scheme?: string;
@@ -257,11 +261,15 @@ export async function listOrders(params: {
   to?: Date;
   invoicedSince?: Date;
   invoicedTo?: Date;
-  search?: string;
+  // Arama sonucu eşleşen sipariş id'leri — çağıran taraf (app/orders/page.tsx) bunu tek seferde
+  // hesaplayıp hem burada hem getOrderFilterCounts'ta kullanıyor; aksi halde aynı pahalı ILIKE
+  // sorgusu (findSearchMatchingOrderIds) sayfa başına iki kez çalışırdı (2026-09-10'da code
+  // review'da tespit edildi).
+  matchingIds?: string[] | null;
   skip?: number;
   take?: number;
 }) {
-  const matchingIds = params.search?.trim() ? await findSearchMatchingOrderIds(params.search) : null;
+  const matchingIds = params.matchingIds ?? null;
   const where = {
     ...(params.status ? { status: params.status } : {}),
     ...(params.scheme ? { scheme: params.scheme } : {}),
@@ -276,7 +284,7 @@ export async function listOrders(params: {
           },
         }
       : {}),
-    ...(matchingIds !== null ? { id: { in: matchingIds } } : {}),
+    ...matchingIdsWhere(matchingIds),
   };
 
   const [orders, total] = await Promise.all([
@@ -291,6 +299,37 @@ export async function listOrders(params: {
   ]);
 
   return { orders, total };
+}
+
+// Siparişler sayfasındaki filtre butonlarının (Tümü / durum / Bugün Faturası Kesilenler) içine adet
+// yazmak için — arama kutusundaki metin sabit tutulup (kullanıcı bir şey ararken butonlar da o arama
+// içindeki dağılımı göstersin diye "cascade") her buton kendi filtresiyle ayrı ayrı sayılıyor.
+export async function getOrderFilterCounts(params: {
+  matchingIds?: string[] | null;
+  invoicedSince: Date;
+  invoicedTo: Date;
+}) {
+  const matchingIds = params.matchingIds ?? null;
+  const baseWhere = matchingIdsWhere(matchingIds);
+
+  // "total" ayrı bir COUNT(*) yerine durum gruplarının toplamından türetiliyor — Order.status
+  // zorunlu (non-nullable) bir alan olduğu için bu iki değer matematiksel olarak hep eşit, ayrı
+  // sorgu sadece gereksiz bir DB gidiş-dönüşüydü (2026-09-10'da code review'da tespit edildi).
+  const [statusGroups, invoicedToday] = await Promise.all([
+    prisma.order.groupBy({ by: ["status"], where: baseWhere, _count: { _all: true } }),
+    prisma.order.count({
+      where: { ...baseWhere, parasutInvoicedAt: { gte: params.invoicedSince, lt: params.invoicedTo } },
+    }),
+  ]);
+
+  const byStatus: Record<string, number> = {};
+  let total = 0;
+  for (const g of statusGroups) {
+    byStatus[g.status] = g._count._all;
+    total += g._count._all;
+  }
+
+  return { total, byStatus, invoicedToday };
 }
 
 // Toast bildirimleri için — bu tarihten SONRA bizim DB'ye düşen (createdAt, yani sync'in yeni

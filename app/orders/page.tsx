@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { listOrders, computeOrderAmount, computeOrderEstimatedProfit } from "@/modules/orders/orders.service";
+import {
+  listOrders,
+  computeOrderAmount,
+  computeOrderEstimatedProfit,
+  getOrderFilterCounts,
+  findSearchMatchingOrderIds,
+} from "@/modules/orders/orders.service";
 import { getRealShippingUsdByPosting } from "@/modules/finance/pnl-report.service";
 import { getUsdToTryRate } from "@/pricing/fx-rate";
 import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
@@ -54,30 +60,57 @@ export default async function OrdersPage({
   const page = Number(params.page ?? "1");
   const showInvoicedToday = params.invoicedToday === "1";
   const todayRange = getIstanbulTodayRangeUtc();
+  // getUsdToTryRate() matchingIds'e bağlı değil — arama sorgusunu (pahalı ILIKE) beklemeden hemen
+  // paralel başlatılıyor (2026-09-10'da code review'da tespit edildi — daha önce matchingIds'in
+  // bitmesini gereksiz yere bekliyordu).
+  const liveTryRatePromise = getUsdToTryRate();
+  const matchingIds = params.q?.trim() ? await findSearchMatchingOrderIds(params.q) : null;
 
-  const { orders, total } = await listOrders({
-    status: showInvoicedToday ? undefined : params.status,
-    invoicedSince: showInvoicedToday ? todayRange.start : undefined,
-    invoicedTo: showInvoicedToday ? todayRange.end : undefined,
-    search: params.q,
-    skip: (page - 1) * 50,
-    take: 50,
-  });
   // Faturası kesilmemiş (ya da bu sütun eklenmeden önce kesilmiş) siparişlerde tahmini bir TL
   // değeri gösterebilmek için günün canlı kurunu da çekiyoruz — kesin kurla ("gerçek fatura kuru")
   // karışmasın diye UI'da ayrı etiketlendiriliyor (bkz. BEKLEYEN-GELISTIRMELER.md #1, 2026-09-10,
-  // kullanıcı talebi). Birbirinden bağımsız oldukları için paralel çekiliyor (2026-09-10'da code
-  // review'da tespit edildi — sırayla beklemek kur isteği yavaşsa gereksiz gecikme ekliyordu).
-  const [realShippingByPosting, liveTryRate] = await Promise.all([
-    getRealShippingUsdByPosting(orders.map((o) => o.postingNumber)),
-    getUsdToTryRate(),
+  // kullanıcı talebi). filterCounts ve liveTryRate, orders sonucuna bağlı değil — bu yüzden
+  // listOrders ile birlikte paralel başlatılıyor, sadece kargo maliyeti orders'ı bekliyor
+  // (2026-09-10'da code review'da tespit edildi — filterCounts listOrders'ı gereksiz yere
+  // sırayla bekliyordu).
+  const [{ orders, total }, liveTryRate, filterCounts] = await Promise.all([
+    listOrders({
+      status: showInvoicedToday ? undefined : params.status,
+      invoicedSince: showInvoicedToday ? todayRange.start : undefined,
+      invoicedTo: showInvoicedToday ? todayRange.end : undefined,
+      matchingIds,
+      skip: (page - 1) * 50,
+      take: 50,
+    }),
+    liveTryRatePromise,
+    getOrderFilterCounts({ matchingIds, invoicedSince: todayRange.start, invoicedTo: todayRange.end }),
   ]);
+  const realShippingByPosting = await getRealShippingUsdByPosting(orders.map((o) => o.postingNumber));
 
-  const pageQuery = new URLSearchParams();
-  if (params.status) pageQuery.set("status", params.status);
-  if (params.q) pageQuery.set("q", params.q);
-  if (showInvoicedToday) pageQuery.set("invoicedToday", "1");
-  const pageQueryPrefix = pageQuery.toString() ? `${pageQuery.toString()}&` : "";
+  // Sayfalama linkleri (pageQueryPrefix) ve filtre butonu linkleri (filterHref) aynı üç parametreyi
+  // (status/invoicedToday/q) tek bir yerden üretiyor — daha önce ikisi ayrı ayrı elle yazılmıştı
+  // (2026-09-10'da code review'da tespit edildi: iki yerde aynı mantığın tekrarlanması, yeni bir
+  // filtre eklendiğinde birinin unutulma riskini taşıyordu).
+  function ordersQuery(overrides: { status?: string; invoicedToday?: string } = {}) {
+    const qs = new URLSearchParams(overrides);
+    if (params.q) qs.set("q", params.q);
+    return qs.toString();
+  }
+
+  // Filtre butonlarının sayaçları aktif aramaya göre hesaplandığı için (getOrderFilterCounts),
+  // linkler de aramayı korumalı — aksi halde kullanıcı "iphone" aratıp "Teslim Edildi (2)" görüp
+  // tıkladığında arama sıfırlanır ve gördüğü sayı ile indiği liste birbirini tutmazdı (2026-09-10'da
+  // code review'da tespit edildi).
+  function filterHref(overrides: { status?: string; invoicedToday?: string }) {
+    const s = ordersQuery(overrides);
+    return s ? `/orders?${s}` : "/orders";
+  }
+
+  const currentQuery = ordersQuery({
+    ...(params.status ? { status: params.status } : {}),
+    ...(showInvoicedToday ? { invoicedToday: "1" } : {}),
+  });
+  const pageQueryPrefix = currentQuery ? `${currentQuery}&` : "";
 
   return (
     <div className="page-wide">
@@ -91,16 +124,22 @@ export default async function OrdersPage({
       </div>
 
       <div className="card" style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <Link href="/orders">
-          <button className={`btn-secondary${!params.status && !showInvoicedToday ? " active" : ""}`}>Tümü</button>
+        <Link href={filterHref({})}>
+          <button className={`btn-secondary${!params.status && !showInvoicedToday ? " active" : ""}`}>
+            Tümü <span className="hint">({filterCounts.total})</span>
+          </button>
         </Link>
         {STATUS_OPTIONS.map((s) => (
-          <Link key={s} href={`/orders?status=${s}`}>
-            <button className={`btn-secondary${params.status === s ? " active" : ""}`}>{translateOrderStatus(s)}</button>
+          <Link key={s} href={filterHref({ status: s })}>
+            <button className={`btn-secondary${params.status === s ? " active" : ""}`}>
+              {translateOrderStatus(s)} <span className="hint">({filterCounts.byStatus[s] ?? 0})</span>
+            </button>
           </Link>
         ))}
-        <Link href="/orders?invoicedToday=1">
-          <button className={`btn-secondary${showInvoicedToday ? " active" : ""}`}>Bugün Faturası Kesilenler</button>
+        <Link href={filterHref({ invoicedToday: "1" })}>
+          <button className={`btn-secondary${showInvoicedToday ? " active" : ""}`}>
+            Bugün Faturası Kesilenler <span className="hint">({filterCounts.invoicedToday})</span>
+          </button>
         </Link>
         {showInvoicedToday && <InvoicedTodayZipButton />}
       </div>

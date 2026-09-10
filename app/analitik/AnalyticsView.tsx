@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { productPath } from "@/utils/decodeOfferId";
 
 interface DayRow {
   date: string;
@@ -265,7 +266,7 @@ export function AnalyticsView() {
                   <tr key={p.sku}>
                     <td>
                       {p.offerId ? (
-                        <Link href={`/products/${encodeURIComponent(p.offerId)}`}>{p.name || p.sku}</Link>
+                        <Link href={productPath(p.offerId)}>{p.name || p.sku}</Link>
                       ) : (
                         p.name || p.sku
                       )}

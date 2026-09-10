@@ -15,6 +15,13 @@ function serializeProduct(product: NonNullable<Awaited<ReturnType<typeof getProd
   return { ...product, importTaskId: product.importTaskId?.toString() ?? null };
 }
 
+// DİKKAT: Next.js App Router'da page.tsx (Server Component) ile route.ts (Route Handler) dinamik
+// segment kodlamasını FARKLI ele alıyor — page.tsx'e gelen params ÇÖZÜLMEMİŞ (bkz.
+// app/products/[offerId]/page.tsx, decodeOfferId kullanıyor), ama route.ts'e gelen params Next
+// tarafından ZATEN OTOMATİK ÇÖZÜLMÜŞ oluyor. Burada tekrar decodeURIComponent çağırmak (2026-09-10'da
+// bir code review önerisiyle kısa süreliğine eklenmişti) offerId'de literal "%" varsa (ör.
+// "TURKOBABA-100%-342G-6974") ÇİFT ÇÖZME'ye yol açıp ürünü bulamıyordu — gerçek istekle
+// (curl ile giriş yapıp PATCH/GET denenerek) doğrulanıp geri alındı.
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ offerId: string }> }) {
   const { offerId } = await params;
   const product = await getProduct(offerId);

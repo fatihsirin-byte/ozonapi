@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ImageDropzone } from "./ImageDropzone";
 import { computeSalePrice } from "@/pricing/formula";
+import { productApiPath } from "@/utils/decodeOfferId";
 import {
   CategoryPicker,
   AttributeValuePicker,
@@ -166,7 +167,7 @@ export function ProductWizard() {
 
   useEffect(() => {
     if (!cloneFrom) return;
-    fetch(`/api/products/${cloneFrom}/clone-data`)
+    fetch(productApiPath(cloneFrom, "/clone-data"))
       .then((r) => r.json())
       .then((data: CloneData) => {
         setName(`${data.name} (kopya)`);
@@ -236,7 +237,7 @@ export function ProductWizard() {
 
   async function pollVariant(offerIdForVariant: string, index: number) {
     const interval = setInterval(async () => {
-      const res = await fetch(`/api/products/${offerIdForVariant}/status`);
+      const res = await fetch(productApiPath(offerIdForVariant, "/status"));
       const data = await res.json();
       if (data.status !== "pending") {
         clearInterval(interval);

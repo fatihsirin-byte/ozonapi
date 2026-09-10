@@ -1,14 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getProduct } from "@/modules/products/products.service";
+import { decodeOfferId } from "@/utils/decodeOfferId";
 import { ProductEditForm } from "./ProductEditForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ offerId: string }> }) {
-  const { offerId } = await params;
+  const { offerId: rawOfferId } = await params;
+  const offerId = decodeOfferId(rawOfferId);
+  if (!offerId) {
+    notFound();
+  }
   const product = await getProduct(offerId);
-
   if (!product) {
     notFound();
   }

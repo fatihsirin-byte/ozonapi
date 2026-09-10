@@ -4,6 +4,8 @@ import { OzonApiError } from "@/ozon/client";
 
 // Sipariş ekranından gerçek (tartılmış) ağırlık ilk kez girildiğinde çağrılır — bir daha
 // sorulmaması için Product.weightConfirmed işaretlenir ve fiyat bu ağırlığa göre yeniden hesaplanır.
+// route.ts'e gelen params Next tarafından zaten çözülmüş oluyor — tekrar decode ETME (bkz.
+// app/api/products/[offerId]/route.ts'teki uyarı yorumu).
 export async function POST(request: NextRequest, { params }: { params: Promise<{ offerId: string }> }) {
   const { offerId } = await params;
   const body = (await request.json()) as { realWeightGrams?: number };

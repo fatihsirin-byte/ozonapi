@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listAllProducts } from "@/modules/products/products.service";
+import { productPath } from "@/utils/decodeOfferId";
 import { ImportProductForm } from "./ImportProductForm";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ export default async function ProductsPage() {
               {products.map((p) => (
                 <tr key={p.id}>
                   <td>
-                    <Link href={`/products/${p.offerId}`}>{p.offerId}</Link>
+                    <Link href={productPath(p.offerId)}>{p.offerId}</Link>
                   </td>
                   <td>{p.name}</td>
                   <td>

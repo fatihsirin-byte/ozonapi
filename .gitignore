@@ -4,6 +4,7 @@ dist/
 .env
 .env.local
 .credentials
+server
 products_export_1.csv
 *.log
 next-env.d.ts

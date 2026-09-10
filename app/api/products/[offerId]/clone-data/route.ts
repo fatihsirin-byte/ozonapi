@@ -13,7 +13,9 @@ function mmToCm(value: number, unit: string): number {
 }
 
 // "Bu üründen kopyala" — Ozon'daki mevcut ürünün kategori/attribute/boyut/görsel bilgisini
-// çekip yeni ürün wizard'ını önceden doldurmak için kullanılır.
+// çekip yeni ürün wizard'ını önceden doldurmak için kullanılır. route.ts'e gelen params Next
+// tarafından zaten çözülmüş oluyor — tekrar decode ETME (bkz.
+// app/api/products/[offerId]/route.ts'teki uyarı yorumu).
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ offerId: string }> }) {
   const { offerId } = await params;
 

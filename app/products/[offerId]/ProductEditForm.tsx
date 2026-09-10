@@ -5,6 +5,7 @@ import { ImageDropzone } from "../new/ImageDropzone";
 import { CategoryPicker, AttributeField, useRequiredAttributes, type CategoryOption } from "../new/CategoryAttributeForm";
 import { computeSalePrice, estimateShippingCostUsd, computeBillingWeightGrams } from "@/pricing/formula";
 import { PriceCalculatorModal } from "./PriceCalculatorModal";
+import { productApiPath } from "@/utils/decodeOfferId";
 
 interface ProductData {
   offerId: string;
@@ -91,7 +92,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
     setSavingWeight(true);
     setMessage(null);
     try {
-      const res = await fetch(`/api/products/${product.offerId}`, {
+      const res = await fetch(productApiPath(product.offerId), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ weightGrams, cargoWeightGrams }),
@@ -153,7 +154,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
     if (tab !== "Kategori & Özellikler" || specLoaded) return;
     setSpecLoading(true);
     setSpecLoaded(true);
-    fetch(`/api/products/${product.offerId}/clone-data`)
+    fetch(productApiPath(product.offerId, "/clone-data"))
       .then((r) => r.json())
       .then((data) => {
         setCategory(data.category ?? null);
@@ -169,7 +170,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
     setMessage(null);
     setStatus("pending");
     try {
-      const res = await fetch(`/api/products/${product.offerId}`, {
+      const res = await fetch(productApiPath(product.offerId), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -201,7 +202,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
 
   function pollUntilResolved() {
     const interval = setInterval(async () => {
-      const res = await fetch(`/api/products/${product.offerId}/status`);
+      const res = await fetch(productApiPath(product.offerId, "/status"));
       const data = await res.json();
       if (data.status !== "pending") {
         clearInterval(interval);
@@ -220,7 +221,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
     setSaving(true);
     setMessage(null);
     try {
-      const res = await fetch(`/api/products/${product.offerId}`, {
+      const res = await fetch(productApiPath(product.offerId), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -248,7 +249,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
     setMessage(null);
     setStatus("pending");
     try {
-      const res = await fetch(`/api/products/${product.offerId}`, {
+      const res = await fetch(productApiPath(product.offerId), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ images }),

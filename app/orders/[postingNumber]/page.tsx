@@ -6,6 +6,7 @@ import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
 import { CopyableField } from "./CopyableField";
 import { transliterateRussian } from "@/utils/transliterate";
 import { LabelDownloadButton } from "./LabelDownloadButton";
+import { ShipOrderButton } from "./ShipOrderButton";
 import { RealWeightInput } from "./RealWeightInput";
 import { ParasutInvoiceButton } from "../ParasutInvoiceButton";
 import { estimateShippingForWeight, effectiveCargoWeightGrams, sumRealShippingRub } from "@/modules/finance/pnl-report.service";
@@ -78,6 +79,13 @@ export default async function OrderDetailPage({
       <div className="topbar">
         <h1>{order.postingNumber}</h1>
         <div style={{ display: "flex", gap: 8 }}>
+          {order.status === "awaiting_packaging" && (
+            <ShipOrderButton
+              postingNumber={order.postingNumber}
+              totalQuantity={order.items.reduce((sum, item) => sum + item.quantity, 0)}
+              locked={order.shipClaimedAt != null}
+            />
+          )}
           <LabelDownloadButton postingNumber={order.postingNumber} />
           <ParasutInvoiceButton
             postingNumber={order.postingNumber}

@@ -60,7 +60,13 @@ const http = createHttpClient();
 const MAX_RETRIES = 3;
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
-export async function ozonPost<T>(path: string, body?: unknown): Promise<T> {
+// retry: false — sevkiyat onayı (shipFbsPosting) gibi GERÇEK, geri alınamaz ve idempotent OLMADIĞI
+// garanti edilmeyen yazma istekleri için kullanılmalı. Normal otomatik retry, Ozon'un isteği aslında
+// işleyip yanıtı kaybettiği (5xx/429 ama gerçekte başarılı) bir durumda aynı isteği ikinci kez
+// göndererek gerçek bir mükerrer işleme (ör. çift sevkiyat) yol açabilir (2026-09-10'da code
+// review'da tespit edildi) — bu tür çağrılarda hata görünür bırakılıp karar kullanıcıya bırakılmalı.
+export async function ozonPost<T>(path: string, body?: unknown, options?: { retry?: boolean }): Promise<T> {
+  const retry = options?.retry ?? true;
   let attempt = 0;
   while (true) {
     try {
@@ -69,7 +75,7 @@ export async function ozonPost<T>(path: string, body?: unknown): Promise<T> {
     } catch (error) {
       attempt += 1;
       const status = error instanceof OzonApiError ? error.status : undefined;
-      const shouldRetry = status !== undefined && RETRYABLE_STATUSES.has(status) && attempt < MAX_RETRIES;
+      const shouldRetry = retry && status !== undefined && RETRYABLE_STATUSES.has(status) && attempt < MAX_RETRIES;
       if (!shouldRetry) {
         throw error;
       }

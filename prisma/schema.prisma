@@ -133,6 +133,14 @@ model Order {
   // PDF gerçek müşteri adı/adres/tutar içerdiği için public/uploads (auth'suz) DEĞİL, sadece
   // giriş yapmış kullanıcıya açık bir API route üzerinden servis ediliyor.
   parasutInvoicePdfCached Boolean @default(false)
+  // "Topla" (shipOrder) çift tıklama/iki sekme korumasının kilidi — BİLEREK "status" alanının
+  // dışında ayrı bir alan: 15 dakikada bir çalışan sync cron'u (syncFbsOrders) "status"ü Ozon'dan
+  // gelen gerçek değerle EZİYOR, o yüzden kilidi status'e yazarsak cron kilidi silip çift gerçek
+  // sevkiyat isteğine yol açabilirdi (2026-09-10'da code review'da tespit edildi — aynı riski
+  // Paraşüt fatura kilidi de ayrı bir alanla, parasutInvoiceId, çözüyor). Başarılı bir sevkiyattan
+  // sonra BİLEREK null'a geri döndürülmüyor (denetim izi + "bu sipariş bizim butonumuzla
+  // paketlendi" kaydı olarak kalıyor).
+  shipClaimedAt DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

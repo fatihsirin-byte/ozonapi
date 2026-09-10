@@ -47,26 +47,56 @@ export function getFbsPosting(postingNumber: string) {
 }
 
 export interface OzonFbsShipResponse {
-  result: { posting_number: string[] };
+  // Sipariş bölünmeden (tek kutu) paketlenirse tek elemanlı, bölünürse birden fazla posting
+  // numarası döner — bölünmüş her posting kendi ayrı gönderisi olur (2026-09-10'da resmi
+  // dokümantasyon araştırmasıyla doğrulandı, bkz. BEKLEYEN-GELISTIRMELER.md #3).
+  result: string[];
 }
 
-// Siparişi paketleyip kargoya hazır hale getirir (exemplar/kutu bilgisi Ozon kategorisine göre değişebilir).
+// Siparişi paketleyip kargoya hazır hale getirir — Ozon panelindeki "Topla" ile aynı adım, siparişi
+// 1. durumdan (awaiting_packaging) 2. duruma geçirir ve kargo etiketinin oluşmasını TETİKLER
+// (etiket bu çağrıdan ÖNCE üretilmiyor, bkz. BEKLEYEN-GELISTIRMELER.md #3, kullanıcı notu).
+// Sipariş birden fazla kutuya bölünecekse bu çağrıdan ÖNCE setMultiBoxQty ile kutu sayısı
+// bildirilmiş olmalı.
 export function shipFbsPosting(params: {
   postingNumber: string;
   packages: Array<{ products: Array<{ product_id: number; quantity: number }> }>;
 }) {
-  return ozonPost<OzonFbsShipResponse>("/v2/posting/fbs/ship", {
-    posting_number: params.postingNumber,
-    packages: params.packages,
-  });
+  return ozonPost<OzonFbsShipResponse>(
+    "/v4/posting/fbs/ship",
+    { posting_number: params.postingNumber, packages: params.packages },
+    { retry: false },
+  );
 }
 
+export interface OzonMultiBoxQtySetResponse {
+  result: { result: boolean };
+}
+
+// Sipariş birden fazla kutuya/gönderiye bölünecekse shipFbsPosting'den ÖNCE çağrılmalı — Ozon
+// panelinde bu seçenek sadece paketteki toplam ürün adedi 1'den fazlaysa çıkıyor (kullanıcı notu,
+// bkz. BEKLEYEN-GELISTIRMELER.md #3).
+export function setMultiBoxQty(params: { postingNumber: string; multiBoxQty: number }) {
+  return ozonPost<OzonMultiBoxQtySetResponse>(
+    "/v3/posting/multiboxqty/set",
+    { posting_number: params.postingNumber, multi_box_qty: params.multiBoxQty },
+    { retry: false },
+  );
+}
+
+// shipFbsPosting/setMultiBoxQty gibi GERÇEK, geri alınamaz bir yazma isteği — otomatik retry
+// burada da kapalı (2026-09-10'da code review'da tespit edildi: henüz hiçbir yerden çağrılmıyor
+// ama ileride bağlanırsa aynı çift-işlem riskini taşıyordu).
 export function cancelFbsPosting(params: { postingNumber: string; cancelReasonId: number; cancelReasonMessage?: string }) {
-  return ozonPost("/v2/posting/fbs/cancel", {
-    posting_number: params.postingNumber,
-    cancel_reason_id: params.cancelReasonId,
-    cancel_reason_message: params.cancelReasonMessage,
-  });
+  return ozonPost(
+    "/v2/posting/fbs/cancel",
+    {
+      posting_number: params.postingNumber,
+      cancel_reason_id: params.cancelReasonId,
+      cancel_reason_message: params.cancelReasonMessage,
+    },
+    { retry: false },
+  );
 }
 
 // Kargo etiketi (barkodlu PDF) — Ozon bazen "henüz hazırlanıyor" hatası dönebiliyor (etiket

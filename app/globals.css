@@ -387,6 +387,7 @@ th {
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 12px;
+  text-align: center;
 }
 
 .badge.draft {

@@ -4,6 +4,7 @@ import { getRealShippingUsdByPosting } from "@/modules/finance/pnl-report.servic
 import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
 import { OrdersToolbar } from "./OrdersToolbar";
 import { OrdersSearchBar } from "./OrdersSearchBar";
+import { PageLinkPagination } from "./PageLinkPagination";
 import { ParasutInvoiceButton } from "./ParasutInvoiceButton";
 import { InvoicedTodayZipButton } from "./InvoicedTodayZipButton";
 import { translateOrderStatus } from "@/utils/orderStatus";
@@ -172,18 +173,11 @@ export default async function OrdersPage({
           </table>
         )}
         {total > 50 && (
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            {page > 1 && (
-              <Link href={`/orders?${pageQueryPrefix}page=${page - 1}`}>
-                <button className="btn-secondary">Önceki</button>
-              </Link>
-            )}
-            {page * 50 < total && (
-              <Link href={`/orders?${pageQueryPrefix}page=${page + 1}`}>
-                <button className="btn-secondary">Sonraki</button>
-              </Link>
-            )}
-          </div>
+          <PageLinkPagination
+            page={page}
+            totalPages={Math.ceil(total / 50)}
+            hrefForPage={(p) => `/orders?${pageQueryPrefix}page=${p}`}
+          />
         )}
       </div>
     </div>

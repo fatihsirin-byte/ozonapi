@@ -1,10 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { computeRowMetrics, estimateShippingForWeight, type PnlRow } from "@/modules/finance/pnl-report.service";
 import { CopyableProductName } from "./CopyableProductName";
 import { OrderDetailModal } from "./OrderDetailModal";
+import { Pagination } from "./Pagination";
+
+const PAGE_SIZE = 50;
 
 function fmtMoney(n: number) {
   return `$${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -73,6 +76,7 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
   const [sortKey, setSortKey] = useState<SortKey>("orderDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [openPosting, setOpenPosting] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const enriched = useMemo<Enriched[]>(
     () =>
@@ -126,6 +130,36 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
   // göre sıralanınca) grup doğal olarak bozulur, o zaman her satır kendi posting no'sunu gösterir.
   const openOrderItems = useMemo(() => (openPosting ? enriched.filter((e) => e.row.postingNumber === openPosting).map((e) => e.row) : []), [enriched, openPosting]);
 
+  // Sayfalama, ham satır index'ine göre değil SİPARİŞ (postingNumber) grubuna göre bölünür — aksi
+  // halde birden fazla ürünü olan bir sipariş tam sayfa sınırına denk gelince ikiye bölünüp iki
+  // ayrı sayfada, her birinde eksik ürün sayısıyla görünürdü (2026-09-10, code review'da tespit
+  // edildi). PAGE_SIZE burada "sayfa başına sipariş sayısı" anlamına geliyor, satır sayısı değil.
+  const postingOrder = useMemo(() => {
+    const seen = new Set<string>();
+    const order: string[] = [];
+    for (const e of sorted) {
+      if (!seen.has(e.row.postingNumber)) {
+        seen.add(e.row.postingNumber);
+        order.push(e.row.postingNumber);
+      }
+    }
+    return order;
+  }, [sorted]);
+  const totalPages = Math.max(1, Math.ceil(postingOrder.length / PAGE_SIZE));
+  const pageItems = useMemo(() => {
+    const pagePostings = new Set(postingOrder.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE));
+    return sorted.filter((e) => pagePostings.has(e.row.postingNumber));
+  }, [sorted, postingOrder, page]);
+
+  // Arama/sıralama değişince ilk sayfaya dön; veri değişip mevcut sayfa artık yoksa (ör. arama
+  // sonucu azaldı) son geçerli sayfaya sabitle — aksi halde boş bir sayfada kalınabilir.
+  useEffect(() => {
+    setPage(1);
+  }, [search, sortKey, sortDir]);
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
   function handleSort(key: SortKey) {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -172,10 +206,10 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
               </tr>
             </thead>
             <tbody>
-              {sorted.map((e, i) => {
+              {pageItems.map((e, i) => {
                 const { row } = e;
-                const isFirstOfGroup = i === 0 || sorted[i - 1].row.postingNumber !== row.postingNumber;
-                const groupSize = sorted.filter((x) => x.row.postingNumber === row.postingNumber).length;
+                const isFirstOfGroup = i === 0 || pageItems[i - 1].row.postingNumber !== row.postingNumber;
+                const groupSize = pageItems.filter((x) => x.row.postingNumber === row.postingNumber).length;
                 return (
                   <tr key={`${row.postingNumber}-${row.offerId}-${i}`} style={!isFirstOfGroup ? { borderTop: "none" } : undefined}>
                     <td>
@@ -274,6 +308,8 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
           </table>
         </div>
       )}
+
+      <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
 
       {openPosting && openOrderItems.length > 0 && (
         <OrderDetailModal

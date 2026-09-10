@@ -1,9 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { PnlRow } from "@/modules/finance/pnl-report.service";
 import { CopyableProductName } from "../CopyableProductName";
+import { Pagination } from "../Pagination";
+
+const PAGE_SIZE = 50;
 
 function fmtMoney(n: number) {
   return `$${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -20,11 +23,24 @@ export function KargoKontroluTable({ rows }: { rows: PnlRow[] }) {
   const [showReviewed, setShowReviewed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const visibleRows = useMemo(
     () => (showReviewed ? rows : rows.filter((r) => !reviewed.has(key(r)))),
     [rows, reviewed, showReviewed],
   );
+
+  const totalPages = Math.max(1, Math.ceil(visibleRows.length / PAGE_SIZE));
+  const pageRows = useMemo(() => visibleRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [visibleRows, page]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [showReviewed]);
+  // İşaretlemeler "incelendi" listesini küçültebilir (eşiğin altındaki diğer satırlar da otomatik
+  // işaretlenir) — mevcut sayfa artık yoksa son geçerli sayfaya sabitle, boş sayfada kalınmasın.
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
 
   // Sunucu isteği başarısız olursa (ağ hatası ya da hata kodu) iyimser (optimistic) değişikliği
   // geri alır ve hata gösterir — aksi halde checkbox ekranda işaretli görünmeye devam edip
@@ -111,7 +127,7 @@ export function KargoKontroluTable({ rows }: { rows: PnlRow[] }) {
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map((row, i) => {
+            {pageRows.map((row, i) => {
               const isReviewed = reviewed.has(key(row));
               return (
                 <tr key={`${key(row)}-${i}`} style={isReviewed ? { opacity: 0.5 } : undefined}>
@@ -156,6 +172,8 @@ export function KargoKontroluTable({ rows }: { rows: PnlRow[] }) {
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
     </div>
   );
 }

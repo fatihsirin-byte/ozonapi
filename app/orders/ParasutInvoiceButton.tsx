@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 interface Props {
@@ -11,13 +11,19 @@ interface Props {
 
 type PdfStatus = "checking" | "ready" | "processing" | "error";
 
+const AUTO_CHECK_INTERVAL_MS = 10_000;
+
 // Paraşüt'te GERÇEK bir satış faturası oluşturur — geri alınamaz, bu yüzden tıklamadan önce
 // onay isteniyor. Kesildikten sonra buton "Faturayı Aç" linkine dönüşür (2026-09-09, kullanıcı
 // talebi). Fatura kesilir kesilmez Paraşüt'ün e-Arşiv'i GİB'e gönderip resmileştirmesi
 // (panelde "GÖNDERİLİYOR" durumu) birkaç saniye/dakika sürebiliyor — bu esnada PDF linki henüz
 // hazır olmuyor (2026-09-09'da canlıda "ActiveRecord::RecordNotFound" hatasıyla tespit edildi).
-// Bu yüzden linke tıklamadan önce durumu canlı sorguluyoruz ve "hazırlanıyor" durumunu ayrıca
-// gösteriyoruz, kullanıcı bozuk bir linkle karşılaşmasın diye.
+// Bu yüzden durumu canlı sorguluyoruz; hazır olana kadar buton devre dışı "İşleniyor..." gösterir
+// ve arkada TEK bir interval ile 10 saniyede bir kendiliğinden tekrar kontrol eder — geçici bir
+// ağ hatası (pdfStatus "error" olsa da) kontrolü kalıcı olarak DURDURMAZ, sadece "ready" olunca
+// durur (2026-09-10, kullanıcı talebi + code review'da "hata sonrası otomatik kontrol tamamen
+// duruyor" bulgusuna karşılık; tekrar deneme SADECE gerçekten başarısız olduysa yeni e-Arşiv
+// başvurusu yapar, bkz. src/parasut/eArchives.ts — burası sadece PDF durumunu okur).
 export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialPrintUrl }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -25,12 +31,12 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
   const [invoiceNo, setInvoiceNo] = useState(initialInvoiceNo);
   const [panelUrl, setPanelUrl] = useState(initialPrintUrl ? initialPrintUrl.replace(/\/print$/, "") : null);
   const [hasInvoice, setHasInvoice] = useState(Boolean(initialPrintUrl || initialInvoiceNo));
-  const [eArchiveWarning, setEArchiveWarning] = useState(false);
   const [pdfStatus, setPdfStatus] = useState<PdfStatus>("checking");
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const statusRef = useRef<PdfStatus>("checking");
 
   async function checkPdfStatus() {
-    setPdfStatus("checking");
+    setPdfStatus((prev) => (prev === "ready" ? prev : "checking"));
     try {
       const res = await fetch(`/api/orders/${encodeURIComponent(postingNumber)}/parasut-invoice/pdf`);
       const data = await res.json();
@@ -46,7 +52,20 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
   }
 
   useEffect(() => {
-    if (hasInvoice) checkPdfStatus();
+    statusRef.current = pdfStatus;
+  }, [pdfStatus]);
+
+  useEffect(() => {
+    if (!hasInvoice) return;
+    checkPdfStatus();
+    const interval = setInterval(() => {
+      if (statusRef.current === "ready") {
+        clearInterval(interval);
+        return;
+      }
+      checkPdfStatus();
+    }, AUTO_CHECK_INTERVAL_MS);
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasInvoice]);
 
@@ -63,7 +82,6 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
       }
       setInvoiceNo(data.invoiceNo);
       setPanelUrl(data.printUrl ? String(data.printUrl).replace(/\/print$/, "") : null);
-      setEArchiveWarning(Boolean(data.eArchiveFailed));
       setHasInvoice(true);
       router.refresh();
     } catch (err) {
@@ -81,14 +99,11 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
             <button className="btn-secondary">Faturayı Aç {invoiceNo ? `(${invoiceNo})` : ""} ↗</button>
           </a>
         )}
-        {(pdfStatus === "checking") && (
+        {pdfStatus === "checking" && (
           <button className="btn-secondary" disabled>Kontrol ediliyor...</button>
         )}
         {pdfStatus === "processing" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span className="hint">e-Arşiv hazırlanıyor (birkaç dakika sürebilir)...</span>
-            <button className="btn-secondary" onClick={checkPdfStatus}>Tekrar Kontrol Et</button>
-          </div>
+          <button className="btn-secondary" disabled>İşleniyor... (birkaç dakika sürebilir)</button>
         )}
         {pdfStatus === "error" && (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -105,11 +120,6 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
             <a href={panelUrl} target="_blank" rel="noopener noreferrer" className="hint">
               Paraşüt panelinde görüntüle ↗
             </a>
-          </div>
-        )}
-        {eArchiveWarning && pdfStatus !== "ready" && (
-          <div className="hint" style={{ color: "var(--danger)", marginTop: 4 }}>
-            Fatura oluştu ama e-Arşiv adımı ilk seferinde başarısız oldu — yukarıdaki "Tekrar Kontrol Et" bunu kendiliğinden düzeltmeyi dener.
           </div>
         )}
       </div>

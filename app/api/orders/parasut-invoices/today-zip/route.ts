@@ -3,21 +3,20 @@ import { ZipArchive } from "archiver";
 import { PassThrough } from "node:stream";
 import axios from "axios";
 import { prisma } from "@/db/prisma";
-import { resolveInvoicePdf } from "@/parasut/eArchives";
+import { resolveInvoicePdfForOrder } from "@/parasut/eArchives";
 import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
 
 // "Bugün Faturası Kesilenler" listesindeki tüm faturaları TEK bir ZIP'te indirir — her PDF
 // posting numarasıyla adlandırılır (2026-09-09, kullanıcı talebi). Fatura kesilirken artık
 // otomatik olarak e-Arşiv'e dönüştürülüyor (bkz. src/parasut/orderInvoice.ts) — PDF, düz
 // sales_invoices'tan değil, o e-Arşiv kaydından (önce presigned S3 linki alınıp, o link AYRICA
-// fetch edilerek) çekiliyor; bkz. src/parasut/eArchives.ts (resolveInvoicePdf, "Faturayı Aç"
-// butonuyla ORTAK — yeniden deneme SADECE parasutEArchiveFailed true iken yapılır, aksi halde
-// hâlâ işlemde olan bir e-Arşiv için GERÇEK, ikinci bir GİB başvurusu tetiklenebilir).
+// fetch edilerek) çekiliyor; bkz. src/parasut/eArchives.ts (resolveInvoicePdfForOrder, "Faturayı
+// Aç" butonuyla ORTAK ve eşzamanlılığa karşı atomik olarak korumalı — bkz. o fonksiyonun yorumu).
 export async function GET() {
   const { start, end } = getIstanbulTodayRangeUtc();
   const orders = await prisma.order.findMany({
     where: { parasutInvoicedAt: { gte: start, lt: end } },
-    select: { postingNumber: true, parasutInvoiceId: true, parasutInvoiceNo: true, parasutEArchiveFailed: true },
+    select: { postingNumber: true, parasutInvoiceId: true, parasutInvoiceNo: true },
   });
 
   if (orders.length === 0) {
@@ -30,15 +29,9 @@ export async function GET() {
   for (const order of orders) {
     if (!order.parasutInvoiceId) continue;
     try {
-      const result = await resolveInvoicePdf(order.parasutInvoiceId, order.parasutEArchiveFailed);
+      const result = await resolveInvoicePdfForOrder(order.postingNumber, order.parasutInvoiceId);
       if (result.status === "processing") {
         throw new Error("Fatura henüz e-Arşiv'e dönüşmedi (hâlâ işlemde olabilir)");
-      }
-      if (result.recoveredFromFailure) {
-        await prisma.order.update({
-          where: { postingNumber: order.postingNumber },
-          data: { parasutEArchiveFailed: false },
-        });
       }
       const pdfResponse = await axios.get<ArrayBuffer>(result.pdfUrl, { responseType: "arraybuffer" });
       pdfs.push({ postingNumber: order.postingNumber, buffer: Buffer.from(pdfResponse.data) });

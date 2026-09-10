@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/db/prisma";
-import { resolveInvoicePdf } from "@/parasut/eArchives";
+import { resolveInvoicePdfForOrder } from "@/parasut/eArchives";
 import { INVOICE_CLAIM_SENTINEL } from "@/parasut/orderInvoice";
 
 // Fatura kesildikten sonra Paraşüt'ün e-Arşiv'i GİB'e gönderip resmileştirmesi (Paraşüt panelinde
@@ -17,21 +17,14 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const decodedPostingNumber = decodeURIComponent(postingNumber);
   const order = await prisma.order.findUnique({
     where: { postingNumber: decodedPostingNumber },
-    select: { parasutInvoiceId: true, parasutEArchiveFailed: true },
+    select: { parasutInvoiceId: true },
   });
 
   if (!order?.parasutInvoiceId || order.parasutInvoiceId === INVOICE_CLAIM_SENTINEL) {
     return NextResponse.json({ status: "not_invoiced" }, { status: 404 });
   }
 
-  const result = await resolveInvoicePdf(order.parasutInvoiceId, order.parasutEArchiveFailed);
-
-  if (result.status === "ready" && result.recoveredFromFailure) {
-    await prisma.order.update({
-      where: { postingNumber: decodedPostingNumber },
-      data: { parasutEArchiveFailed: false },
-    });
-  }
+  const result = await resolveInvoicePdfForOrder(decodedPostingNumber, order.parasutInvoiceId);
 
   if (result.status === "processing") {
     return NextResponse.json({ status: "processing" }, { status: 202 });

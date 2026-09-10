@@ -134,22 +134,30 @@ export function computeOrderCost(items: Array<{ quantity: number; product: { cos
 // hiçbir yerde gerçek "barkod" (EAN/UPC) verisi saklanmıyor — Ozon'un posting API'sinde de böyle
 // bir alan gelmiyor (yalnızca kargo paketi için ayrı bir "barcodes" alanı var, ürünle ilgisiz) —
 // bu yüzden barkod araması kapsam dışı, kullanıcıya ayrıca belirtildi.
-function buildOrderSearchFilter(search: string) {
+//
+// ham SQL kullanılıyor çünkü Prisma'nın JSON path filtreleri (müşteri adı rawPayload içinde
+// gömülü) "mode: insensitive" desteklemiyor (2026-09-09'da code review'da tespit edildi) — ILIKE
+// tüm alanlarda tutarlı büyük/küçük harf duyarsız arama sağlıyor. asSku'yu 18 haneyle sınırlamak
+// da Postgres bigint taşmasını (ve sayfanın çökmesini) önlüyor (aynı incelemede tespit edildi).
+async function findSearchMatchingOrderIds(search: string): Promise<string[]> {
   const trimmed = search.trim();
-  if (!trimmed) return undefined;
-  const asSku = /^\d+$/.test(trimmed) ? BigInt(trimmed) : null;
+  const pattern = `%${trimmed}%`;
+  const asSku = /^\d{1,18}$/.test(trimmed) ? BigInt(trimmed) : null;
 
-  return {
-    OR: [
-      { postingNumber: { contains: trimmed, mode: "insensitive" as const } },
-      { rawPayload: { path: ["customer", "name"], string_contains: trimmed } },
-      { rawPayload: { path: ["addressee", "name"], string_contains: trimmed } },
-      { items: { some: { offerId: { contains: trimmed, mode: "insensitive" as const } } } },
-      { items: { some: { product: { name: { contains: trimmed, mode: "insensitive" as const } } } } },
-      { items: { some: { product: { nameRu: { contains: trimmed, mode: "insensitive" as const } } } } },
-      ...(asSku !== null ? [{ items: { some: { ozonSku: asSku } } }] : []),
-    ],
-  };
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT DISTINCT o.id
+    FROM "Order" o
+    LEFT JOIN "OrderItem" oi ON oi."orderId" = o.id
+    LEFT JOIN "Product" p ON p.id = oi."productId"
+    WHERE o."postingNumber" ILIKE ${pattern}
+       OR (o."rawPayload" -> 'customer' ->> 'name') ILIKE ${pattern}
+       OR (o."rawPayload" -> 'addressee' ->> 'name') ILIKE ${pattern}
+       OR oi."offerId" ILIKE ${pattern}
+       OR p."name" ILIKE ${pattern}
+       OR p."nameRu" ILIKE ${pattern}
+       OR (${asSku} IS NOT NULL AND oi."ozonSku" = ${asSku})
+  `;
+  return rows.map((r) => r.id);
 }
 
 export async function listOrders(params: {
@@ -163,7 +171,7 @@ export async function listOrders(params: {
   skip?: number;
   take?: number;
 }) {
-  const searchFilter = params.search ? buildOrderSearchFilter(params.search) : undefined;
+  const matchingIds = params.search?.trim() ? await findSearchMatchingOrderIds(params.search) : null;
   const where = {
     ...(params.status ? { status: params.status } : {}),
     ...(params.scheme ? { scheme: params.scheme } : {}),
@@ -178,7 +186,7 @@ export async function listOrders(params: {
           },
         }
       : {}),
-    ...(searchFilter ?? {}),
+    ...(matchingIds !== null ? { id: { in: matchingIds } } : {}),
   };
 
   const [orders, total] = await Promise.all([

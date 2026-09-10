@@ -47,6 +47,7 @@ export default async function OrdersPage({
   const pageQuery = new URLSearchParams();
   if (params.status) pageQuery.set("status", params.status);
   if (params.q) pageQuery.set("q", params.q);
+  if (showInvoicedToday) pageQuery.set("invoicedToday", "1");
   const pageQueryPrefix = pageQuery.toString() ? `${pageQuery.toString()}&` : "";
 
   return (

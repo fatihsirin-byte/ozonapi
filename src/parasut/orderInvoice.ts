@@ -71,8 +71,20 @@ async function findOrCreateParasutProduct(offerId: string, name: string, unitPri
     if (product.attributes.name !== name) {
       // Sadece katalog adını günceller — başarısız olsa bile (2026-09-09'da code review'da
       // tespit edildi) gerçek faturanın kesilmesini ENGELLEMEMELİ, bu yüzden ayrı try/catch'te.
+      // NOT: PUT'un Paraşüt'te kısmi mi tam değişim mi olduğu doğrulanamadığı için (aynı
+      // incelemede tespit edildi) sadece "name" değil, bizim de yazma isteğinde kullandığımız
+      // BİLİNEN alanlar birlikte gönderiliyor — ham product.attributes'i olduğu gibi spread etmek
+      // Paraşüt'ün döndürdüğü, bizim yazmamıza izin vermeyen ekstra alanları da taşıyıp isteğin
+      // reddedilmesine yol açabilirdi (2026-09-10'da ikinci bir code review'da tespit edildi).
       try {
-        await updateProduct(product.id, { name });
+        await updateProduct(product.id, {
+          name,
+          code: product.attributes.code,
+          vat_rate: product.attributes.vat_rate,
+          unit: product.attributes.unit,
+          list_price: product.attributes.list_price,
+          currency: product.attributes.currency,
+        });
       } catch (err) {
         console.error(`[parasut] Ürün adı güncellenemedi (product ${product.id}, offerId ${offerId}):`, err);
       }
@@ -115,6 +127,7 @@ export async function createInvoiceForOzonOrder(postingNumber: string) {
       invoiceNo: current.parasutInvoiceNo,
       printUrl: current.parasutPrintUrl,
       alreadyExisted: true,
+      eArchiveFailed: current.parasutEArchiveFailed,
     };
   }
 
@@ -177,10 +190,11 @@ async function doCreateInvoiceForOzonOrder(postingNumber: string) {
   // ÖNEMLİ (2026-09-09'da muhasebeci geri bildirimiyle tespit edildi): "301 - 11/1-a Mal İhracatı"
   // ibaresini fatura notuna KENDİMİZ eklersek, Paraşüt zaten aynı metni (vat_exemption_reason_code
   // sayesinde) "Vergi İstisna Muafiyet Sebebi: 301 - 11/1-a Mal İhracatı" olarak otomatik bastığı
-  // için PDF'te iki kere görünüyor. Bu yüzden fatura notu alanına SADECE ETGB referansı yazılıyor.
-  // ETGB, kargo süreci tamamlanınca Ozon/ASE&GBS tarafından oluşuyor — henüz yoksa boş bırakılır.
+  // için PDF'te iki kere görünüyor. Bu yüzden fatura notu alanına SADECE ETGB + sipariş no yazılıyor
+  // (2026-09-10, kullanıcı talebi: "açıklama kısmına ETGB - Sipariş no yazman lazım"). ETGB, kargo
+  // süreci tamamlanınca Ozon/ASE&GBS tarafından oluşuyor — henüz yoksa numara olmadan yazılır.
   const etgb = await fetchEtgbForOrder(postingNumber, order.orderDate);
-  const invoiceNote = etgb ? `ETGB ${etgb.etgb.number}` : undefined;
+  const invoiceNote = etgb ? `ETGB ${etgb.etgb.number} - ${postingNumber}` : `ETGB - ${postingNumber}`;
 
   const nextSequence = await getNextInvoiceSequence();
   const issueDate = new Date().toISOString().slice(0, 10);

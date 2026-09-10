@@ -1,4 +1,5 @@
 import { parasutPost, parasutGet } from "./client";
+import { prisma } from "../db/prisma";
 
 // KRİTİK ADIM (2026-09-09'da /Users/.../automation-nextjs projesindeki çalışan Paraşüt
 // entegrasyonuna bakılarak bulundu): sadece POST /sales_invoices ile fatura TASLAK kalıyor —
@@ -50,44 +51,69 @@ export async function getEArchivePdfUrl(eArchiveId: string): Promise<string | nu
   return (res.data.attributes.url as string | undefined) ?? null;
 }
 
+// archiveExists=true → Paraşüt'te bu fatura için bir e-Arşiv kaydı GERÇEKTEN VAR (PDF henüz hazır
+// olmasa bile) — bu durumda bir daha ASLA createEArchive çağrılmamalı. archiveExists=false → hiç
+// oluşmadı (ya da retry de başarısız oldu), bir dahaki sefere tekrar denenebilir.
 export type ResolveInvoicePdfResult =
-  | { status: "ready"; pdfUrl: string; recoveredFromFailure: boolean }
-  | { status: "processing" };
+  | { status: "ready"; pdfUrl: string; archiveExists: true }
+  | { status: "processing"; archiveExists: boolean };
 
 // PDF durumunu canlı sorgulayan, hem "Faturayı Aç" butonu hem toplu ZIP indirme tarafından
 // kullanılan tek ortak yer (2026-09-09'da code review'da tespit edilen kod tekrarına karşılık
 // birleştirildi). KRİTİK: allowRetry SADECE fatura kesilirken e-Arşiv adımı gerçekten başarısız
-// olduysa (Order.parasutEArchiveFailed) true gönderilmeli — aksi halde Paraşüt/GİB tarafında hâlâ
-// işlemde olan (ama BİZİM tarafımızda başarıyla kabul edilmiş) bir e-Arşiv'i "yok" sanıp
-// createEArchive'i tekrar çağırmak, aynı fatura için GERÇEK, ikinci bir GİB başvurusu oluşturabilir
-// (2026-09-09'da code review'da tespit edildi — bu proje için özellikle riskli, gerçek belgeler
-// silinemiyor). allowRetry false iken sadece "processing" döner, kullanıcı biraz sonra tekrar dener.
+// olduysa true gönderilmeli — aksi halde Paraşüt/GİB tarafında hâlâ işlemde olan (ama BİZİM
+// tarafımızda başarıyla kabul edilmiş) bir e-Arşiv'i "yok" sanıp createEArchive'i tekrar çağırmak,
+// aynı fatura için GERÇEK, ikinci bir GİB başvurusu oluşturabilir (2026-09-09'da code review'da
+// tespit edildi). Bu fonksiyonun kendisi eşzamanlılığa karşı KORUMASIZ — allowRetry kararını
+// atomik olarak veren resolveInvoicePdfForOrder üzerinden çağrılmalı, doğrudan değil.
 export async function resolveInvoicePdf(invoiceId: string, allowRetry: boolean): Promise<ResolveInvoicePdfResult> {
   let eArchiveId: string | null;
   try {
     eArchiveId = await findActiveEArchiveId(invoiceId);
   } catch {
-    return { status: "processing" };
+    return { status: "processing", archiveExists: false };
   }
 
-  let recoveredFromFailure = false;
   if (!eArchiveId && allowRetry) {
     try {
       const retry = await createEArchive(invoiceId);
       eArchiveId = retry.data.id;
-      recoveredFromFailure = true;
     } catch {
-      return { status: "processing" };
+      return { status: "processing", archiveExists: false };
     }
   }
 
-  if (!eArchiveId) return { status: "processing" };
+  if (!eArchiveId) return { status: "processing", archiveExists: false };
 
   try {
     const pdfUrl = await getEArchivePdfUrl(eArchiveId);
-    if (!pdfUrl) return { status: "processing" };
-    return { status: "ready", pdfUrl, recoveredFromFailure };
+    if (!pdfUrl) return { status: "processing", archiveExists: true };
+    return { status: "ready", pdfUrl, archiveExists: true };
   } catch {
-    return { status: "processing" };
+    return { status: "processing", archiveExists: true };
   }
+}
+
+// resolveInvoicePdf'in eşzamanlılığa GÜVENLİ sarmalayıcısı — asıl "Faturayı Aç" butonu ve toplu
+// ZIP indirme BUNU çağırmalı. Order.parasutEArchiveFailed=true→false geçişini ATOMİK bir
+// updateMany ile "claim" ediyor: aynı anda gelen iki istekten sadece biri true→false geçişini
+// yakalayıp retry hakkı alabiliyor (DB bunu garanti ediyor), diğeri allowRetry=false ile devam
+// eder — bu, iki sekmede aynı siparişi açmak ya da "Tekrar Kontrol Et"e art arda basmak gibi
+// durumlarda GERÇEK bir faturanın iki kez GİB'e gönderilmesini engeller (2026-09-09'da code
+// review'da tespit edildi). Retry hak edildiği halde e-Arşiv oluşturulamazsa (archiveExists=false)
+// bayrak geri "true"ya çevrilir ki bir dahaki kontrolde tekrar denenebilsin.
+export async function resolveInvoicePdfForOrder(postingNumber: string, invoiceId: string): Promise<ResolveInvoicePdfResult> {
+  const claim = await prisma.order.updateMany({
+    where: { postingNumber, parasutEArchiveFailed: true },
+    data: { parasutEArchiveFailed: false },
+  });
+  const allowRetry = claim.count > 0;
+
+  const result = await resolveInvoicePdf(invoiceId, allowRetry);
+
+  if (allowRetry && !result.archiveExists) {
+    await prisma.order.update({ where: { postingNumber }, data: { parasutEArchiveFailed: true } });
+  }
+
+  return result;
 }

@@ -4,7 +4,13 @@ Bu dosya, henüz yapılmamış ama konuşulmuş işleri ve tespit edilip ileri b
 bugları takip etmek için (2026-09-10'da oluşturuldu). Her madde için ne istendiği, neden henüz
 yapılmadığı ve nereden devam edileceği yazılıyor.
 
-## 1. TL satış fiyatı — fatura kesildiği günün kuruyla kilitlenen (YAPILMADI)
+## 1. TL satış fiyatı — fatura kesildiği günün kuruyla kilitlenen (YAPILDI — 2026-09-10)
+
+Aşağıdaki plan aynen uygulandı: `Order.parasutInvoiceFxRate` alanı eklendi (migration
+`20260910110000_add_order_parasut_invoice_fx_rate`), `src/parasut/orderInvoice.ts` fatura
+kesilirken kullanılan kuru bu alana kaydediyor, `app/orders/page.tsx`'te "TL Satış Fiyatı" sütunu
+kesin (₺, hover'da "gerçek fatura kuru") ile tahmini ("~₺", hint rengi, hover'da "henüz fatura
+kesilmedi") değerleri görsel olarak ayırarak gösteriyor.
 
 **İstek:** Siparişler listesine, o siparişin satış tutarının TL karşılığını gösteren bir sütun
 eklenmesi. Kritik nokta: bu TL değeri **fatura kesildiği günün kuruyla sabitlenmeli** — yani

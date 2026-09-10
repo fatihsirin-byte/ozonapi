@@ -70,7 +70,11 @@ export async function resolveInvoicePdf(invoiceId: string, allowRetry: boolean):
   let eArchiveId: string | null;
   try {
     eArchiveId = await findActiveEArchiveId(invoiceId);
-  } catch {
+  } catch (err) {
+    // Hata öncesi burada sessizce yutuluyordu — bir sorun olduğunda (ör. 2026-09-10'da yaşanan
+    // eşzamanlı token isteği hatası) loglarda HİÇBİR iz kalmıyordu, teşhis çok zor oldu. Artık
+    // loglanıyor, sonucu (kullanıcıya "İşleniyor" gösterilmesi) değişmiyor.
+    console.error(`[parasut] findActiveEArchiveId başarısız (invoice ${invoiceId}):`, err);
     return { status: "processing", archiveExists: false };
   }
 
@@ -78,7 +82,8 @@ export async function resolveInvoicePdf(invoiceId: string, allowRetry: boolean):
     try {
       const retry = await createEArchive(invoiceId);
       eArchiveId = retry.data.id;
-    } catch {
+    } catch (err) {
+      console.error(`[parasut] createEArchive (retry) başarısız (invoice ${invoiceId}):`, err);
       return { status: "processing", archiveExists: false };
     }
   }
@@ -89,7 +94,8 @@ export async function resolveInvoicePdf(invoiceId: string, allowRetry: boolean):
     const pdfUrl = await getEArchivePdfUrl(eArchiveId);
     if (!pdfUrl) return { status: "processing", archiveExists: true };
     return { status: "ready", pdfUrl, archiveExists: true };
-  } catch {
+  } catch (err) {
+    console.error(`[parasut] getEArchivePdfUrl başarısız (eArchive ${eArchiveId}, invoice ${invoiceId}):`, err);
     return { status: "processing", archiveExists: true };
   }
 }

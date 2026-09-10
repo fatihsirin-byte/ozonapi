@@ -82,6 +82,7 @@ export default async function OrderDetailPage({
             postingNumber={order.postingNumber}
             initialInvoiceNo={order.parasutInvoiceNo}
             initialPrintUrl={order.parasutPrintUrl}
+            initialConfirmed={order.parasutInvoiceNoConfirmed}
           />
           <Link href="/orders">
             <button className="btn-secondary">← Siparişler</button>

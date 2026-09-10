@@ -240,6 +240,10 @@ async function doCreateInvoiceForOzonOrder(postingNumber: string) {
       parasutPrintUrl: printUrl,
       parasutInvoicedAt: new Date(),
       parasutEArchiveFailed: eArchiveFailed,
+      // Fatura satırları bu kurla TL'ye çevrildi (yukarıda) — TL satış tutarını siparişler
+      // listesinde GERÇEK faturayla birebir eşleşecek şekilde kalıcı göstermek için saklanıyor
+      // (2026-09-10, kullanıcı talebi — bkz. app/orders/page.tsx "TL Satış Fiyatı" sütunu).
+      parasutInvoiceFxRate: rate,
     },
   });
 

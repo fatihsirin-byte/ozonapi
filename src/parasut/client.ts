@@ -54,6 +54,7 @@ interface ParasutTokenResponse {
 // kullanılıyor, dolunca password grant ile yeniden alınıyor (refresh_token akışı henüz
 // eklenmedi — kalıcı depolama gerektirir, ilk sürüm için gereksiz karmaşıklık).
 let cachedToken: { accessToken: string; expiresAt: number } | null = null;
+let inFlightTokenRequest: Promise<string> | null = null;
 
 async function fetchAccessToken(): Promise<string> {
   const config = requireParasutConfig();
@@ -79,11 +80,24 @@ async function fetchAccessToken(): Promise<string> {
   return cachedToken.accessToken;
 }
 
+// ParasutInvoiceButton her sipariş satırı için ayrı ayrı 10 saniyede bir durum kontrolü yapıyor
+// (bkz. app/orders/ParasutInvoiceButton.tsx) — token süresi dolduğunda/boşken bunların hepsi AYNI
+// ANDA burayı çağırabiliyordu, her biri kendi fetchAccessToken() isteğini Paraşüt'e eşzamanlı
+// gönderiyordu. Bu, 2026-09-10'da canlıda çok sayıda sipariş faturalanmışken butonların sonsuza
+// dek "İşleniyor"da takılı kalmasıyla tespit edildi — eşzamanlı password-grant isteklerinin bir
+// kısmı sessizce başarısız oluyordu (hata örtük yutulduğu için loglarda görünmüyordu, bkz.
+// eArchives.ts). Çözüm: aynı anda TEK bir token isteği uçuşta olsun, geri kalan çağıranlar onu
+// beklesin ("single-flight").
 async function getAccessToken(): Promise<string> {
   if (cachedToken && Date.now() < cachedToken.expiresAt) {
     return cachedToken.accessToken;
   }
-  return fetchAccessToken();
+  if (!inFlightTokenRequest) {
+    inFlightTokenRequest = fetchAccessToken().finally(() => {
+      inFlightTokenRequest = null;
+    });
+  }
+  return inFlightTokenRequest;
 }
 
 function createHttpClient(): AxiosInstance {

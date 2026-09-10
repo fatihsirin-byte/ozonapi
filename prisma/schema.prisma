@@ -121,6 +121,11 @@ model Order {
   // "Bugün faturası kesilenler" filtresi (TSİ bazında) için — createdAt/updatedAt başka
   // sebeplerle de değişebildiğinden fatura anını ayrı tutuyoruz (2026-09-09, kullanıcı talebi).
   parasutInvoicedAt DateTime?
+  // Fatura kesilirken kullanılan o günkü USD/TL kuru (bkz. src/parasut/orderInvoice.ts) — TL satış
+  // tutarını GERÇEK faturayla birebir eşleşecek şekilde kalıcı göstermek için (2026-09-10, kullanıcı
+  // talebi). Fatura kesilmemiş ya da bu alan eklenmeden önce kesilmiş siparişlerde null kalır —
+  // o durumda liste ekranı günün CANLI kuruyla tahmini bir TL değeri gösterir (bkz. app/orders/page.tsx).
+  parasutInvoiceFxRate Float?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

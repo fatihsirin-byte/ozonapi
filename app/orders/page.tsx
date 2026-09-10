@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listOrders, computeOrderAmount, computeOrderEstimatedProfit } from "@/modules/orders/orders.service";
 import { getRealShippingUsdByPosting } from "@/modules/finance/pnl-report.service";
+import { getUsdToTryRate } from "@/pricing/fx-rate";
 import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
 import { OrdersToolbar } from "./OrdersToolbar";
 import { OrdersSearchBar } from "./OrdersSearchBar";
@@ -21,6 +22,22 @@ const STATUS_OPTIONS = [
 
 function formatMoney(n: number) {
   return `$${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatTl(n: number) {
+  return `₺${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Gerçek Paraşüt faturasıyla BİREBİR eşleşmesi için, o faturanın kendi hesaplama sırasını birebir
+// tekrarlıyoruz (bkz. src/parasut/orderInvoice.ts: her kalem ÖNCE kendi birim fiyatı TL'ye çevrilip
+// 2 ondalığa yuvarlanıyor, SONRA adetle çarpılıp toplanıyor) — tek seferde
+// "toplam $ tutar × kur" yapmak, kalem başına yuvarlamadan dolayı birkaç kuruş farklı çıkabilirdi
+// (2026-09-10'da code review'da tespit edildi: "birebir aynı" diyen ipucu metniyle çelişirdi).
+function computeInvoiceTlAmount(items: Array<{ price: string; quantity: number }>, rate: number): number {
+  return items.reduce((sum, item) => {
+    const unitPriceTry = Number((Number(item.price) * rate).toFixed(2));
+    return sum + unitPriceTry * item.quantity;
+  }, 0);
 }
 
 function getShipmentDate(rawPayload: unknown): string | null {
@@ -46,7 +63,15 @@ export default async function OrdersPage({
     skip: (page - 1) * 50,
     take: 50,
   });
-  const realShippingByPosting = await getRealShippingUsdByPosting(orders.map((o) => o.postingNumber));
+  // Faturası kesilmemiş (ya da bu sütun eklenmeden önce kesilmiş) siparişlerde tahmini bir TL
+  // değeri gösterebilmek için günün canlı kurunu da çekiyoruz — kesin kurla ("gerçek fatura kuru")
+  // karışmasın diye UI'da ayrı etiketlendiriliyor (bkz. BEKLEYEN-GELISTIRMELER.md #1, 2026-09-10,
+  // kullanıcı talebi). Birbirinden bağımsız oldukları için paralel çekiliyor (2026-09-10'da code
+  // review'da tespit edildi — sırayla beklemek kur isteği yavaşsa gereksiz gecikme ekliyordu).
+  const [realShippingByPosting, liveTryRate] = await Promise.all([
+    getRealShippingUsdByPosting(orders.map((o) => o.postingNumber)),
+    getUsdToTryRate(),
+  ]);
 
   const pageQuery = new URLSearchParams();
   if (params.status) pageQuery.set("status", params.status);
@@ -97,6 +122,9 @@ export default async function OrdersPage({
                 <th style={{ whiteSpace: "nowrap" }}>Kargo Tarihi</th>
                 <th style={{ whiteSpace: "nowrap" }}>Ürün</th>
                 <th style={{ whiteSpace: "nowrap" }}>Tutar</th>
+                <th style={{ whiteSpace: "nowrap" }} title="Fatura kesilmiş siparişlerde o günün gerçek faturasıyla birebir aynı, kesin tutar. Kesilmemişlerde bugünün canlı kuruyla hesaplanan tahmini değer.">
+                  TL Satış Fiyatı
+                </th>
                 <th style={{ whiteSpace: "nowrap" }} title="Satış tutarı - alış maliyeti - tahmini kargo (ağırlıktan) - tahmini Ozon komisyonu/lojistik/banka bedeli">
                   Olası Net Kâr
                 </th>
@@ -150,6 +178,26 @@ export default async function OrdersPage({
                     <td>{formatMoney(computeOrderAmount(o.items))}</td>
                     <td>
                       {(() => {
+                        if (o.parasutInvoiceFxRate != null) {
+                          return (
+                            <span title="Fatura kesildiği günün gerçek kuruyla — Paraşüt faturasındaki tutarla birebir aynı">
+                              {formatTl(computeInvoiceTlAmount(o.items, o.parasutInvoiceFxRate))}
+                            </span>
+                          );
+                        }
+                        const amountUsd = computeOrderAmount(o.items);
+                        if (liveTryRate != null) {
+                          return (
+                            <span className="hint" title="Henüz fatura kesilmedi — bugünün canlı kuruyla TAHMİNİ değer, fatura kesildiğinde kesinleşecek">
+                              ~{formatTl(amountUsd * liveTryRate)}
+                            </span>
+                          );
+                        }
+                        return <span className="hint">-</span>;
+                      })()}
+                    </td>
+                    <td>
+                      {(() => {
                         const profit = computeOrderEstimatedProfit(o.items, realShippingByPosting.get(o.postingNumber));
                         if (profit == null) return <span className="hint">veri yok</span>;
                         return (
@@ -164,6 +212,7 @@ export default async function OrdersPage({
                         postingNumber={o.postingNumber}
                         initialInvoiceNo={o.parasutInvoiceNo}
                         initialPrintUrl={o.parasutPrintUrl}
+                        initialConfirmed={o.parasutInvoiceNoConfirmed}
                       />
                     </td>
                   </tr>

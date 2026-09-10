@@ -7,6 +7,11 @@ interface Props {
   postingNumber: string;
   initialInvoiceNo: string | null;
   initialPrintUrl: string | null;
+  // true ise bu faturanın PDF'i DAHA ÖNCE en az bir kere başarıyla doğrulanmış demektir (bkz.
+  // Order.parasutInvoiceNoConfirmed) — bu durumda sayfa her açıldığında 10 saniyede bir tekrar
+  // tekrar Paraşüt'e sormaya gerek yok, TEK bir kontrol yeterli. Aksi halde (henüz hiç
+  // doğrulanmamış, yeni kesilmiş faturalar) aşağıdaki otomatik yeniden deneme döngüsü çalışır.
+  initialConfirmed?: boolean;
 }
 
 type PdfStatus = "checking" | "ready" | "processing" | "error" | "stalled";
@@ -30,8 +35,15 @@ const MAX_AUTO_CHECKS = 12;
 // devam eder (2026-09-10, kullanıcı talebi + code review'da "hata sonrası otomatik kontrol tamamen
 // duruyor" bulgusuna karşılık; tekrar deneme SADECE gerçekten başarısız olduysa yeni e-Arşiv
 // başvurusu yapar, bkz. src/parasut/eArchives.ts — burası sadece PDF durumunu okur).
-export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialPrintUrl }: Props) {
+export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialPrintUrl, initialConfirmed }: Props) {
   const router = useRouter();
+  // 2026-09-10'da canlıda tespit edildi: onlarca fatura kesilmiş siparişin bulunduğu bir sayfa
+  // açıldığında HEPSİ aynı anda 10 saniyede bir kontrol başlatıyordu — Paraşüt'e giden eşzamanlı
+  // istek yığını (özellikle token isteğinde, bkz. src/parasut/client.ts) bazı kontrollerin sessizce
+  // başarısız olmasına, butonların sonsuza dek "İşleniyor"/"2 dakikadır hazır değil" durumunda
+  // takılı kalmasına yol açtı — halbuki fatura günler önce sorunsuz kesilmişti. Zaten bir kere
+  // doğrulanmış faturalarda artık TEKRARLAYAN otomatik kontrol yapılmıyor, sadece tek seferlik.
+  const retryable = !initialConfirmed;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [invoiceNo, setInvoiceNo] = useState(initialInvoiceNo);
@@ -77,7 +89,12 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
   }, [pdfStatus]);
 
   useEffect(() => {
-    if (!hasInvoice) return;
+    // Zaten doğrulanmış (retryable=false) faturalarda burada HİÇ Paraşüt isteği atılmıyor —
+    // panel linki (printUrl) fatura kesilirken zaten kalıcı olarak kaydedilmişti, sayfa her
+    // yenilendiğinde tekrar sormaya gerek yok (2026-09-10, kullanıcı talebi: "bi kere link
+    // geldikten sonra sakla, her yenilediğimizde kontrol etmesin"). Aşağıdaki render'da bu durumda
+    // doğrudan panelUrl'e giden bir "Faturayı Aç" gösteriliyor.
+    if (!hasInvoice || !retryable) return;
     attemptsRef.current = 0;
     checkPdfStatus();
     const interval = setInterval(() => {
@@ -95,7 +112,7 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
     }, AUTO_CHECK_INTERVAL_MS);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasInvoice, retryTick]);
+  }, [hasInvoice, retryable, retryTick]);
 
   async function handleCreate() {
     if (!confirm("Paraşüt'te bu sipariş için GERÇEK bir satış faturası kesilecek. Onaylıyor musunuz?")) return;
@@ -117,6 +134,19 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
     } finally {
       setLoading(false);
     }
+  }
+
+  // Zaten doğrulanmış faturalarda HİÇ canlı kontrol yapılmadan (yukarıdaki effect), doğrudan
+  // fatura kesilirken kaydedilmiş panel linkine giden bir "Faturayı Aç" gösteriliyor — bu
+  // faturanın PDF'i kesin var, tekrar sormaya gerek yok.
+  if (hasInvoice && !retryable) {
+    return panelUrl ? (
+      <a href={panelUrl} target="_blank" rel="noopener noreferrer">
+        <button className="btn-secondary">Faturayı Aç {invoiceNo ? `(${invoiceNo})` : ""} ↗</button>
+      </a>
+    ) : (
+      <span className="hint">Fatura kesildi{invoiceNo ? ` (${invoiceNo})` : ""}</span>
+    );
   }
 
   if (hasInvoice) {

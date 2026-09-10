@@ -1,5 +1,5 @@
 import { prisma } from "../db/prisma";
-import { getOrderDetail, fetchEtgbForOrder } from "../modules/orders/orders.service";
+import { getOrderDetail } from "../modules/orders/orders.service";
 import { createContact } from "./contacts";
 import { createSalesInvoice, updateSalesInvoiceNote } from "./invoices";
 import { createEArchive } from "./eArchives";
@@ -190,11 +190,10 @@ async function doCreateInvoiceForOzonOrder(postingNumber: string) {
   // ÖNEMLİ (2026-09-09'da muhasebeci geri bildirimiyle tespit edildi): "301 - 11/1-a Mal İhracatı"
   // ibaresini fatura notuna KENDİMİZ eklersek, Paraşüt zaten aynı metni (vat_exemption_reason_code
   // sayesinde) "Vergi İstisna Muafiyet Sebebi: 301 - 11/1-a Mal İhracatı" olarak otomatik bastığı
-  // için PDF'te iki kere görünüyor. Bu yüzden fatura notu alanına SADECE ETGB + sipariş no yazılıyor
-  // (2026-09-10, kullanıcı talebi: "açıklama kısmına ETGB - Sipariş no yazman lazım"). ETGB, kargo
-  // süreci tamamlanınca Ozon/ASE&GBS tarafından oluşuyor — henüz yoksa numara olmadan yazılır.
-  const etgb = await fetchEtgbForOrder(postingNumber, order.orderDate);
-  const invoiceNote = etgb ? `ETGB ${etgb.etgb.number} - ${postingNumber}` : `ETGB - ${postingNumber}`;
+  // için PDF'te iki kere görünüyor. Bu yüzden fatura notu alanına SADECE bu sabit metin yazılıyor
+  // (2026-09-10, kullanıcı talebi: gerçek ETGB numarası DEĞİL, "ETGB - Sipariş no" formatında
+  // düz metin — ETGB numarasını fatura kesilirken ayrıca çekmeye gerek yok).
+  const invoiceNote = `ETGB - ${postingNumber}`;
 
   const nextSequence = await getNextInvoiceSequence();
   const issueDate = new Date().toISOString().slice(0, 10);

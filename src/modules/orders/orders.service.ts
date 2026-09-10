@@ -2,6 +2,7 @@ import { prisma } from "../../db/prisma";
 import { listFbsPostings, type OzonFbsPosting } from "../../ozon/orders";
 import { getProductAttributes } from "../../ozon/products";
 import { importFromOzon, syncMissingProductsFromOzon } from "../products/products.service";
+import { computePriceBreakdown } from "../../pricing/formula";
 import {
   uploadInvoiceFile,
   createOrUpdateInvoice,
@@ -129,6 +130,48 @@ export function computeOrderCost(items: Array<{ quantity: number; product: { cos
   return total;
 }
 
+interface EstimatedProfitItem {
+  price: string;
+  quantity: number;
+  product: {
+    costPrice: string | null;
+    weightGrams: number | null;
+    cargoWeightGrams: number | null;
+    widthCm: number | null;
+    heightCm: number | null;
+    depthCm: number | null;
+    heavyPackaging: boolean;
+  } | null;
+}
+
+// Siparişler listesinde "Olası Kâr/Zarar" sütunu için (2026-09-10, kullanıcı talebi: "tahmini
+// ağırlıktan tahmini kargo, komisyon vs. bunlardan doğan tahmini kar zararı"). Sipariş detay
+// sayfasındaki basit "satış - alış - tahmini kargo" hesabından FARKLI olarak, "Fiyat
+// Hesaplayıcı"nın da kullandığı computePriceBreakdown ile aynı formülü (ağırlık paketleme payı +
+// kademeli kargo tarifesi + Ozon komisyonu + lojistik hizmet bedeli + banka işlem ücreti) satılan
+// GERÇEK fiyat üzerinden kalem kalem uyguluyor — komisyon burada dahil, orada değil.
+export function computeOrderEstimatedProfit(items: EstimatedProfitItem[]): number | null {
+  let total = 0;
+  for (const item of items) {
+    const product = item.product;
+    if (!product?.costPrice) return null;
+    // computePriceBreakdown ağırlık yoksa kargoyu sessizce $0 sayıyor (bkz. formula.ts) — burada
+    // bunu "bilinmiyor" (null) olarak işaretliyoruz, aksi halde kâr olduğundan yüksek görünür.
+    if (product.weightGrams == null && product.cargoWeightGrams == null) return null;
+    const breakdown = computePriceBreakdown(
+      product.costPrice,
+      product.weightGrams,
+      { widthCm: product.widthCm, heightCm: product.heightCm, depthCm: product.depthCm },
+      Number(item.price),
+      product.heavyPackaging,
+      product.cargoWeightGrams,
+    );
+    if (!breakdown) return null;
+    total += breakdown.profitUsd * item.quantity;
+  }
+  return total;
+}
+
 // Sipariş arama kutusu (2026-09-09, kullanıcı talebi): müşteri adı, Ozon sipariş no, ürün SKU'su
 // (Ozon'un numerik ürün kimliği), ürün adı ve offerId'nin hepsinde birden arar. NOT: sistemde
 // hiçbir yerde gerçek "barkod" (EAN/UPC) verisi saklanmıyor — Ozon'un posting API'sinde de böyle
@@ -141,7 +184,11 @@ export function computeOrderCost(items: Array<{ quantity: number; product: { cos
 // da Postgres bigint taşmasını (ve sayfanın çökmesini) önlüyor (aynı incelemede tespit edildi).
 async function findSearchMatchingOrderIds(search: string): Promise<string[]> {
   const trimmed = search.trim();
-  const pattern = `%${trimmed}%`;
+  // ILIKE'ın kendi joker karakterlerini (%, _) ve kaçış karakterini (\) literal arıyormuş gibi
+  // kaçırıyoruz — aksi halde offerId/SKU'larda yaygın olan "_" tek karakterlik joker gibi
+  // davranıp alakasız sonuçlar da eşleşiyordu (2026-09-10'da code review'da tespit edildi).
+  const escaped = trimmed.replace(/[\\%_]/g, "\\$&");
+  const pattern = `%${escaped}%`;
   const asSku = /^\d{1,18}$/.test(trimmed) ? BigInt(trimmed) : null;
 
   const rows = await prisma.$queryRaw<{ id: string }[]>`

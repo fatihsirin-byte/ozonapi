@@ -9,9 +9,15 @@ interface Props {
   initialPrintUrl: string | null;
 }
 
-type PdfStatus = "checking" | "ready" | "processing" | "error";
+type PdfStatus = "checking" | "ready" | "processing" | "error" | "stalled";
 
 const AUTO_CHECK_INTERVAL_MS = 10_000;
+// Sınırsız otomatik yeniden deneme, Paraşüt'e (rate limit'e açık, bkz. src/parasut/client.ts) ve
+// e-Arşiv yeniden deneme mekanizmasına (bkz. src/parasut/eArchives.ts) sürekli yük bindirir —
+// 2 dakika (12 deneme) sonra durup kullanıcıya elle "Tekrar Dene" seçeneği sunuluyor; bu hem
+// kalıcı bir sorunda kullanıcıya haber verilmesini sağlıyor hem gereksiz sürekli isteği kesiyor
+// (2026-09-10'da code review'da tespit edildi).
+const MAX_AUTO_CHECKS = 12;
 
 // Paraşüt'te GERÇEK bir satış faturası oluşturur — geri alınamaz, bu yüzden tıklamadan önce
 // onay isteniyor. Kesildikten sonra buton "Faturayı Aç" linkine dönüşür (2026-09-09, kullanıcı
@@ -20,8 +26,8 @@ const AUTO_CHECK_INTERVAL_MS = 10_000;
 // hazır olmuyor (2026-09-09'da canlıda "ActiveRecord::RecordNotFound" hatasıyla tespit edildi).
 // Bu yüzden durumu canlı sorguluyoruz; hazır olana kadar buton devre dışı "İşleniyor..." gösterir
 // ve arkada TEK bir interval ile 10 saniyede bir kendiliğinden tekrar kontrol eder — geçici bir
-// ağ hatası (pdfStatus "error" olsa da) kontrolü kalıcı olarak DURDURMAZ, sadece "ready" olunca
-// durur (2026-09-10, kullanıcı talebi + code review'da "hata sonrası otomatik kontrol tamamen
+// ağ hatası (pdfStatus "error" olsa da) kontrolü kalıcı olarak DURDURMAZ, MAX_AUTO_CHECKS'e kadar
+// devam eder (2026-09-10, kullanıcı talebi + code review'da "hata sonrası otomatik kontrol tamamen
 // duruyor" bulgusuna karşılık; tekrar deneme SADECE gerçekten başarısız olduysa yeni e-Arşiv
 // başvurusu yapar, bkz. src/parasut/eArchives.ts — burası sadece PDF durumunu okur).
 export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialPrintUrl }: Props) {
@@ -34,6 +40,7 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
   const [pdfStatus, setPdfStatus] = useState<PdfStatus>("checking");
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const statusRef = useRef<PdfStatus>("checking");
+  const attemptsRef = useRef(0);
 
   async function checkPdfStatus() {
     setPdfStatus((prev) => (prev === "ready" ? prev : "checking"));
@@ -51,16 +58,28 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
     }
   }
 
+  function manualRetry() {
+    attemptsRef.current = 0;
+    checkPdfStatus();
+  }
+
   useEffect(() => {
     statusRef.current = pdfStatus;
   }, [pdfStatus]);
 
   useEffect(() => {
     if (!hasInvoice) return;
+    attemptsRef.current = 0;
     checkPdfStatus();
     const interval = setInterval(() => {
       if (statusRef.current === "ready") {
         clearInterval(interval);
+        return;
+      }
+      attemptsRef.current += 1;
+      if (attemptsRef.current >= MAX_AUTO_CHECKS) {
+        clearInterval(interval);
+        setPdfStatus("stalled");
         return;
       }
       checkPdfStatus();
@@ -108,7 +127,13 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
         {pdfStatus === "error" && (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span className="hint" style={{ color: "var(--danger)" }}>Durum kontrol edilemedi</span>
-            <button className="btn-secondary" onClick={checkPdfStatus}>Tekrar Dene</button>
+            <button className="btn-secondary" onClick={manualRetry}>Tekrar Dene</button>
+          </div>
+        )}
+        {pdfStatus === "stalled" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="hint" style={{ color: "var(--danger)" }}>2 dakikadır hazır değil — Paraşüt panelinden kontrol edin</span>
+            <button className="btn-secondary" onClick={manualRetry}>Tekrar Dene</button>
           </div>
         )}
         {/* PDF henüz hazır değilse (ya da hiç hazır olmayacaksa) faturayı Paraşüt panelinden

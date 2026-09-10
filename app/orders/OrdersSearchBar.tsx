@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 // Müşteri adı, Ozon sipariş no, ürün SKU'su, ürün adı ve offerId'de arar (2026-09-09, kullanıcı
-// talebi) — bkz. src/modules/orders/orders.service.ts (buildOrderSearchFilter). Gerçek "barkod"
-// (EAN/UPC) verisi sistemde hiç saklanmadığı için o alan kapsam dışı.
+// talebi) — bkz. src/modules/orders/orders.service.ts (findSearchMatchingOrderIds). Gerçek
+// "barkod" (EAN/UPC) verisi sistemde hiç saklanmadığı için o alan kapsam dışı.
 export function OrdersSearchBar() {
   const router = useRouter();
   const searchParams = useSearchParams();

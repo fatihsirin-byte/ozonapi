@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listOrders, computeOrderAmount, computeOrderCost } from "@/modules/orders/orders.service";
+import { listOrders, computeOrderAmount, computeOrderCost, computeOrderEstimatedProfit } from "@/modules/orders/orders.service";
 import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
 import { OrdersToolbar } from "./OrdersToolbar";
 import { OrdersSearchBar } from "./OrdersSearchBar";
@@ -96,6 +96,9 @@ export default async function OrdersPage({
                 <th style={{ whiteSpace: "nowrap" }} title="Satış tutarı - alış maliyeti (Ozon komisyon/kargo kesintileri hariç)">
                   Brüt Kâr
                 </th>
+                <th style={{ whiteSpace: "nowrap" }} title="Satış tutarı - alış maliyeti - tahmini kargo (ağırlıktan) - tahmini Ozon komisyonu/lojistik/banka bedeli">
+                  Olası Kâr/Zarar
+                </th>
                 <th style={{ whiteSpace: "nowrap" }}>Fatura</th>
               </tr>
             </thead>
@@ -149,6 +152,17 @@ export default async function OrdersPage({
                         const cost = computeOrderCost(o.items);
                         if (cost == null) return <span className="hint">alış fiyatı yok</span>;
                         return formatMoney(computeOrderAmount(o.items) - cost);
+                      })()}
+                    </td>
+                    <td>
+                      {(() => {
+                        const profit = computeOrderEstimatedProfit(o.items);
+                        if (profit == null) return <span className="hint">veri yok</span>;
+                        return (
+                          <span style={{ color: profit >= 0 ? "var(--success)" : "var(--danger)" }}>
+                            {formatMoney(profit)}
+                          </span>
+                        );
                       })()}
                     </td>
                     <td>

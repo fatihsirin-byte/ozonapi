@@ -41,6 +41,12 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const statusRef = useRef<PdfStatus>("checking");
   const attemptsRef = useRef(0);
+  // "Tekrar Dene" tıklanınca hem elle bir kontrol yapılsın hem de aşağıdaki otomatik kontrol
+  // interval'ı SIFIRDAN kurulsun diye — sadece checkPdfStatus() çağırmak yetmiyordu, çünkü
+  // interval yalnızca [hasInvoice] değiştiğinde kuruluyordu ve MAX_AUTO_CHECKS'e ulaşıp bir kez
+  // duran interval bir daha asla yeniden başlamıyordu (2026-09-10'da code review'da tespit edildi
+  // — kullanıcı "stalled" durumundan sonra sonsuza dek devre dışı bir butonda kalabiliyordu).
+  const [retryTick, setRetryTick] = useState(0);
 
   async function checkPdfStatus() {
     setPdfStatus((prev) => (prev === "ready" ? prev : "checking"));
@@ -59,8 +65,7 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
   }
 
   function manualRetry() {
-    attemptsRef.current = 0;
-    checkPdfStatus();
+    setRetryTick((n) => n + 1);
   }
 
   useEffect(() => {
@@ -86,7 +91,7 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
     }, AUTO_CHECK_INTERVAL_MS);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasInvoice]);
+  }, [hasInvoice, retryTick]);
 
   async function handleCreate() {
     if (!confirm("Paraşüt'te bu sipariş için GERÇEK bir satış faturası kesilecek. Onaylıyor musunuz?")) return;

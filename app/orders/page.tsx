@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { listOrders, computeOrderAmount, computeOrderCost, computeOrderEstimatedProfit } from "@/modules/orders/orders.service";
+import { listOrders, computeOrderAmount, computeOrderEstimatedProfit } from "@/modules/orders/orders.service";
+import { getRealShippingUsdByPosting } from "@/modules/finance/pnl-report.service";
 import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
 import { OrdersToolbar } from "./OrdersToolbar";
 import { OrdersSearchBar } from "./OrdersSearchBar";
@@ -43,6 +44,7 @@ export default async function OrdersPage({
     skip: (page - 1) * 50,
     take: 50,
   });
+  const realShippingByPosting = await getRealShippingUsdByPosting(orders.map((o) => o.postingNumber));
 
   const pageQuery = new URLSearchParams();
   if (params.status) pageQuery.set("status", params.status);
@@ -93,11 +95,8 @@ export default async function OrdersPage({
                 <th style={{ whiteSpace: "nowrap" }}>Kargo Tarihi</th>
                 <th style={{ whiteSpace: "nowrap" }}>Ürün</th>
                 <th style={{ whiteSpace: "nowrap" }}>Tutar</th>
-                <th style={{ whiteSpace: "nowrap" }} title="Satış tutarı - alış maliyeti (Ozon komisyon/kargo kesintileri hariç)">
-                  Brüt Kâr
-                </th>
                 <th style={{ whiteSpace: "nowrap" }} title="Satış tutarı - alış maliyeti - tahmini kargo (ağırlıktan) - tahmini Ozon komisyonu/lojistik/banka bedeli">
-                  Olası Kâr/Zarar
+                  Olası Net Kâr
                 </th>
                 <th style={{ whiteSpace: "nowrap" }}>Fatura</th>
               </tr>
@@ -149,14 +148,7 @@ export default async function OrdersPage({
                     <td>{formatMoney(computeOrderAmount(o.items))}</td>
                     <td>
                       {(() => {
-                        const cost = computeOrderCost(o.items);
-                        if (cost == null) return <span className="hint">alış fiyatı yok</span>;
-                        return formatMoney(computeOrderAmount(o.items) - cost);
-                      })()}
-                    </td>
-                    <td>
-                      {(() => {
-                        const profit = computeOrderEstimatedProfit(o.items);
+                        const profit = computeOrderEstimatedProfit(o.items, realShippingByPosting.get(o.postingNumber));
                         if (profit == null) return <span className="hint">veri yok</span>;
                         return (
                           <span style={{ color: profit >= 0 ? "var(--success)" : "var(--danger)" }}>

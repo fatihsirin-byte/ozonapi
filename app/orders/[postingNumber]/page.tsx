@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getOrderDetail, computeOrderAmount, computeOrderCost } from "@/modules/orders/orders.service";
+import { getOrderDetail, computeOrderAmount, computeOrderCost, computeOrderEstimatedProfit } from "@/modules/orders/orders.service";
 import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
 import { OzonInvoicePanel } from "./OzonInvoicePanel";
 import { EtgbInfo } from "./EtgbInfo";
@@ -9,7 +9,8 @@ import { transliterateRussian } from "@/utils/transliterate";
 import { LabelDownloadButton } from "./LabelDownloadButton";
 import { RealWeightInput } from "./RealWeightInput";
 import { ParasutInvoiceButton } from "../ParasutInvoiceButton";
-import { estimateShippingForWeight, effectiveCargoWeightGrams } from "@/modules/finance/pnl-report.service";
+import { estimateShippingForWeight, effectiveCargoWeightGrams, sumRealShippingRub } from "@/modules/finance/pnl-report.service";
+import { getUsdToRubRate } from "@/pricing/fx-rate";
 
 export const dynamic = "force-dynamic";
 
@@ -79,7 +80,17 @@ export default async function OrderDetailPage({
   }, 0);
   const hasWeightData = order.items.every((item) => effectiveCargoWeightGrams(item.product) != null);
   const estimatedShippingUsd = hasWeightData && totalWeightForShipping > 0 ? estimateShippingForWeight(totalWeightForShipping) : null;
-  const possibleNetProfit = orderCost != null && estimatedShippingUsd != null ? orderAmount - orderCost - estimatedShippingUsd : null;
+
+  // Ozon bu siparişin kargo kesintisini GERÇEKTEN işlediyse (teslimattan sonra) tahmini ağırlık
+  // bazlı kargo yerine gerçek tutar kullanılır (2026-09-10, kullanıcı talebi). Siparişler
+  // listesindeki "Olası Net Kâr" sütunuyla AYNI fonksiyon — eskiden burada sadece satış-alış-kargo
+  // hesaplanıyordu (komisyon/lojistik/banka bedeli hariç), liste ise komisyonu da düşüyordu; aynı
+  // sipariş için iki farklı sayfada FARKLI rakamlar görünüyordu (2026-09-10'da code review'da
+  // tespit edildi — kullanıcı için kafa karıştırıcı, "uygulama bozuk" izlenimi verir).
+  const usdToRubRate = await getUsdToRubRate();
+  const realShippingRub = sumRealShippingRub(order.transactions);
+  const realShippingUsd = realShippingRub != null && usdToRubRate ? realShippingRub / usdToRubRate : null;
+  const possibleNetProfit = computeOrderEstimatedProfit(order.items, realShippingUsd);
 
   return (
     <div className="page-wide">

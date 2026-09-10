@@ -123,9 +123,36 @@ export function effectiveCargoWeightGrams(product: {
 // oluşabiliyor ama deliveryCharge o satırlarda 0 kalıyor (bkz. finance.service.ts açıklaması) —
 // bu yüzden "veri var mı" kontrolü satır varlığına değil, toplamın 0'dan büyük olmasına bakıyor;
 // aksi halde henüz kargo kesintisi işlenmemiş siparişler yanlışlıkla "gerçek veri var" sayılırdı.
-function sumRealShippingRub(transactions: Array<{ deliveryCharge: number | null }>): number | null {
+export function sumRealShippingRub(transactions: Array<{ deliveryCharge: number | null }>): number | null {
   const total = transactions.reduce((sum, t) => sum + Math.abs(t.deliveryCharge ?? 0), 0);
   return total > 0 ? total : null;
+}
+
+// Siparişler listesindeki "Olası Net Kâr" hesabı için — Ozon gerçek kargo kesintisini işlediyse
+// (teslimattan sonra) tahmini yerine bunu kullanır (2026-09-10, kullanıcı talebi: "faturası
+// kesildiyse ... bunlardan yararlan kargo fiyatında"). bkz. src/modules/orders/orders.service.ts
+// computeOrderEstimatedProfit.
+export async function getRealShippingUsdByPosting(postingNumbers: string[]): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (postingNumbers.length === 0) return result;
+
+  const [transactions, usdToRubRate] = await Promise.all([
+    prisma.financeTransaction.findMany({ where: { postingNumber: { in: postingNumbers } } }),
+    getUsdToRubRate(),
+  ]);
+  if (!usdToRubRate) return result;
+
+  const byPosting = new Map<string, typeof transactions>();
+  for (const t of transactions) {
+    const list = byPosting.get(t.postingNumber) ?? [];
+    list.push(t);
+    byPosting.set(t.postingNumber, list);
+  }
+  for (const [postingNumber, txs] of byPosting) {
+    const rub = sumRealShippingRub(txs);
+    if (rub != null) result.set(postingNumber, rub / usdToRubRate);
+  }
+  return result;
 }
 
 // DB'de o an ne kadar sipariş geçmişi varsa hepsini kalem bazında döner (canlı Ozon

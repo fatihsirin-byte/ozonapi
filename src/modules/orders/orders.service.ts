@@ -144,20 +144,24 @@ interface EstimatedProfitItem {
   } | null;
 }
 
-// Siparişler listesinde "Olası Kâr/Zarar" sütunu için (2026-09-10, kullanıcı talebi: "tahmini
-// ağırlıktan tahmini kargo, komisyon vs. bunlardan doğan tahmini kar zararı"). Sipariş detay
-// sayfasındaki basit "satış - alış - tahmini kargo" hesabından FARKLI olarak, "Fiyat
-// Hesaplayıcı"nın da kullandığı computePriceBreakdown ile aynı formülü (ağırlık paketleme payı +
-// kademeli kargo tarifesi + Ozon komisyonu + lojistik hizmet bedeli + banka işlem ücreti) satılan
-// GERÇEK fiyat üzerinden kalem kalem uyguluyor — komisyon burada dahil, orada değil.
-export function computeOrderEstimatedProfit(items: EstimatedProfitItem[]): number | null {
-  let total = 0;
+// Siparişler listesinde "Olası Net Kâr" sütunu için (2026-09-10, kullanıcı talebi: "tahmini
+// ağırlıktan tahmini kargo, komisyon vs."). "Fiyat Hesaplayıcı"nın da kullandığı
+// computePriceBreakdown ile aynı formülü (ağırlık paketleme payı + kademeli kargo tarifesi + Ozon
+// komisyonu + lojistik hizmet bedeli + banka işlem ücreti) satılan GERÇEK fiyat üzerinden kalem
+// kalem uyguluyor. Ozon bu siparişin kargo kesintisini GERÇEKTEN işlediyse (realShippingUsd —
+// bkz. pnl-report.service.ts getRealShippingUsdByPosting), tahmini ağırlık bazlı kargo yerine o
+// kullanılır (2026-09-10, kullanıcı talebi: "faturası kesildiyse ... bunlardan yararlan kargo
+// fiyatında") — komisyon/lojistik/banka bedeli her zaman satış fiyatı üzerinden hesaplanmaya devam eder.
+export function computeOrderEstimatedProfit(items: EstimatedProfitItem[], realShippingUsd?: number | null): number | null {
+  let totalBeforeShipping = 0;
+  let totalEstimatedShipping = 0;
   for (const item of items) {
     const product = item.product;
     if (!product?.costPrice) return null;
-    // computePriceBreakdown ağırlık yoksa kargoyu sessizce $0 sayıyor (bkz. formula.ts) — burada
-    // bunu "bilinmiyor" (null) olarak işaretliyoruz, aksi halde kâr olduğundan yüksek görünür.
-    if (product.weightGrams == null && product.cargoWeightGrams == null) return null;
+    // computePriceBreakdown ağırlık yoksa kargoyu sessizce $0 sayıyor (bkz. formula.ts) — gerçek
+    // kargo verisi de yoksa burada "bilinmiyor" (null) olarak işaretliyoruz, aksi halde kâr
+    // olduğundan yüksek görünür. Gerçek kargo verisi VARSA ağırlık eksikliği önemli değil.
+    if (realShippingUsd == null && product.weightGrams == null && product.cargoWeightGrams == null) return null;
     const breakdown = computePriceBreakdown(
       product.costPrice,
       product.weightGrams,
@@ -167,9 +171,10 @@ export function computeOrderEstimatedProfit(items: EstimatedProfitItem[]): numbe
       product.cargoWeightGrams,
     );
     if (!breakdown) return null;
-    total += breakdown.profitUsd * item.quantity;
+    totalBeforeShipping += (breakdown.profitUsd + breakdown.shippingUsd) * item.quantity;
+    totalEstimatedShipping += breakdown.shippingUsd * item.quantity;
   }
-  return total;
+  return totalBeforeShipping - (realShippingUsd ?? totalEstimatedShipping);
 }
 
 // Sipariş arama kutusu (2026-09-09, kullanıcı talebi): müşteri adı, Ozon sipariş no, ürün SKU'su
@@ -189,6 +194,10 @@ async function findSearchMatchingOrderIds(search: string): Promise<string[]> {
   // davranıp alakasız sonuçlar da eşleşiyordu (2026-09-10'da code review'da tespit edildi).
   const escaped = trimmed.replace(/[\\%_]/g, "\\$&");
   const pattern = `%${escaped}%`;
+  // asSku metin dışı bir arama için null olabiliyor — Postgres, parametre NULL geldiğinde
+  // "ozonSku" sütununun tipini (bigint) çıkaramıyor ve "could not determine data type of
+  // parameter" hatasıyla çöküyordu (2026-09-10'da canlıda arama yapılınca tespit edildi) —
+  // bu yüzden aşağıda her iki kullanımda da ::bigint ile açıkça belirtiliyor.
   const asSku = /^\d{1,18}$/.test(trimmed) ? BigInt(trimmed) : null;
 
   const rows = await prisma.$queryRaw<{ id: string }[]>`
@@ -202,7 +211,7 @@ async function findSearchMatchingOrderIds(search: string): Promise<string[]> {
        OR oi."offerId" ILIKE ${pattern}
        OR p."name" ILIKE ${pattern}
        OR p."nameRu" ILIKE ${pattern}
-       OR (${asSku} IS NOT NULL AND oi."ozonSku" = ${asSku})
+       OR (${asSku}::bigint IS NOT NULL AND oi."ozonSku" = ${asSku}::bigint)
   `;
   return rows.map((r) => r.id);
 }

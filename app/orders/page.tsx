@@ -6,6 +6,7 @@ import {
   getOrderFilterCounts,
   findSearchMatchingOrderIds,
   getShipmentDelayInfo,
+  getWeightSplitWarning,
 } from "@/modules/orders/orders.service";
 import { getRealShippingAndFeesUsdByPosting } from "@/modules/finance/pnl-report.service";
 import { getUsdToTryRate } from "@/pricing/fx-rate";
@@ -17,6 +18,9 @@ import { PageLinkPagination } from "./PageLinkPagination";
 import { ParasutInvoiceButton } from "./ParasutInvoiceButton";
 import { InvoicedTodayZipButton } from "./InvoicedTodayZipButton";
 import { translateOrderStatus } from "@/utils/orderStatus";
+import { BulkShipProvider } from "./BulkShipContext";
+import { BulkShipBar } from "./BulkShipBar";
+import { BulkCheckbox } from "./BulkCheckbox";
 
 export const dynamic = "force-dynamic";
 
@@ -147,6 +151,15 @@ export default async function OrdersPage({
     ...(showDelayed ? { delayed: "1" } : {}),
   });
   const pageQueryPrefix = currentQuery ? `${currentQuery}&` : "";
+  // Filtre/arama/sayfa DEĞİŞTİĞİNDE toplu paketleme seçimi (BulkShipProvider'ın içindeki state)
+  // SIFIRLANMALI — aksi halde kullanıcı bir filtrede birkaç sipariş seçip başka bir sekmeye/sayfaya
+  // geçtiğinde, artık ekranda hiç görünmeyen o eski seçimler sessizce seçili kalır ve "Toplu
+  // Paketle" dendiğinde GERÇEK, geri alınamaz Ozon istekleri kullanıcının o an görmediği siparişlere
+  // de gider (2026-09-11'de code review'da tespit edildi: aynı /orders rotası içindeki client-side
+  // gezinmede React, aynı ağaç konumundaki BulkShipProvider'ı yeniden BAĞLAMIYOR, state korunuyordu).
+  // React'e "bu farklı bir görünüm" dedirtmenin standart yolu key değiştirmek — bu, provider'ı
+  // TAMAMEN yeniden bağlar (remount) ve state'i sıfırlar.
+  const selectionKey = `${currentQuery}|page=${page}`;
 
   return (
     <div className="page-wide">
@@ -159,6 +172,8 @@ export default async function OrdersPage({
         <OrdersSearchBar />
       </div>
 
+      <BulkShipProvider key={selectionKey}>
+      <BulkShipBar />
       <div className="card" style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <Link href={filterHref({})}>
           <button className={`btn-secondary${!params.status && !showInvoicedToday && !showDelayed ? " active" : ""}`}>
@@ -207,6 +222,7 @@ export default async function OrdersPage({
           <table>
             <thead>
               <tr>
+                <th style={{ whiteSpace: "nowrap" }} title="Toplu paketleme için seçim — sadece 'Paketleme Bekliyor' durumundaki siparişlerde çıkar">Seç</th>
                 <th style={{ whiteSpace: "nowrap" }}>Posting No</th>
                 <th style={{ whiteSpace: "nowrap" }}>Durum</th>
                 <th style={{ whiteSpace: "nowrap" }}>Kabul Tarihi</th>
@@ -226,11 +242,24 @@ export default async function OrdersPage({
               {orders.map((o) => {
                 const shipmentDate = getShipmentDate(o.rawPayload);
                 const delay = getShipmentDelayInfo(o);
+                const canBulkShip = o.status === "awaiting_packaging" && o.shipClaimedAt == null;
+                const weightWarning = getWeightSplitWarning(o);
+                const totalQuantity = o.items.reduce((sum, item) => sum + item.quantity, 0);
                 return (
                   <tr key={o.id}>
                     <td>
+                      {canBulkShip && (
+                        <BulkCheckbox postingNumber={o.postingNumber} totalQuantity={totalQuantity} weightWarning={weightWarning} />
+                      )}
+                    </td>
+                    <td>
                       <Link href={`/orders/${o.postingNumber}`}>{o.postingNumber}</Link>
                       <div className="hint">{o.scheme}</div>
+                      {weightWarning && (
+                        <div className="hint" style={{ color: "var(--danger)" }} title="500g altı depo + birden fazla farklı ürün">
+                          ⚠ 500g uyarısı
+                        </div>
+                      )}
                     </td>
                     <td>
                       <span className="badge pending">{translateOrderStatus(o.status)}</span>
@@ -333,6 +362,7 @@ export default async function OrdersPage({
           />
         )}
       </div>
+      </BulkShipProvider>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { prisma } from "../../db/prisma";
 import { listFbsPostings, getFbsPosting, shipFbsPosting, type OzonFbsPosting } from "../../ozon/orders";
 import { getProductAttributes } from "../../ozon/products";
 import { OzonApiError } from "../../ozon/client";
+import { WAREHOUSE_UNDER_500G } from "../../ozon/warehouses";
 import { importFromOzon, syncMissingProductsFromOzon } from "../products/products.service";
 import { computePriceBreakdown } from "../../pricing/formula";
 import { effectiveCargoWeightGrams, estimateShippingForWeight } from "../finance/pnl-report.service";
@@ -316,6 +317,23 @@ export function getShipmentDelayInfo(order: { status: string; rawPayload: unknow
   const diffMs = Date.now() - shipmentDeadline.getTime();
   if (diffMs <= 0) return { isDelayed: false, daysLate: 0, shipmentDeadline };
   return { isDelayed: true, daysLate: Math.floor(diffMs / (24 * 60 * 60 * 1000)), shipmentDeadline };
+}
+
+// Ozon, stok bildirirken ağırlığa göre İKİ ayrı depoya yönlendiriyor (bkz. src/ozon/warehouses.ts,
+// "Cekmekoy-500gr altı" / "cekmeköy 501g üstü") — bir sipariş "500g altı" deposundan geldiyse, o
+// üründeki ağırlık TEK BAŞINA 500g altı kabul edilerek o rotaya girmiş demektir. Ama siparişte
+// BİRDEN ÇOK FARKLI ürün varsa (her biri kendi başına 500g altı olsa bile), hepsi TEK kutuda
+// paketlenirse toplam ağırlık 500g'ı geçip bu rotanın kaldıramayacağı bir pakete dönüşebilir —
+// bu da gerçek bir teslimat sorununa yol açabiliyor (bkz. warehouses.ts'teki "bölgenize teslim
+// edilmiyor" notu, aynı kök sorun). "501g üstü" deposundan gelen siparişlerde bu risk zaten yok,
+// o rota daha ağır paketler için tasarlanmış (2026-09-11, kullanıcı talebi: "sipariş lojistik
+// deposu 500g altı ise ve birden çok ürün varsa... uyarı göstersin").
+export function getWeightSplitWarning(order: { rawPayload: unknown; items: Array<{ offerId: string }> }): boolean {
+  const distinctProducts = new Set(order.items.map((i) => i.offerId)).size;
+  if (distinctProducts <= 1) return false;
+  const warehouseId = (order.rawPayload as { analytics_data?: { warehouse_id?: number } } | null)?.analytics_data
+    ?.warehouse_id;
+  return warehouseId === WAREHOUSE_UNDER_500G;
 }
 
 export async function listOrders(params: {

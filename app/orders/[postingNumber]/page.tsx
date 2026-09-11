@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getOrderDetail, computeOrderAmount, computeOrderCost, computeOrderEstimatedProfit, getShipmentDelayInfo } from "@/modules/orders/orders.service";
+import { getOrderDetail, computeOrderAmount, computeOrderCost, computeOrderEstimatedProfit, getShipmentDelayInfo, getWeightSplitWarning } from "@/modules/orders/orders.service";
 import { productPath } from "@/utils/decodeOfferId";
 import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
 import { CopyableField } from "./CopyableField";
@@ -79,6 +79,7 @@ export default async function OrderDetailPage({
   const realFeesUsd = realFeesRub != null && usdToRubRate ? realFeesRub / usdToRubRate : null;
   const possibleNetProfit = computeOrderEstimatedProfit(order.items, realShippingUsd, realFeesUsd);
   const shipmentDelay = getShipmentDelayInfo(order);
+  const weightWarning = getWeightSplitWarning(order);
 
   return (
     <div className="page-wide">
@@ -90,6 +91,7 @@ export default async function OrderDetailPage({
               postingNumber={order.postingNumber}
               totalQuantity={order.items.reduce((sum, item) => sum + item.quantity, 0)}
               locked={order.shipClaimedAt != null}
+              weightWarning={weightWarning}
             />
           )}
           <LabelDownloadButton postingNumber={order.postingNumber} />

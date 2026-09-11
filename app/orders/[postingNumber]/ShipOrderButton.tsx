@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LabelDownloadButton } from "./LabelDownloadButton";
+import { WEIGHT_WARNING_TEXT } from "../weightWarningText";
+import { shipPosting } from "../shipPosting";
 
 // Ozon panelinde "Topla" dendiğinde kutuya bölme seçeneği SADECE paketteki toplam ürün adedi
 // 1'den fazlaysa çıkıyor (kullanıcı notu, bkz. BEKLEYEN-GELISTIRMELER.md #3) — burada da aynı
@@ -11,6 +13,7 @@ export function ShipOrderButton({
   postingNumber,
   totalQuantity,
   locked,
+  weightWarning,
 }: {
   postingNumber: string;
   totalQuantity: number;
@@ -19,6 +22,10 @@ export function ShipOrderButton({
   // açıklıyoruz, aksi halde kullanıcı tekrar tıklayıp hep aynı hatayı alır (2026-09-10'da code
   // review'da tespit edildi).
   locked?: boolean;
+  // Sipariş "500g altı" lojistik deposundan geldi ve birden fazla FARKLI ürün içeriyor — tek kutuda
+  // paketlenirse toplam ağırlık 500g'ı geçip teslimat sorununa yol açabilir (bkz.
+  // orders.service.ts getWeightSplitWarning, 2026-09-11 kullanıcı talebi).
+  weightWarning?: boolean;
 }) {
   const router = useRouter();
   const canSplit = totalQuantity > 1;
@@ -50,33 +57,18 @@ export function ShipOrderButton({
       qty = parsed;
     }
     setLoading(true);
-    try {
-      const res = await fetch(`/api/orders/${encodeURIComponent(postingNumber)}/ship`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ multiBoxQty: qty }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "Paketlenemedi");
-        return;
-      }
-      // BİLEREK data.postingNumbers DEĞİL data.syncedPostings kullanılıyor — postingNumbers,
-      // Ozon'un ham ship cevabının (hiç canlıda doğrulanmamış) ayrıştırılmasından geliyor ve boş
-      // çıkabilir; syncedPostings ise shipOrder'ın GERÇEKTEN senkronize ettiği (en azından orijinal
-      // posting'i içeren) liste — hep en az bir posting içerir (2026-09-11'de code review'da tespit
-      // edildi: boş dizi gelirse kullanıcı hiç etiket indirme butonu göremiyordu).
-      setResult(data.syncedPostings?.length > 0 ? data.syncedPostings : [postingNumber]);
-      setStep("idle");
-      // BİLEREK router.refresh() ÇAĞIRMIYORUZ — çağırırsak order.status artık "awaiting_packaging"
-      // olmadığından bu bileşen anında kaldırılıp aşağıdaki etiket indirme butonları kullanıcı
-      // henüz tıklayamadan kaybolurdu (2026-09-10/11'de code review + kullanıcı talebi: "barkodlarını
-      // o ekrana çeksek"). Kullanıcı "Tamam" deyince (aşağıda) elle yeniliyoruz.
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Bilinmeyen hata");
-    } finally {
-      setLoading(false);
+    const res = await shipPosting(postingNumber, qty);
+    setLoading(false);
+    if (!res.ok) {
+      setError(res.error ?? "Paketlenemedi");
+      return;
     }
+    setResult(res.syncedPostings ?? [postingNumber]);
+    setStep("idle");
+    // BİLEREK router.refresh() ÇAĞIRMIYORUZ — çağırırsak order.status artık "awaiting_packaging"
+    // olmadığından bu bileşen anında kaldırılıp aşağıdaki etiket indirme butonları kullanıcı
+    // henüz tıklayamadan kaybolurdu (2026-09-10/11'de code review + kullanıcı talebi: "barkodlarını
+    // o ekrana çeksek"). Kullanıcı "Tamam" deyince (aşağıda) elle yeniliyoruz.
   }
 
   if (result) {
@@ -127,6 +119,9 @@ export function ShipOrderButton({
     <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: 260 }}>
       <div style={{ fontWeight: 500 }}>Bu siparişi paketle ve Ozon'a bildir</div>
       <div className="hint">Bu işlem Ozon'a GERÇEK bir sevkiyat onayı gönderir, geri alınamaz.</div>
+      {weightWarning && (
+        <div style={{ color: "var(--danger)", fontSize: 13, fontWeight: 500 }}>{WEIGHT_WARNING_TEXT}</div>
+      )}
       {canSplit && (
         <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
           Kaç kutuya bölünsün? (1 = bölme, tek kutu, en fazla {totalQuantity})

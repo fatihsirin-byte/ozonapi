@@ -408,7 +408,15 @@ export async function getTopSellingProducts(params: {
           }
         : {}),
     },
-    include: { product: true },
+    // Sadece ihtiyaç duyulan alanlar — `include: { product: true }` her satırda draftAttributes/
+    // images gibi büyük JSON kolonları dahil TÜM ürün satırını çekiyordu, geniş tarih
+    // aralıklarında gereksiz bellek/gecikme demekti (2026-09-11'de code review'da tespit edildi).
+    select: {
+      offerId: true,
+      price: true,
+      quantity: true,
+      product: { select: { name: true, images: true } },
+    },
   });
 
   const byOfferId = new Map<string, TopSellingProduct>();
@@ -813,9 +821,15 @@ export async function shipOrder(postingNumber: string, multiBoxQty?: number) {
   // yukarı fırlatmaz (bir önceki denemede TAM BURADA bir ayrıştırma hatası kilidi yanlışlıkla
   // serbest bırakıyordu, 2026-09-10'da code review'da tespit edildi).
   const postingNumbers = extractShippedPostingNumbers(shipResult);
-  // Boş/beklenmedik şekilli bir cevap gelirse bile en azından ORİJİNAL posting'i senkronize etmeyi
-  // deniyoruz — hiç posting numarası çıkaramadıysak varsayılan olarak kendisini kullanıyoruz.
-  const postingsToSync = postingNumbers.length > 0 ? postingNumbers : [postingNumber];
+  // ORİJİNAL posting HER ZAMAN senkronize edilecekler listesinde — boş/beklenmedik bir cevap
+  // gelirse zaten tek başına kullanılıyor; bölünmüş bir cevapta Ozon'un döndüğü yeni posting
+  // numaraları BAZEN orijinali içermeyebilir (ör. son eki değişmiş olabilir) — bu durumda orijinal
+  // hiç YENİDEN ÇEKİLMEZ, sadece aşağıdaki kör "awaiting_deliver" yedeğine güvenilirdi ve
+  // rawPayload'ı bayat kalırdı (2026-09-11'de code review'da tespit edildi).
+  // Set ile tekilleştiriliyor — Ozon'un ham cevabında aynı posting numarası iki kez geçerse
+  // (hiç canlı doğrulanmadı, teorik bir ihtimal) aşağıdaki paralel döngü aynı sipariş satırına
+  // eşzamanlı iki ayrı upsert/update göndermesin diye (2026-09-11'de code review'da tespit edildi).
+  const postingsToSync = [...new Set(postingNumbers.includes(postingNumber) ? postingNumbers : [postingNumber, ...postingNumbers])];
 
   // Ozon'a GERÇEKTEN paketlendi bildirildikten sonra, kullanıcı 15 dakikalık sync cron'unu
   // beklemeden yeni posting'leri (bölünmüşse HER BİRİNİ, kendi kalemleriyle) hemen görebilsin diye
@@ -827,7 +841,7 @@ export async function shipOrder(postingNumber: string, multiBoxQty?: number) {
   // (~15 dakika) yine de düzeltir. Postingler BİRBİRİNDEN BAĞIMSIZ olduğu için paralel çekiliyor
   // (2026-09-11'de code review'da tespit edildi — art arda beklemek, çok kutuya bölünen bir
   // siparişte kullanıcıyı gereksiz yere N kat bekletiyordu).
-  await Promise.allSettled(
+  const syncResults = await Promise.allSettled(
     postingsToSync.map(async (pn) => {
       const { result: fresh } = await getFbsPosting(pn);
       if (pn === postingNumber && fresh.status === "awaiting_packaging") {
@@ -844,24 +858,23 @@ export async function shipOrder(postingNumber: string, multiBoxQty?: number) {
         await upsertPostingIntoDb(fresh);
       }
     }),
-  ).then((results) => {
-    results.forEach((r, i) => {
-      if (r.status === "rejected") {
-        console.error(`[shipOrder] ${postingsToSync[i]} paketlendi ama hemen senkronize edilemedi — bir sonraki sync cron turunda düzelecek:`, r.reason);
-      }
-    });
+  );
+  syncResults.forEach((r, i) => {
+    if (r.status === "rejected") {
+      console.error(`[shipOrder] ${postingsToSync[i]} paketlendi ama hemen senkronize edilemedi — bir sonraki sync cron turunda düzelecek:`, r.reason);
+    }
   });
-  // ORİJİNAL posting HER ZAMAN kendi local durumu en azından "awaiting_deliver"a çekilmiş olarak
-  // döner — anında senkronizasyonu başarısız olsa bile (bkz. yukarıdaki catch), kullanıcı bu
-  // ekranda en azından O siparişin etiketini deneyebilsin diye (2026-09-11'de code review'da
-  // tespit edildi: sadece BAŞARILI olanlar dönseydi, orijinal posting'in senkronu başarısız olup
-  // diğerleri (bölünmüşse) başarılı olduğunda orijinal listeden düşerdi).
+  // BİLEREK KOŞULSUZ: sadece "promise reddedildiyse" kontrol etmek yetmiyordu — Ozon'un cevabında
+  // status alanı beklenmedik şekilde boş/tanımsız gelirse (hiç canlı doğrulanmadı) getFbsPosting
+  // BAŞARIYLA döner ama upsertPostingIntoDb'nin update'i status:undefined ile Prisma tarafından
+  // sessizce atlanır — promise "fulfilled" görünür ama local durum hâlâ "awaiting_packaging" kalırdı
+  // (2026-09-11'de code review'da tespit edildi). "status: awaiting_packaging" koşulu zaten bu
+  // updateMany'yi no-op yapıyor eğer senkron gerçekten başarılıysa — koşulsuz çağırmak güvenli.
   await prisma.order
     .updateMany({ where: { postingNumber, status: "awaiting_packaging" }, data: { status: "awaiting_deliver" } })
     .catch(() => {});
-  const syncedPostings = postingsToSync.includes(postingNumber) ? postingsToSync : [postingNumber, ...postingsToSync];
 
-  return { postingNumbers, syncedPostings };
+  return { postingNumbers, syncedPostings: postingsToSync };
 }
 
 // ETGB salt-okunur — Ozon/kargo firması otomatik oluşturuyor, biz sadece siparişin tarihi

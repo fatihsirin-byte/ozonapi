@@ -64,8 +64,15 @@ export function BulkShipWizard({
     setResults((prev) => [...prev, result]);
     setLastError(null);
     const nextIndex = warnedIndex + 1;
+    // warnedIndex HER durumda (son sıradaki işlendiğinde bile) ilerletiliyor — aksi halde
+    // warnedQueue.length'e ulaştığında eski değerinde (son işlenen sıra) TAKILI kalıyordu. Bu,
+    // sonradan eklenen X kapatma düğmesi "unwarned-confirm" fazındayken de tıklanabildiği için
+    // GERÇEK bir hataya yol açtı: handleCancelAll'daki warnedQueue.slice(warnedIndex) o zaman
+    // ZATEN işlenmiş son uyarılı siparişi TEKRAR "atlandı" olarak ekliyordu — hatta gerçekten
+    // paketlenmiş (success) bir siparişin sonucunu görünüşte çelişkili hale getiriyordu
+    // (2026-09-11'de code review'da tespit edildi).
+    setWarnedIndex(nextIndex);
     if (nextIndex < warnedQueue.length) {
-      setWarnedIndex(nextIndex);
       setBoxQtyInput("1");
       setStepError(null);
     } else if (unwarnedQueue.length > 0) {
@@ -163,7 +170,48 @@ export function BulkShipWizard({
       }}
     >
       <div className="card" style={{ padding: 20, width: 480, maxHeight: "85vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ fontWeight: 600, fontSize: 16 }}>Toplu Paketle</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 600, fontSize: 16 }}>Toplu Paketle</div>
+          {/* Kullanıcı bu modalı ne yapacağını bilmeden kapattığında (2026-09-11'de gerçek bir
+              kullanıcı tepkisi: "vazgeç yok x yok korktum") HİÇBİR YENİ sipariş işleme alınmadan
+              direkt çıkabilsin diye — bu düğme "Paketle" ile karışmasın diye görsel olarak ayrık.
+              DİKKAT: eğer bu wizard'daki ÖNCEKİ bir adımda gerçekten bir sipariş paketlendiyse
+              (results içinde en az bir "success" varsa) bu GERİ ALINAMAZ — o yüzden başlık/tooltip
+              o durumda "hiçbir şey yapma" YERİNE bunu açıkça belirtiyor (2026-09-11'de code
+              review'da tespit edildi: önceden metin her durumda "hiçbir şey yapma" diyordu, bu da
+              en az bir sipariş zaten paketlenmişken YANLIŞ bir güvence veriyordu). */}
+          {phase !== "processing" && (
+            <button
+              type="button"
+              // busy iken (tam da bir ship isteği havadayken) X'e basılırsa handleCancelAll o
+              // siparişi "atlandı" işaretleyip "done" ekranına geçebilirdi — ama sonra havadaki
+              // istek dönünce advanceAfterWarned yine de çalışıp AYNI siparişe ikinci, çelişkili
+              // bir sonuç ekleyebilir, hatta bittiyse fazı yeniden "unwarned-confirm"e döndürüp
+              // kullanıcı kapattığını sanırken sihirbazı sessizce yeniden açabilirdi — diğer tüm
+              // butonlarla (Paketle/Atla/Kalanları İptal Et) AYNI şekilde disabled={busy} eklendi
+              // (2026-09-11'de code review'da tespit edildi).
+              disabled={busy}
+              onClick={phase === "done" ? onFinish : handleCancelAll}
+              title={
+                results.some((r) => r.outcome === "success")
+                  ? "Kapat — bazı siparişler bu sihirbazda ZATEN gerçekten paketlendi, bu GERİ ALINMAZ, sadece kalanları işlemeden kapatır"
+                  : "Vazgeç, hiçbir sipariş paketlenmeden kapat"
+              }
+              aria-label="Kapat"
+              style={{
+                background: "none",
+                border: "none",
+                fontSize: 20,
+                cursor: busy ? "default" : "pointer",
+                color: "var(--text-secondary, #888)",
+                lineHeight: 1,
+                opacity: busy ? 0.4 : 1,
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
 
         {phase === "warned-step" && (
           <>

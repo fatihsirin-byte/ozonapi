@@ -8,6 +8,7 @@ import {
   getShipmentDelayInfo,
   getWeightSplitWarning,
   orderTotalQuantity,
+  SHIPPED_OR_DONE_STATUSES,
 } from "@/modules/orders/orders.service";
 import { getRealShippingAndFeesUsdByPosting } from "@/modules/finance/pnl-report.service";
 import { getUsdToTryRate } from "@/pricing/fx-rate";
@@ -23,6 +24,7 @@ import { BulkShipProvider } from "./BulkShipContext";
 import { BulkShipBar } from "./BulkShipBar";
 import { BulkCheckbox } from "./BulkCheckbox";
 import { WEIGHT_WARNING_TEXT } from "./weightWarningText";
+import { ShipDeadlineCountdown } from "./ShipDeadlineCountdown";
 
 export const dynamic = "force-dynamic";
 
@@ -229,6 +231,9 @@ export default async function OrdersPage({
                 <th style={{ whiteSpace: "nowrap" }}>Durum</th>
                 <th style={{ whiteSpace: "nowrap" }}>Kabul Tarihi</th>
                 <th style={{ whiteSpace: "nowrap" }}>Kargo Tarihi</th>
+                <th style={{ whiteSpace: "nowrap" }} title="Ozon'un kargoya verme süresi dolana kadar kalan zaman — canlı günceller">
+                  Kalan Süre
+                </th>
                 <th style={{ whiteSpace: "nowrap" }}>Ürün</th>
                 <th style={{ whiteSpace: "nowrap" }}>Tutar</th>
                 <th style={{ whiteSpace: "nowrap" }} title="Fatura kesilmiş siparişlerde o günün gerçek faturasıyla birebir aynı, kesin tutar. Kesilmemişlerde bugünün canlı kuruyla hesaplanan tahmini değer.">
@@ -244,6 +249,22 @@ export default async function OrdersPage({
               {orders.map((o) => {
                 const shipmentDate = getShipmentDate(o.rawPayload);
                 const delay = getShipmentDelayInfo(o);
+                // "Kalan Süre" sütunu sadece kargoya verme süresi HÂLÂ anlamlıysa (sipariş zaten
+                // kargoya verilmiş/teslim edilmiş/iptal değilse), gecikmemişse VE tarih GERÇEKTEN
+                // GEÇERLİYSE gösteriliyor — aksi halde ya "Gecikenler" filtresi zaten kapsıyor ya
+                // da tarih alakasız/bozuk (2026-09-11, kullanıcı talebi: "sevkiyata kalan süreyi
+                // countdown gibi gösterelim"). delay.shipmentDeadline ZATEN doğrulanmış (bkz.
+                // getShipmentDelayInfo) — ham shipmentDate string'ini burada TEKRAR new Date() ile
+                // ayrıştırıp geçersiz bir tarihte .toISOString()'in RangeError fırlatıp TÜM
+                // sayfayı çökertmesi riskini almak yerine, o hazır Date nesnesi kullanılıyor
+                // (2026-09-11'de code review'da tespit edildi).
+                const shipmentDeadline = delay.shipmentDeadline;
+                const showCountdown =
+                  shipmentDate &&
+                  shipmentDeadline &&
+                  !Number.isNaN(shipmentDeadline.getTime()) &&
+                  !delay.isDelayed &&
+                  !SHIPPED_OR_DONE_STATUSES.has(o.status);
                 const canBulkShip = o.status === "awaiting_packaging" && o.shipClaimedAt == null;
                 const weightWarning = getWeightSplitWarning(o);
                 const totalQuantity = orderTotalQuantity(o.items);
@@ -273,6 +294,13 @@ export default async function OrdersPage({
                         <div className="hint" style={{ color: "var(--danger)" }}>
                           {delay.daysLate === 0 ? "bugün gecikti" : `${delay.daysLate} gün gecikti`}
                         </div>
+                      )}
+                    </td>
+                    <td>
+                      {showCountdown ? (
+                        <ShipDeadlineCountdown deadlineIso={shipmentDeadline.toISOString()} />
+                      ) : (
+                        <span className="hint">-</span>
                       )}
                     </td>
                     <td>

@@ -293,7 +293,10 @@ function matchingIdsWhere(matchingIds: string[] | null) {
 // (2026-09-11'de code review'da tespit edildi). `not_accepted` ("Kabul Edilmedi") BİLİNÇLİ olarak
 // kümeye eklenMEDİ — bu durum genelde satıcının hâlâ aktif müdahale etmesi gereken bir durum,
 // "iş bitti" anlamına gelmiyor.
-const SHIPPED_OR_DONE_STATUSES = new Set([
+// export ediliyor — Siparişler sayfasındaki "Kalan Süre" sütunu, bir siparişin kargoya verme
+// süresinin hâlâ ANLAMLI olup olmadığını (yani zaten sevk edilmiş/tamamlanmış olmadığını) buradan
+// öğreniyor (2026-09-11, kullanıcı talebi: "sevkiyata kalan süreyi... countdown gibi gösterelim").
+export const SHIPPED_OR_DONE_STATUSES = new Set([
   "delivering",
   "delivered",
   "cancelled",

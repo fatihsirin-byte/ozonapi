@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getOrderDetail, computeOrderAmount, computeOrderCost, computeOrderEstimatedProfit, getShipmentDelayInfo, getWeightSplitWarning } from "@/modules/orders/orders.service";
+import { getOrderDetail, computeOrderAmount, computeOrderCost, computeOrderEstimatedProfit, getShipmentDelayInfo, getWeightSplitWarning, orderTotalQuantity } from "@/modules/orders/orders.service";
 import { productPath } from "@/utils/decodeOfferId";
 import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
 import { CopyableField } from "./CopyableField";
@@ -89,7 +89,7 @@ export default async function OrderDetailPage({
           {order.status === "awaiting_packaging" && (
             <ShipOrderButton
               postingNumber={order.postingNumber}
-              totalQuantity={order.items.reduce((sum, item) => sum + item.quantity, 0)}
+              totalQuantity={orderTotalQuantity(order.items)}
               locked={order.shipClaimedAt != null}
               weightWarning={weightWarning}
             />

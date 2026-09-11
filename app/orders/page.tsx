@@ -7,6 +7,7 @@ import {
   findSearchMatchingOrderIds,
   getShipmentDelayInfo,
   getWeightSplitWarning,
+  orderTotalQuantity,
 } from "@/modules/orders/orders.service";
 import { getRealShippingAndFeesUsdByPosting } from "@/modules/finance/pnl-report.service";
 import { getUsdToTryRate } from "@/pricing/fx-rate";
@@ -21,6 +22,7 @@ import { translateOrderStatus } from "@/utils/orderStatus";
 import { BulkShipProvider } from "./BulkShipContext";
 import { BulkShipBar } from "./BulkShipBar";
 import { BulkCheckbox } from "./BulkCheckbox";
+import { WEIGHT_WARNING_TEXT } from "./weightWarningText";
 
 export const dynamic = "force-dynamic";
 
@@ -244,7 +246,7 @@ export default async function OrdersPage({
                 const delay = getShipmentDelayInfo(o);
                 const canBulkShip = o.status === "awaiting_packaging" && o.shipClaimedAt == null;
                 const weightWarning = getWeightSplitWarning(o);
-                const totalQuantity = o.items.reduce((sum, item) => sum + item.quantity, 0);
+                const totalQuantity = orderTotalQuantity(o.items);
                 return (
                   <tr key={o.id}>
                     <td>
@@ -256,8 +258,8 @@ export default async function OrdersPage({
                       <Link href={`/orders/${o.postingNumber}`}>{o.postingNumber}</Link>
                       <div className="hint">{o.scheme}</div>
                       {weightWarning && (
-                        <div className="hint" style={{ color: "var(--danger)" }} title="500g altı depo + birden fazla farklı ürün">
-                          ⚠ 500g uyarısı
+                        <div className="hint" style={{ color: "var(--danger)" }}>
+                          {WEIGHT_WARNING_TEXT}
                         </div>
                       )}
                     </td>

@@ -322,15 +322,25 @@ export function getShipmentDelayInfo(order: { status: string; rawPayload: unknow
 // Ozon, stok bildirirken ağırlığa göre İKİ ayrı depoya yönlendiriyor (bkz. src/ozon/warehouses.ts,
 // "Cekmekoy-500gr altı" / "cekmeköy 501g üstü") — bir sipariş "500g altı" deposundan geldiyse, o
 // üründeki ağırlık TEK BAŞINA 500g altı kabul edilerek o rotaya girmiş demektir. Ama siparişte
-// BİRDEN ÇOK FARKLI ürün varsa (her biri kendi başına 500g altı olsa bile), hepsi TEK kutuda
-// paketlenirse toplam ağırlık 500g'ı geçip bu rotanın kaldıramayacağı bir pakete dönüşebilir —
-// bu da gerçek bir teslimat sorununa yol açabiliyor (bkz. warehouses.ts'teki "bölgenize teslim
-// edilmiyor" notu, aynı kök sorun). "501g üstü" deposundan gelen siparişlerde bu risk zaten yok,
-// o rota daha ağır paketler için tasarlanmış (2026-09-11, kullanıcı talebi: "sipariş lojistik
-// deposu 500g altı ise ve birden çok ürün varsa... uyarı göstersin").
-export function getWeightSplitWarning(order: { rawPayload: unknown; items: Array<{ offerId: string }> }): boolean {
-  const distinctProducts = new Set(order.items.map((i) => i.offerId)).size;
-  if (distinctProducts <= 1) return false;
+// TOPLAM ÜRÜN ADEDİ 1'den fazlaysa (aynı ürünün 2+ adedi de, farklı ürünlerin toplamı da dahil —
+// 2026-09-11'de kullanıcı netleştirdi: "onda da uyarı çıkabilir siparişteki toplam ürün adedi
+// gibi", ilk yazımda sadece FARKLI ürün sayısı bakılıyordu), hepsi TEK kutuda paketlenirse toplam
+// ağırlık 500g'ı geçip bu rotanın kaldıramayacağı bir pakete dönüşebilir — bu da gerçek bir
+// teslimat sorununa yol açabiliyor (bkz. warehouses.ts'teki "bölgenize teslim edilmiyor" notu,
+// aynı kök sorun). "501g üstü" deposundan gelen siparişlerde bu risk zaten yok, o rota daha ağır
+// paketler için tasarlanmış.
+// Sipariş sayfalarında (liste + detay) hem "toplam adet" gösterimi hem bu uyarı AYNI toplamı
+// kullanıyor — üç ayrı yerde aynı reduce'u tekrar yazmak yerine tek bir yerden paylaşılıyor
+// (2026-09-11'de code review'da tespit edildi: gelecekte "toplam adet" tanımı değişirse — ör.
+// iptal edilen kalemler hariç tutulursa — üç kopyadan biri unutulup uyarı ile gösterilen adet
+// birbirinden sapabilirdi).
+export function orderTotalQuantity(items: Array<{ quantity: number }>): number {
+  return items.reduce((sum, i) => sum + i.quantity, 0);
+}
+
+export function getWeightSplitWarning(order: { rawPayload: unknown; items: Array<{ quantity: number }> }): boolean {
+  const totalQuantity = orderTotalQuantity(order.items);
+  if (totalQuantity <= 1) return false;
   const warehouseId = (order.rawPayload as { analytics_data?: { warehouse_id?: number } } | null)?.analytics_data
     ?.warehouse_id;
   return warehouseId === WAREHOUSE_UNDER_500G;

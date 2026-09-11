@@ -21,7 +21,7 @@ async function shipOne(postingNumber: string, multiBoxQty?: number): Promise<Shi
   return { postingNumber, outcome: "success", syncedPostings: res.syncedPostings };
 }
 
-// Toplu paketleme sihirbazı — önce UYARILI siparişleri (500g altı depo + birden fazla farklı ürün)
+// Toplu paketleme sihirbazı — önce UYARILI siparişleri (500g altı depo + toplam ürün adedi 1'den fazla)
 // TEK TEK, kullanıcı onayıyla işler (2026-09-11, kullanıcı talebi: "toplu paketlemede eğer
 // uyarılılar varsa önce uyarılı... tek tek işleme aldıran sıralı wizard"), sonra uyarısız
 // kalanları TEK bir "N sipariş paketlenecek, onaylıyor musunuz?" onayıyla sırayla (paralel DEĞİL —

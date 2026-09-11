@@ -17,7 +17,7 @@ export function BulkCheckbox({
       type="checkbox"
       checked={isSelected(postingNumber)}
       onChange={(e) => toggle({ postingNumber, totalQuantity, weightWarning }, e.target.checked)}
-      title={weightWarning ? "500g altı depo + birden fazla ürün — paketlerken uyarı gösterilecek" : undefined}
+      title={weightWarning ? "Ağırlık uyarısı olan sipariş — toplu paketlerken ayrıca sorulacak" : undefined}
     />
   );
 }

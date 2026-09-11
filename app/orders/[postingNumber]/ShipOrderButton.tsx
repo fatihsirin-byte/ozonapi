@@ -22,9 +22,9 @@ export function ShipOrderButton({
   // açıklıyoruz, aksi halde kullanıcı tekrar tıklayıp hep aynı hatayı alır (2026-09-10'da code
   // review'da tespit edildi).
   locked?: boolean;
-  // Sipariş "500g altı" lojistik deposundan geldi ve birden fazla FARKLI ürün içeriyor — tek kutuda
-  // paketlenirse toplam ağırlık 500g'ı geçip teslimat sorununa yol açabilir (bkz.
-  // orders.service.ts getWeightSplitWarning, 2026-09-11 kullanıcı talebi).
+  // Sipariş "500g altı" lojistik deposundan geldi ve toplam ürün adedi 1'den fazla (aynı ürünün
+  // 2+ adedi de, farklı ürünlerin toplamı da dahil) — tek kutuda paketlenirse toplam ağırlık
+  // 500g'ı geçip teslimat sorununa yol açabilir (bkz. orders.service.ts getWeightSplitWarning).
   weightWarning?: boolean;
 }) {
   const router = useRouter();

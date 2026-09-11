@@ -1,3 +1,12 @@
+// URL'deki ?page= değeri geçersiz (sayı değil, negatif, ondalık vb.) olursa NaN/anlamsız bir sayfa
+// numarasıyla devam etmek yerine 1'e düşer — aksi halde ör. ?page=abc, skip: NaN olarak Prisma'ya
+// gidip sayfa çökerdi (2026-09-11'de code review'da tespit edildi, /products sayfasına sayfalama
+// eklenirken — /orders'ta da aynı örüntü vardı, ikisi de burada kullanılıyor).
+export function parsePageParam(value: string | undefined): number {
+  const n = Number(value ?? "1");
+  return Number.isInteger(n) && n > 0 ? n : 1;
+}
+
 // Geçerli sayfanın etrafında birkaç sayfa numarası, artı her zaman ilk ve son sayfa gösterir;
 // aradaki boşluklar "..." ile belirtilir (ör. 1 … 4 5 [6] 7 8 … 20).
 export function buildPageList(current: number, totalPages: number, siblings = 1): Array<number | "..."> {

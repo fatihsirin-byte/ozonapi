@@ -405,8 +405,37 @@ export async function checkImportStatus(offerId: string) {
 
 // Shopify CSV içe aktarımından gelen "draft" satırlar (binlerce olabilir) burada listelenmiyor —
 // onlar /import sayfasında ayrı, sayfalanmış bir listede yönetiliyor (bkz. staging.service.ts).
-export async function listAllProducts() {
-  return prisma.product.findMany({ where: { status: { not: "draft" } }, orderBy: { createdAt: "desc" } });
+// search/skip/take verilmezse eskisi gibi TÜM ürünleri döner (geriye dönük uyumluluk — bkz.
+// app/api/products/route.ts'teki parametresiz GET) — verildiğinde offerId/name/nameRu üzerinde
+// arayıp sayfalar (2026-09-11, kullanıcı talebi: "ürünler sayfasına pagination ve searchbar").
+export async function listAllProducts(params?: { search?: string; skip?: number; take?: number }) {
+  const search = params?.search?.trim();
+  const where = {
+    status: { not: "draft" },
+    ...(search
+      ? {
+          OR: [
+            { offerId: { contains: search, mode: "insensitive" as const } },
+            { name: { contains: search, mode: "insensitive" as const } },
+            { nameRu: { contains: search, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
+
+  // take verilmemişse (ör. app/api/products/route.ts'teki eski parametresiz GET) zaten TÜM
+  // sonuçlar dönüyor — bu durumda ayrı bir COUNT sorgusu atmak yerine findMany'nin uzunluğu
+  // yeterli, gereksiz bir tam tablo sayımı önleniyor (2026-09-11'de code review'da tespit edildi).
+  if (params?.take == null) {
+    const products = await prisma.product.findMany({ where, orderBy: { createdAt: "desc" } });
+    return { products, total: products.length };
+  }
+
+  const [products, total] = await Promise.all([
+    prisma.product.findMany({ where, orderBy: { createdAt: "desc" }, skip: params.skip, take: params.take }),
+    prisma.product.count({ where }),
+  ]);
+  return { products, total };
 }
 
 export async function getProduct(offerId: string) {

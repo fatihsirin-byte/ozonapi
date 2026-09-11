@@ -6,9 +6,10 @@ import {
   getOrderFilterCounts,
   findSearchMatchingOrderIds,
 } from "@/modules/orders/orders.service";
-import { getRealShippingUsdByPosting } from "@/modules/finance/pnl-report.service";
+import { getRealShippingAndFeesUsdByPosting } from "@/modules/finance/pnl-report.service";
 import { getUsdToTryRate } from "@/pricing/fx-rate";
 import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
+import { parsePageParam } from "@/utils/pagination";
 import { OrdersToolbar } from "./OrdersToolbar";
 import { OrdersSearchBar } from "./OrdersSearchBar";
 import { PageLinkPagination } from "./PageLinkPagination";
@@ -57,7 +58,7 @@ export default async function OrdersPage({
   searchParams: Promise<{ status?: string; page?: string; invoicedToday?: string; q?: string }>;
 }) {
   const params = await searchParams;
-  const page = Number(params.page ?? "1");
+  const page = parsePageParam(params.page);
   const showInvoicedToday = params.invoicedToday === "1";
   const todayRange = getIstanbulTodayRangeUtc();
   // getUsdToTryRate() matchingIds'e bağlı değil — arama sorgusunu (pahalı ILIKE) beklemeden hemen
@@ -85,7 +86,9 @@ export default async function OrdersPage({
     liveTryRatePromise,
     getOrderFilterCounts({ matchingIds, invoicedSince: todayRange.start, invoicedTo: todayRange.end }),
   ]);
-  const realShippingByPosting = await getRealShippingUsdByPosting(orders.map((o) => o.postingNumber));
+  const { shipping: realShippingByPosting, fees: realFeesByPosting } = await getRealShippingAndFeesUsdByPosting(
+    orders.map((o) => o.postingNumber),
+  );
 
   // Sayfalama linkleri (pageQueryPrefix) ve filtre butonu linkleri (filterHref) aynı üç parametreyi
   // (status/invoicedToday/q) tek bir yerden üretiyor — daha önce ikisi ayrı ayrı elle yazılmıştı
@@ -164,7 +167,7 @@ export default async function OrdersPage({
                 <th style={{ whiteSpace: "nowrap" }} title="Fatura kesilmiş siparişlerde o günün gerçek faturasıyla birebir aynı, kesin tutar. Kesilmemişlerde bugünün canlı kuruyla hesaplanan tahmini değer.">
                   TL Satış Fiyatı
                 </th>
-                <th style={{ whiteSpace: "nowrap" }} title="Satış tutarı - alış maliyeti - tahmini kargo (ağırlıktan) - tahmini Ozon komisyonu/lojistik/banka bedeli">
+                <th style={{ whiteSpace: "nowrap" }} title="Satış tutarı - alış maliyeti - kargo - komisyon/lojistik/banka bedeli. Ozon bu kesintileri gerçekten işlediyse (genelde teslimattan sonra) gerçek tutarlar, işlemediyse tahmini değerler kullanılır.">
                   Olası Net Kâr
                 </th>
                 <th style={{ whiteSpace: "nowrap" }}>Fatura</th>
@@ -237,7 +240,11 @@ export default async function OrdersPage({
                     </td>
                     <td>
                       {(() => {
-                        const profit = computeOrderEstimatedProfit(o.items, realShippingByPosting.get(o.postingNumber));
+                        const profit = computeOrderEstimatedProfit(
+                          o.items,
+                          realShippingByPosting.get(o.postingNumber),
+                          realFeesByPosting.get(o.postingNumber),
+                        );
                         if (profit == null) return <span className="hint">veri yok</span>;
                         return (
                           <span style={{ color: profit >= 0 ? "var(--success)" : "var(--danger)" }}>

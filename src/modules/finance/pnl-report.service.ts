@@ -40,6 +40,13 @@ export interface PnlRow {
   realShippingUsd: number | null;
   approximateShippingSplit: boolean;
   shippingReviewed: boolean;
+  // Ozon'un GERÇEKTEN kestiği komisyon+diğer ücretler (₽) — realShippingRub ile AYNI mantık
+  // (posting'te tek ürün varsa tamamı, birden fazla varsa satış payına göre paylaştırılmış).
+  // bkz. pnl-report.service.ts sumRealFeesRub (2026-09-11, kullanıcı talebi: "komisyon banka
+  // gideri iç dağıtım vs düşmüyor" — PNL sayfası da sipariş sayfası gibi artık gerçek veriyi
+  // kullanıyor, tahmini sabit oran (%5+%2+%1.9) sadece gerçek veri yokken devreye giriyor).
+  realFeesRub: number | null;
+  realFeesUsd: number | null;
 }
 
 export interface MissingCostPriceGroup {
@@ -83,9 +90,14 @@ export interface PnlRowMetrics {
   totalSale: number;
   totalCost: number | null;
   shipping: number | null;
+  // commission/logistics/bankFee HER ZAMAN tahmini sabit oranla hesaplanır (kullanıcının CSV'de
+  // oranları değiştirip "ne olurdu" denemesi için — bkz. buildPnlCsv). Kâr hesabında (profit) bu
+  // üçünün toplamı DEĞİL, feesUsd kullanılır — Ozon gerçek kesintiyi işlediyse feesUsd o gerçek
+  // tutar, işlemediyse yine bu üçünün toplamıdır (2026-09-11, kullanıcı talebi).
   commission: number;
   logistics: number;
   bankFee: number;
+  feesUsd: number;
   profit: number | null;
   marginPct: number | null;
   warning: string | null;
@@ -128,19 +140,38 @@ export function sumRealShippingRub(transactions: Array<{ deliveryCharge: number 
   return total > 0 ? total : null;
 }
 
-// Siparişler listesindeki "Olası Net Kâr" hesabı için — Ozon gerçek kargo kesintisini işlediyse
-// (teslimattan sonra) tahmini yerine bunu kullanır (2026-09-10, kullanıcı talebi: "faturası
-// kesildiyse ... bunlardan yararlan kargo fiyatında"). bkz. src/modules/orders/orders.service.ts
-// computeOrderEstimatedProfit.
-export async function getRealShippingUsdByPosting(postingNumbers: string[]): Promise<Map<string, number>> {
-  const result = new Map<string, number>();
-  if (postingNumbers.length === 0) return result;
+// commissionAmount + otherCharges'ı BİRLİKTE topluyoruz — bu hesapta Ozon'un "satış komisyonu"
+// accrual tipi (bkz. finance.service.ts SALE_COMMISSION_TYPE_ID) neredeyse hep 0 geliyor, gerçek
+// komisyona karşılık gelen kalemler ("RfbsGlobalAgentFee", "BrandCommission" gibi) sınıflandırılamayıp
+// otherCharges'a düşüyor — o yüzden ikisini ayrı tutmak yanlış (çok düşük) bir "gerçek komisyon"
+// gösterirdi. Satır bazında ABS ALMADAN (Math.abs), önce toplayıp SONRA işaretine bakıyoruz — bazı
+// satırlar ("MarketplaceRedistributionOfAcquiringOperation") birbirini götüren +/- çift olarak
+// geliyor; satır bazında abs alsaydık bu çiftler yanlışlıkla iki kat gerçek gider sayılırdı
+// (2026-09-11, kullanıcı talebi: "komisyon banka gideri iç dağıtım vs düşmüyor" — aslında hiç
+// kullanılmıyordu, sadece sabit tahmini oranla değiştiriliyordu).
+export function sumRealFeesRub(transactions: Array<{ commissionAmount: number | null; otherCharges: number | null }>): number | null {
+  const total = transactions.reduce((sum, t) => sum + (t.commissionAmount ?? 0) + (t.otherCharges ?? 0), 0);
+  return total < 0 ? -total : null;
+}
+
+// Siparişler listesindeki "Olası Net Kâr" hesabı için — Ozon gerçek kargo/komisyon kesintisini
+// işlediyse (teslimattan sonra) tahmini yerine bunları kullanır (2026-09-10/11, kullanıcı talebi).
+// bkz. src/modules/orders/orders.service.ts computeOrderEstimatedProfit. İkisi de AYNI
+// FinanceTransaction satırlarına ihtiyaç duyduğu için tek sorguda birlikte dönüyor — önceden ayrı
+// iki fonksiyon aynı postingNumber'lar için sorguyu iki kere atıyordu (2026-09-11'de code
+// review'da tespit edildi).
+export async function getRealShippingAndFeesUsdByPosting(
+  postingNumbers: string[],
+): Promise<{ shipping: Map<string, number>; fees: Map<string, number> }> {
+  const shipping = new Map<string, number>();
+  const fees = new Map<string, number>();
+  if (postingNumbers.length === 0) return { shipping, fees };
 
   const [transactions, usdToRubRate] = await Promise.all([
     prisma.financeTransaction.findMany({ where: { postingNumber: { in: postingNumbers } } }),
     getUsdToRubRate(),
   ]);
-  if (!usdToRubRate) return result;
+  if (!usdToRubRate) return { shipping, fees };
 
   const byPosting = new Map<string, typeof transactions>();
   for (const t of transactions) {
@@ -149,10 +180,12 @@ export async function getRealShippingUsdByPosting(postingNumbers: string[]): Pro
     byPosting.set(t.postingNumber, list);
   }
   for (const [postingNumber, txs] of byPosting) {
-    const rub = sumRealShippingRub(txs);
-    if (rub != null) result.set(postingNumber, rub / usdToRubRate);
+    const shippingRub = sumRealShippingRub(txs);
+    if (shippingRub != null) shipping.set(postingNumber, shippingRub / usdToRubRate);
+    const feesRub = sumRealFeesRub(txs);
+    if (feesRub != null) fees.set(postingNumber, feesRub / usdToRubRate);
   }
-  return result;
+  return { shipping, fees };
 }
 
 // DB'de o an ne kadar sipariş geçmişi varsa hepsini kalem bazında döner (canlı Ozon
@@ -187,7 +220,9 @@ export async function getPnlRows(params?: { since?: Date; to?: Date }): Promise<
 
   const rows: PnlRow[] = [];
   for (const order of orders) {
-    const realShippingTotalRub = sumRealShippingRub(transactionsByPosting.get(order.postingNumber) ?? []);
+    const orderTransactions = transactionsByPosting.get(order.postingNumber) ?? [];
+    const realShippingTotalRub = sumRealShippingRub(orderTransactions);
+    const realFeesTotalRub = sumRealFeesRub(orderTransactions);
     const distinctOfferIds = new Set(order.items.map((i) => i.offerId));
     const approximateShippingSplit = distinctOfferIds.size > 1;
     const orderTotalSale = order.items.reduce((sum, i) => sum + Number(i.price) * i.quantity, 0);
@@ -201,6 +236,15 @@ export async function getPnlRows(params?: { since?: Date; to?: Date }): Promise<
         } else if (orderTotalSale > 0) {
           const itemSale = Number(item.price) * item.quantity;
           realShippingRub = realShippingTotalRub * (itemSale / orderTotalSale);
+        }
+      }
+      let realFeesRub: number | null = null;
+      if (realFeesTotalRub != null) {
+        if (!approximateShippingSplit) {
+          realFeesRub = realFeesTotalRub;
+        } else if (orderTotalSale > 0) {
+          const itemSale = Number(item.price) * item.quantity;
+          realFeesRub = realFeesTotalRub * (itemSale / orderTotalSale);
         }
       }
       rows.push({
@@ -229,6 +273,8 @@ export async function getPnlRows(params?: { since?: Date; to?: Date }): Promise<
         realShippingUsd: realShippingRub != null && usdToRubRate != null ? realShippingRub / usdToRubRate : null,
         approximateShippingSplit,
         shippingReviewed: item.shippingReviewed,
+        realFeesRub,
+        realFeesUsd: realFeesRub != null && usdToRubRate != null ? realFeesRub / usdToRubRate : null,
       });
     }
   }
@@ -301,23 +347,26 @@ export function computeRowMetrics(row: PnlRow): PnlRowMetrics {
   const commission = totalSale * COMMISSION_RATE;
   const logistics = Math.min(row.unitSalePrice * LOGISTICS_SERVICE_RATE, LOGISTICS_SERVICE_CAP_USD) * row.quantity;
   const bankFee = totalSale * BANK_FEE_RATE;
+  // Ozon'un GERÇEK komisyon+diğer kesintisi varsa (bkz. PnlRow.realFeesUsd) sabit tahmini oran
+  // yerine o kullanılır — kargoda zaten yapılan aynı desen (2026-09-11, kullanıcı talebi).
+  const feesUsd = row.realFeesUsd ?? commission + logistics + bankFee;
 
   if (row.unitCostPrice == null) {
     return {
-      totalSale, totalCost: null, shipping, commission, logistics, bankFee, profit: null, marginPct: null,
+      totalSale, totalCost: null, shipping, commission, logistics, bankFee, feesUsd, profit: null, marginPct: null,
       warning: "Alış fiyatı girilmemiş — kâr hesaplanamadı",
     };
   }
   const totalCost = row.quantity * row.unitCostPrice;
   if (shipping == null) {
     return {
-      totalSale, totalCost, shipping: null, commission, logistics, bankFee, profit: null, marginPct: null,
+      totalSale, totalCost, shipping: null, commission, logistics, bankFee, feesUsd, profit: null, marginPct: null,
       warning: "Ağırlık yok — kargo ücreti hesaplanamadı",
     };
   }
-  const profit = totalSale - commission - logistics - bankFee - shipping - totalCost;
+  const profit = totalSale - feesUsd - shipping - totalCost;
   const marginPct = totalCost > 0 ? (profit / totalCost) * 100 : null;
-  return { totalSale, totalCost, shipping, commission, logistics, bankFee, profit, marginPct, warning: null };
+  return { totalSale, totalCost, shipping, commission, logistics, bankFee, feesUsd, profit, marginPct, warning: null };
 }
 
 export interface PnlReportTotals {
@@ -327,6 +376,8 @@ export interface PnlReportTotals {
   commission: number;
   logistics: number;
   bankFee: number;
+  // Kâr hesabında GERÇEKTEN kullanılan komisyon+diğer kesinti toplamı — bkz. PnlRowMetrics.feesUsd.
+  feesUsd: number;
   profit: number;
   marginPct: number | null;
   missingCostCount: number;
@@ -334,7 +385,7 @@ export interface PnlReportTotals {
 
 export function summarizePnlRows(rows: PnlRow[]): PnlReportTotals {
   const totals: PnlReportTotals = {
-    totalSale: 0, totalCost: 0, shipping: 0, commission: 0, logistics: 0, bankFee: 0, profit: 0,
+    totalSale: 0, totalCost: 0, shipping: 0, commission: 0, logistics: 0, bankFee: 0, feesUsd: 0, profit: 0,
     marginPct: null, missingCostCount: 0,
   };
   for (const row of rows) {
@@ -343,6 +394,7 @@ export function summarizePnlRows(rows: PnlRow[]): PnlReportTotals {
     totals.commission += m.commission;
     totals.logistics += m.logistics;
     totals.bankFee += m.bankFee;
+    totals.feesUsd += m.feesUsd;
     if (m.totalCost == null) {
       totals.missingCostCount += 1;
       continue;
@@ -409,7 +461,14 @@ export function buildPnlCsv(rows: PnlRow[]): string {
       `=K${rowNum}*0.05`,
       `=MIN(${G}*0.02,200/75)*F${rowNum}`,
       `=K${rowNum}*0.019`,
-      `=IF(${L}="","",K${rowNum}-N${rowNum}-${O}-${P}-${M}-${L})`,
+      // Ozon'un gerçek komisyon+diğer kesintisi varsa (kargoda olduğu gibi) Net Kâr'da N/O/P
+      // formüllerinin toplamı YERİNE sabit sayı olarak kullanılır — N/O/P hücreleri yine de
+      // oranları elle değiştirip "ne olurdu" denemek için formül olarak kalıyor, sadece Net Kâr
+      // onlara bağlı değil (2026-09-11, kullanıcı talebi: "komisyon banka gideri iç dağıtım vs
+      // düşmüyor").
+      row.realFeesUsd != null
+        ? `=IF(${L}="","",K${rowNum}-${row.realFeesUsd}-${M}-${L})`
+        : `=IF(${L}="","",K${rowNum}-N${rowNum}-${O}-${P}-${M}-${L})`,
       `=IF(OR(${L}="",${L}=0),"",Q${rowNum}/${L}*100)`,
       metrics.warning ?? "",
     ];
@@ -439,7 +498,11 @@ export function buildPnlCsv(rows: PnlRow[]): string {
   csvRows.push(csvEscape("- Bu dosyadaki fiyat/kâr hücreleri canlı formül — komisyon/marj/kargo oranlarını hücrelerden değiştirip anında yeniden hesaplatabilirsiniz."));
   csvRows.push(csvEscape("- \"Ağırlık Kaynağı\" = Ölçülmüş: ürün sipariş ekranından tartılıp elle girilmiş gerçek ağırlık kullanıldı."));
   csvRows.push(csvEscape("- \"Ağırlık Kaynağı\" = Tahmini (inflated): ağırlık hiç güncellenmemiş, formülün paketleme payı eklediği eski tahmini ağırlık kullanıldı."));
-  csvRows.push(csvEscape("- Bu hesap Ozon'un gerçek finans hareketlerine değil, fiyat formülündeki komisyon/kargo/banka oranlarına dayanıyor (tahmini kâr)."));
+  csvRows.push(
+    csvEscape(
+      "- Kargo Ücreti ve Net Kâr: Ozon o siparişin kargo/komisyon kesintisini GERÇEKTEN işlediyse (genelde teslimattan sonra) o gerçek tutar sabit sayı olarak kullanılır; işlemediyse fiyat formülündeki tahmini oranlarla hesaplanır. Komisyon/Lojistik Hizmet Bedeli/Banka Ücreti sütunları HER ZAMAN tahmini orana göredir (oranları hücrelerden değiştirip deneyebilirsiniz) — Net Kâr gerçek veri varken bu üç hücreye değil, gerçek toplam kesintiye bağlıdır.",
+    ),
+  );
 
   // BOM — Excel/Google Sheets'in UTF-8'i (Türkçe karakterler) doğru tanıması için.
   return "﻿" + csvRows.join("\n");

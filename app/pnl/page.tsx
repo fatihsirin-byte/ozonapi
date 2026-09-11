@@ -101,7 +101,7 @@ export default async function PnlPage({
           <div>
             <div className="hint">Komisyon + Lojistik + Banka</div>
             <div className="value" style={{ color: "var(--danger)" }}>
-              {fmtMoney(totals.commission + totals.logistics + totals.bankFee)}
+              {fmtMoney(totals.feesUsd)}
             </div>
           </div>
           <div>

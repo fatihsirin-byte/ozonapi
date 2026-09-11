@@ -2,11 +2,27 @@ import Link from "next/link";
 import { listAllProducts } from "@/modules/products/products.service";
 import { productPath } from "@/utils/decodeOfferId";
 import { ImportProductForm } from "./ImportProductForm";
+import { ProductsSearchBar } from "./ProductsSearchBar";
+import { PageLinkPagination } from "../orders/PageLinkPagination";
+import { parsePageParam } from "@/utils/pagination";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProductsPage() {
-  const products = await listAllProducts();
+const PAGE_SIZE = 50;
+
+export default async function ProductsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string; q?: string }>;
+}) {
+  const params = await searchParams;
+  const page = parsePageParam(params.page);
+  const { products, total } = await listAllProducts({
+    search: params.q,
+    skip: (page - 1) * PAGE_SIZE,
+    take: PAGE_SIZE,
+  });
+  const pageQuery = params.q ? `q=${encodeURIComponent(params.q)}&` : "";
 
   return (
     <div className="page">
@@ -20,9 +36,15 @@ export default async function ProductsPage() {
         </div>
       </div>
 
+      <div className="card" style={{ marginBottom: 16 }}>
+        <ProductsSearchBar />
+      </div>
+
       <div className="card">
         {products.length === 0 ? (
-          <div className="empty-state">Henüz ürün yok. "Yeni Ürün" ile ilk ürününüzü ekleyin.</div>
+          <div className="empty-state">
+            {params.q ? `"${params.q}" için sonuç bulunamadı.` : 'Henüz ürün yok. "Yeni Ürün" ile ilk ürününüzü ekleyin.'}
+          </div>
         ) : (
           <table>
             <thead>
@@ -52,6 +74,13 @@ export default async function ProductsPage() {
               ))}
             </tbody>
           </table>
+        )}
+        {total > PAGE_SIZE && (
+          <PageLinkPagination
+            page={page}
+            totalPages={Math.ceil(total / PAGE_SIZE)}
+            hrefForPage={(p) => `/products?${pageQuery}page=${p}`}
+          />
         )}
       </div>
     </div>

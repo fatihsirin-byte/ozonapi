@@ -151,16 +151,26 @@ interface EstimatedProfitItem {
 // computePriceBreakdown ile aynı formülü (ağırlık paketleme payı + kademeli kargo tarifesi + Ozon
 // komisyonu + lojistik hizmet bedeli + banka işlem ücreti) satılan GERÇEK fiyat üzerinden kalem
 // kalem uyguluyor. Ozon bu siparişin kargo kesintisini GERÇEKTEN işlediyse (realShippingUsd —
-// bkz. pnl-report.service.ts getRealShippingUsdByPosting), tahmini ağırlık bazlı kargo yerine o
-// kullanılır (2026-09-10, kullanıcı talebi: "faturası kesildiyse ... bunlardan yararlan kargo
-// fiyatında") — komisyon/lojistik/banka bedeli her zaman satış fiyatı üzerinden hesaplanmaya devam eder.
-export function computeOrderEstimatedProfit(items: EstimatedProfitItem[], realShippingUsd?: number | null): number | null {
+// bkz. pnl-report.service.ts getRealShippingAndFeesUsdByPosting), tahmini ağırlık bazlı kargo
+// yerine o kullanılır (2026-09-10, kullanıcı talebi: "faturası kesildiyse ... bunlardan yararlan
+// kargo fiyatında") — komisyon/lojistik/banka bedeli her zaman satış fiyatı üzerinden hesaplanmaya devam eder.
+// realFeesUsd verilirse (Ozon'un GERÇEK komisyon+diğer kesintileri, bkz. pnl-report.service.ts
+// getRealShippingAndFeesUsdByPosting) tahmini sabit oran (%5 komisyon + %2 lojistik + %1.9 banka)
+// yerine kullanılır — realShippingUsd'nin kargoda yaptığının aynısı (2026-09-11, kullanıcı talebi:
+// "komisyon banka gideri iç dağıtım vs düşmüyor" — aslında düşülüyordu ama SABİT TAHMİNİ oranla;
+// Ozon'un gerçekte kestiği tutar bu hesaba hiç yansımıyordu).
+export function computeOrderEstimatedProfit(
+  items: EstimatedProfitItem[],
+  realShippingUsd?: number | null,
+  realFeesUsd?: number | null,
+): number | null {
   // Kalemsiz bir sipariş için hesaplanacak bir şey yok — bu koruma olmadan aşağıdaki tarife
   // formülü 0 gram için bile sabit taban ücreti (ör. -$0.80) döndürüp "kalemsiz sipariş zararda"
   // gibi hayalet bir rakam gösterirdi (2026-09-10'da code review'da tespit edildi).
   if (items.length === 0) return null;
 
-  let totalBeforeShipping = 0;
+  let totalSaleMinusCost = 0;
+  let totalEstimatedFeesUsd = 0;
   let totalBillingWeightGrams = 0;
   let anyWeightMissing = false;
 
@@ -176,9 +186,13 @@ export function computeOrderEstimatedProfit(items: EstimatedProfitItem[], realSh
       product.cargoWeightGrams,
     );
     if (!breakdown) return null;
-    // Kargo/komisyon dışındaki kısım (satış - alış - komisyon - lojistik - banka bedeli) adet
-    // bazında doğrusal ölçekleniyor, bu yüzden quantity ile çarpılabilir.
-    totalBeforeShipping += (breakdown.profitUsd + breakdown.shippingUsd) * item.quantity;
+    // Kargo hariç, satış - alış kısmı adet bazında doğrusal ölçekleniyor, bu yüzden quantity ile
+    // çarpılabilir. Tahmini komisyon/lojistik/banka bedeli AYRI tutuluyor (breakdown.profitUsd
+    // zaten bunları düşmüş haliyle geliyordu — actualPrice - shipping - cost - profit = tahmini
+    // ücret olarak geri çıkarılıyor) ki realFeesUsd verildiğinde onun yerine konabilsin.
+    totalSaleMinusCost += (breakdown.actualPriceUsd - breakdown.costUsd) * item.quantity;
+    const estimatedFeeUsd = breakdown.actualPriceUsd - breakdown.shippingUsd - breakdown.costUsd - breakdown.profitUsd;
+    totalEstimatedFeesUsd += estimatedFeeUsd * item.quantity;
 
     // ÖNEMLİ: kargo tarifesinin sabit taban ücreti (ör. $0.80) paket başına BİR KEZ uygulanır —
     // birim ağırlığı quantity ile çarpıp tarifeyi TEK SEFERDE toplam ağırlığa uyguluyoruz, aksi
@@ -198,7 +212,9 @@ export function computeOrderEstimatedProfit(items: EstimatedProfitItem[], realSh
     }
   }
 
-  if (realShippingUsd != null) return totalBeforeShipping - realShippingUsd;
+  const feesUsd = realFeesUsd ?? totalEstimatedFeesUsd;
+
+  if (realShippingUsd != null) return totalSaleMinusCost - feesUsd - realShippingUsd;
   // totalBillingWeightGrams <= 0 burada ARTIK engel değil — tüm kalemlerin ağırlığı gerçekten
   // (cargoWeightGrams olarak) 0 girilmişse bu geçerli bir veridir, "bilinmiyor" değil; sadece
   // anyWeightMissing (gerçekten hiç veri yoksa) null döndürülmeli (2026-09-10'da code review'da
@@ -209,7 +225,7 @@ export function computeOrderEstimatedProfit(items: EstimatedProfitItem[], realSh
   // bu fonksiyonu kullanıyor; aynı formül iki ayrı dosyada tekrar bakımlı kalırsa biri değişip
   // diğeri değişmeyince aynı sayfada iki kart çelişebilirdi (2026-09-10'da code review'da tespit
   // edildi). İkisi şu an birebir aynı formül, sadece TEK yerden geliyor olması garanti ediliyor.
-  return totalBeforeShipping - estimateShippingForWeight(totalBillingWeightGrams);
+  return totalSaleMinusCost - feesUsd - estimateShippingForWeight(totalBillingWeightGrams);
 }
 
 // Sipariş arama kutusu (2026-09-09, kullanıcı talebi): müşteri adı, Ozon sipariş no, ürün SKU'su

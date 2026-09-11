@@ -27,7 +27,7 @@ const DONUT_COLORS = {
 function BreakdownDonut({ m }: { m: PnlRowMetrics }) {
   const cost = m.totalCost ?? 0;
   const shipping = m.shipping ?? 0;
-  const fees = m.commission + m.logistics + m.bankFee;
+  const fees = m.feesUsd;
   const positiveProfit = m.profit != null && m.profit > 0 ? m.profit : 0;
   const base = cost + shipping + fees + positiveProfit;
 
@@ -107,14 +107,12 @@ export function OrderDetailModal({
     (acc, { m }) => ({
       totalSale: acc.totalSale + m.totalSale,
       totalCost: m.totalCost == null ? acc.totalCost : acc.totalCost + m.totalCost,
-      commission: acc.commission + m.commission,
-      logistics: acc.logistics + m.logistics,
-      bankFee: acc.bankFee + m.bankFee,
+      feesUsd: acc.feesUsd + m.feesUsd,
       shipping: acc.shipping + (m.shipping ?? 0),
       profit: m.profit == null ? acc.profit : acc.profit + m.profit,
       hasAllCosts: acc.hasAllCosts && m.totalCost != null,
     }),
-    { totalSale: 0, totalCost: 0, commission: 0, logistics: 0, bankFee: 0, shipping: 0, profit: 0, hasAllCosts: true },
+    { totalSale: 0, totalCost: 0, feesUsd: 0, shipping: 0, profit: 0, hasAllCosts: true },
   );
 
   return (
@@ -215,7 +213,7 @@ export function OrderDetailModal({
             </div>
             <div>
               <span>Komisyon + Lojistik + Banka</span>
-              <strong>{fmtMoney(totals.commission + totals.logistics + totals.bankFee)}</strong>
+              <strong>{fmtMoney(totals.feesUsd)}</strong>
             </div>
             <div>
               <span>Net Kâr</span>

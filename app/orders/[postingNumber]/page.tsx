@@ -9,7 +9,7 @@ import { LabelDownloadButton } from "./LabelDownloadButton";
 import { ShipOrderButton } from "./ShipOrderButton";
 import { RealWeightInput } from "./RealWeightInput";
 import { ParasutInvoiceButton } from "../ParasutInvoiceButton";
-import { estimateShippingForWeight, effectiveCargoWeightGrams, sumRealShippingRub } from "@/modules/finance/pnl-report.service";
+import { estimateShippingForWeight, effectiveCargoWeightGrams, sumRealShippingRub, sumRealFeesRub } from "@/modules/finance/pnl-report.service";
 import { getUsdToRubRate } from "@/pricing/fx-rate";
 import { translateOrderStatus } from "@/utils/orderStatus";
 
@@ -72,7 +72,12 @@ export default async function OrderDetailPage({
   // tespit edildi — kullanıcı için kafa karıştırıcı, "uygulama bozuk" izlenimi verir).
   const realShippingRub = sumRealShippingRub(order.transactions);
   const realShippingUsd = realShippingRub != null && usdToRubRate ? realShippingRub / usdToRubRate : null;
-  const possibleNetProfit = computeOrderEstimatedProfit(order.items, realShippingUsd);
+  // Komisyon/lojistik/banka bedeli için de AYNI mantık — Ozon bunları gerçekten kestiyse tahmini
+  // sabit oran yerine gerçek tutar kullanılır (2026-09-11, kullanıcı talebi: "komisyon banka
+  // gideri iç dağıtım vs düşmüyor" — bkz. pnl-report.service.ts sumRealFeesRub).
+  const realFeesRub = sumRealFeesRub(order.transactions);
+  const realFeesUsd = realFeesRub != null && usdToRubRate ? realFeesRub / usdToRubRate : null;
+  const possibleNetProfit = computeOrderEstimatedProfit(order.items, realShippingUsd, realFeesUsd);
 
   return (
     <div className="page-wide">

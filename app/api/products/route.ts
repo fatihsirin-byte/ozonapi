@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(result);
   }
 
-  const products = await listAllProducts();
+  const { products } = await listAllProducts();
   // importTaskId BigInt — JSON.stringify edilemiyor, string'e çevirip dönüyoruz.
   const serialized = products.map((p) => ({ ...p, importTaskId: p.importTaskId?.toString() ?? null }));
   return NextResponse.json({ products: serialized });

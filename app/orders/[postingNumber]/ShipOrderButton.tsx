@@ -40,6 +40,13 @@ export function ShipOrderButton({
         setError("Geçerli bir kutu sayısı girin (1 ya da daha büyük bir tam sayı).");
         return;
       }
+      // Toplam adetten fazla kutuya bölünemez — server da aynı kontrolü yapıyor, burada erken
+      // durdurmak gereksiz bir istek atmayı önlüyor (2026-09-11'de gerçek bir denemede, packages
+      // dizisine dağıtım eklenince bu sınır anlamlı hale geldi).
+      if (parsed > totalQuantity) {
+        setError(`Bu siparişte toplam ${totalQuantity} adet var — en fazla ${totalQuantity} kutuya bölünebilir.`);
+        return;
+      }
       qty = parsed;
     }
     setLoading(true);
@@ -122,10 +129,11 @@ export function ShipOrderButton({
       <div className="hint">Bu işlem Ozon'a GERÇEK bir sevkiyat onayı gönderir, geri alınamaz.</div>
       {canSplit && (
         <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
-          Kaç kutuya bölünsün? (1 = bölme, tek kutu)
+          Kaç kutuya bölünsün? (1 = bölme, tek kutu, en fazla {totalQuantity})
           <input
             type="number"
             min="1"
+            max={totalQuantity}
             value={multiBoxQty}
             onChange={(e) => setMultiBoxQty(e.target.value)}
             style={{ width: 80 }}

@@ -1,5 +1,5 @@
 import { prisma } from "../../db/prisma";
-import { listFbsPostings, getFbsPosting, shipFbsPosting, setMultiBoxQty, type OzonFbsPosting } from "../../ozon/orders";
+import { listFbsPostings, getFbsPosting, shipFbsPosting, type OzonFbsPosting } from "../../ozon/orders";
 import { getProductAttributes } from "../../ozon/products";
 import { OzonApiError } from "../../ozon/client";
 import { importFromOzon, syncMissingProductsFromOzon } from "../products/products.service";
@@ -280,6 +280,44 @@ function matchingIdsWhere(matchingIds: string[] | null) {
   return matchingIds !== null ? { id: { in: matchingIds } } : {};
 }
 
+// Ozon'un satıcıya kargoya verme SÜRESİ olarak verdiği kesin tarih — bu tarih geçtiği hâlde sipariş
+// hâlâ kargoya teslim edilmemişse (yani hâlâ bu kümenin DIŞINDaki bir durumdaysa) gecikmiş sayılır
+// (2026-09-11, kullanıcı talebi: "kargoya verme süresi gecikme vs detayları gösterip gecikenler
+// her statüde siparişlerde filtreleyecek"). `sent_by_seller` ("Satıcı Tarafından Gönderildi") kümeye
+// BİLEREK eklendi — satıcının kargoya verme işini zaten TAMAMLADIĞI anlamına geliyor, deadline
+// geçmiş olsa bile "gecikti" göstermek yanıltıcı olurdu (2026-09-11'de code review'da tespit
+// edildi — ilk yazımda sadece delivering/delivered/cancelled vardı). Aynı gerekçeyle `arbitration`
+// ve `client_arbitration` ("İhtilaf"/"Müşteri İhtilafı") da eklendi — bunlar normalde sipariş
+// TESLİM EDİLDİKTEN SONRA açılan anlaşmazlık durumları, kargoya verme süresiyle artık alakasız
+// (2026-09-11'de code review'da tespit edildi). `not_accepted` ("Kabul Edilmedi") BİLİNÇLİ olarak
+// kümeye eklenMEDİ — bu durum genelde satıcının hâlâ aktif müdahale etmesi gereken bir durum,
+// "iş bitti" anlamına gelmiyor.
+const SHIPPED_OR_DONE_STATUSES = new Set([
+  "delivering",
+  "delivered",
+  "cancelled",
+  "sent_by_seller",
+  "arbitration",
+  "client_arbitration",
+]);
+
+export interface ShipmentDelayInfo {
+  isDelayed: boolean;
+  daysLate: number;
+  shipmentDeadline: Date | null;
+}
+
+export function getShipmentDelayInfo(order: { status: string; rawPayload: unknown }): ShipmentDelayInfo {
+  const shipmentDateRaw = (order.rawPayload as { shipment_date?: string } | null)?.shipment_date;
+  const shipmentDeadline = shipmentDateRaw ? new Date(shipmentDateRaw) : null;
+  if (!shipmentDeadline || Number.isNaN(shipmentDeadline.getTime()) || SHIPPED_OR_DONE_STATUSES.has(order.status)) {
+    return { isDelayed: false, daysLate: 0, shipmentDeadline };
+  }
+  const diffMs = Date.now() - shipmentDeadline.getTime();
+  if (diffMs <= 0) return { isDelayed: false, daysLate: 0, shipmentDeadline };
+  return { isDelayed: true, daysLate: Math.floor(diffMs / (24 * 60 * 60 * 1000)), shipmentDeadline };
+}
+
 export async function listOrders(params: {
   status?: string;
   scheme?: string;
@@ -292,10 +330,40 @@ export async function listOrders(params: {
   // sorgusu (findSearchMatchingOrderIds) sayfa başına iki kez çalışırdı (2026-09-10'da code
   // review'da tespit edildi).
   matchingIds?: string[] | null;
+  // Ozon'un kargoya verme süresi (shipment_date) geçmiş ama sipariş hâlâ kargoya teslim edilmemiş
+  // (durumu delivering/delivered/cancelled DIŞINDA) siparişler — status filtresiyle BİRLİKTE değil,
+  // ONUN YERİNE kullanılır (2026-09-11, kullanıcı talebi).
+  delayedOnly?: boolean;
   skip?: number;
   take?: number;
 }) {
   const matchingIds = params.matchingIds ?? null;
+
+  if (params.delayedOnly) {
+    // shipment_date rawPayload JSON'u içinde olduğu için DB seviyesinde filtrelenemiyor — önce
+    // durum bazında (indexed, ucuz) adayları DAR bir select (items/product OLMADAN) ile çekip
+    // gecikmeyi JS'te hesaplıyoruz ve sayfalamayı id bazında yapıyoruz; items+product join'i
+    // SADECE o sayfada gösterilecek siparişler için ayrı bir sorguyla çekiyoruz — aksi halde
+    // (ilk yazımda olduğu gibi) tüm adaylar için ağır join yapılıp büyük çoğunluğu JS'teki
+    // slice ile atılıyordu (2026-09-11'de code review'da tespit edildi).
+    const candidates = await prisma.order.findMany({
+      where: { status: { notIn: [...SHIPPED_OR_DONE_STATUSES] }, ...matchingIdsWhere(matchingIds) },
+      select: { id: true, status: true, rawPayload: true },
+      orderBy: { orderDate: "desc" },
+    });
+    const delayedIds = candidates.filter((o) => getShipmentDelayInfo(o).isDelayed).map((o) => o.id);
+    const skip = params.skip ?? 0;
+    const take = params.take ?? 50;
+    const pageIds = delayedIds.slice(skip, skip + take);
+    const pageOrders = await prisma.order.findMany({
+      where: { id: { in: pageIds } },
+      include: { items: { include: { product: true } } },
+    });
+    const byId = new Map(pageOrders.map((o) => [o.id, o]));
+    const orders = pageIds.map((id) => byId.get(id)!).filter(Boolean);
+    return { orders, total: delayedIds.length };
+  }
+
   const where = {
     ...(params.status ? { status: params.status } : {}),
     ...(params.scheme ? { scheme: params.scheme } : {}),
@@ -334,6 +402,12 @@ export async function getOrderFilterCounts(params: {
   matchingIds?: string[] | null;
   invoicedSince: Date;
   invoicedTo: Date;
+  // "Gecikenler" sekmesi zaten aktifken (page.tsx'te showDelayed=true) çağıran taraf listOrders'ı
+  // AYNI matchingIds ile zaten çağırıp doğru gecikme sayısını (total) elinde tutuyor — bu durumda
+  // burada AYNI (JSON rawPayload taramalı, pahalı) sorguyu tekrar çalıştırmak yerine o sayıyı
+  // doğrudan kullanıyoruz (2026-09-11'de code review'da tespit edildi: iki fonksiyon paralel
+  // çalıştığı için birbirinin sonucunu göremiyordu, aynı tarama iki kez yapılıyordu).
+  knownDelayedCount?: number;
 }) {
   const matchingIds = params.matchingIds ?? null;
   const baseWhere = matchingIdsWhere(matchingIds);
@@ -341,11 +415,17 @@ export async function getOrderFilterCounts(params: {
   // "total" ayrı bir COUNT(*) yerine durum gruplarının toplamından türetiliyor — Order.status
   // zorunlu (non-nullable) bir alan olduğu için bu iki değer matematiksel olarak hep eşit, ayrı
   // sorgu sadece gereksiz bir DB gidiş-dönüşüydü (2026-09-10'da code review'da tespit edildi).
-  const [statusGroups, invoicedToday] = await Promise.all([
+  const [statusGroups, invoicedToday, delayCandidates] = await Promise.all([
     prisma.order.groupBy({ by: ["status"], where: baseWhere, _count: { _all: true } }),
     prisma.order.count({
       where: { ...baseWhere, parasutInvoicedAt: { gte: params.invoicedSince, lt: params.invoicedTo } },
     }),
+    params.knownDelayedCount != null
+      ? Promise.resolve([])
+      : prisma.order.findMany({
+          where: { ...baseWhere, status: { notIn: [...SHIPPED_OR_DONE_STATUSES] } },
+          select: { status: true, rawPayload: true },
+        }),
   ]);
 
   const byStatus: Record<string, number> = {};
@@ -354,8 +434,9 @@ export async function getOrderFilterCounts(params: {
     byStatus[g.status] = g._count._all;
     total += g._count._all;
   }
+  const delayedCount = params.knownDelayedCount ?? delayCandidates.filter((o) => getShipmentDelayInfo(o).isDelayed).length;
 
-  return { total, byStatus, invoicedToday };
+  return { total, byStatus, invoicedToday, delayedCount };
 }
 
 // Toast bildirimleri için — bu tarihten SONRA bizim DB'ye düşen (createdAt, yani sync'in yeni
@@ -669,6 +750,22 @@ function extractShippedPostingNumbers(raw: unknown): string[] {
   return [];
 }
 
+// shipOrder'ın attığı hataları ikiye ayırmak için: BU sınıfla sarmalanan hatalar ya Ozon'a GERÇEK
+// bir ship isteği hiç gitmeden oluştu, ya da Ozon isteği AÇIKÇA (belirsizlik olmadan) reddetti —
+// her iki durumda da kilit zaten serbest bırakıldı, siparişe kesinlikle hiçbir şey olmadı.
+// Sarmalanmamış hatalar ("belirsiz" durumlar — bkz.
+// shipFbsPosting'in kendi hata bloğu) farklı, daha temkinli bir mesajla gösterilmeli. Ship API
+// route'u bu ayrımı kullanıcıya yansıtıyor — aksi halde her hata "Ozon panelinden kontrol edin"
+// gibi gereksiz yere ürkütücü bir mesaj gösteriyordu, oysa çoğu durumda (ör. Ozon'un net bir
+// "POSTING_DOES_NOT_HAVE_MULTI_BOX_PRODUCT" gibi isimli reddi) hiçbir belirsizlik yok
+// (2026-09-11'de gerçek bir siparişte yaşandı — kullanıcı gereksiz yere korktu).
+export class SafeShipFailureError extends Error {
+  constructor(public readonly cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "SafeShipFailureError";
+  }
+}
+
 // shipOrder içinde iki ayrı yerden çağrılıyordu (2026-09-10'da code review'da tespit edildi) — tek
 // yerden, kilidin serbest bırakılma mantığının ileride tutarsız güncellenmesini önlemek için.
 function releaseShipClaim(postingNumber: string) {
@@ -678,12 +775,42 @@ function releaseShipClaim(postingNumber: string) {
   });
 }
 
+// Sipariş birden fazla kutuya bölünecekse (multiBoxQty > 1) ürün adetlerini kutulara dağıtır.
+// ÖNEMLİ (2026-09-11'de gerçek bir siparişte yaşanan POSTING_DOES_NOT_HAVE_MULTI_BOX_PRODUCT
+// hatası + Ozon'un resmi dokümantasyonuyla doğrulandı): bölme için AYRI bir "multiboxqty/set"
+// çağrısı YAPILMAZ — o uç nokta bambaşka bir senaryo için (bkz. src/ozon/orders.ts setMultiBoxQty
+// açıklaması, kaldırıldı). Doğru yöntem: shipFbsPosting'in `packages` dizisine BİRDEN FAZLA eleman
+// göndermek — Ozon'un resmi örneği tam bu senaryo için (2 adet aynı üründen oluşan bir siparişi 2
+// kutuya bölmek), her package'a 1'er adet koyarak. Burada birimleri (her adet ayrı) round-robin
+// dağıtıyoruz ki farklı ürünler varsa bile kutular dengeli dolsun.
+// DİKKAT: bu fonksiyon birden fazla FARKLI ürünün tek bir kutuya karışabileceği bir dağıtım
+// yapıyor (round-robin, ürün ayrımı gözetmeden). Ozon'un resmi dokümantasyonundaki `packages`
+// dizisi örneği bunu destekliyor gibi görünüyor ve GERÇEK bir canlı testte (2026-09-11, tek
+// ürünlü sipariş 71019016-0179-1, 2 kutu) başarıyla çalıştı — ama o test TEK ürünlüydü. Birden
+// fazla FARKLI ürün içeren bir siparişte kutu bölme henüz canlıda doğrulanmadı; eğer Ozon karışık
+// kutulara da MULTI_BOX_PRODUCT benzeri bir hatayla itiraz ederse (2026-09-11'deki yanlış
+// multiboxqty/set denemesindeki gibi) bu fonksiyon gözden geçirilmeli.
+function distributeIntoPackages(
+  items: Array<{ product_id: number; quantity: number }>,
+  boxCount: number,
+): Array<{ products: Array<{ product_id: number; quantity: number }> }> {
+  const units: number[] = [];
+  for (const item of items) {
+    for (let i = 0; i < item.quantity; i++) units.push(item.product_id);
+  }
+  const boxes: Map<number, number>[] = Array.from({ length: boxCount }, () => new Map());
+  units.forEach((productId, i) => {
+    const box = boxes[i % boxCount];
+    box.set(productId, (box.get(productId) ?? 0) + 1);
+  });
+  return boxes.map((box) => ({
+    products: [...box.entries()].map(([product_id, quantity]) => ({ product_id, quantity })),
+  }));
+}
+
 // Ozon panelindeki "Topla" ile aynı adım — siparişi awaiting_packaging'den bir sonraki duruma
 // geçirir ve kargo etiketinin oluşmasını tetikler (bkz. BEKLEYEN-GELISTIRMELER.md #3, kullanıcı
-// notu: etiket ANCAK bu adımdan sonra oluşuyor). multiBoxQty verilirse (Ozon panelinde bu seçenek
-// sadece paketteki toplam ürün adedi 1'den fazlaysa çıkıyor — kullanıcı notu) shipFbsPosting'den
-// ÖNCE setMultiBoxQty çağrılıyor; Ozon kendi tarafında ürünleri kutulara nasıl dağıtacağına karar
-// veriyor, biz "kaç kutu" bilgisini veriyoruz (hangi ürünün hangi kutuya gideceğini DEĞİL).
+// notu: etiket ANCAK bu adımdan sonra oluşuyor).
 export async function shipOrder(postingNumber: string, multiBoxQty?: number) {
   if (multiBoxQty != null && (!Number.isInteger(multiBoxQty) || multiBoxQty < 1)) {
     throw new Error("Geçersiz kutu sayısı — 1 ya da daha büyük bir tam sayı olmalı.");
@@ -747,39 +874,17 @@ export async function shipOrder(postingNumber: string, multiBoxQty?: number) {
     throw new Error(`"${unsafeSku.offerId}" kaleminin Ozon SKU değeri beklenenden çok büyük — güvenle gönderilemiyor, sipariş paketlenmedi.`);
   }
 
-  try {
-    if (multiBoxQty != null && multiBoxQty > 1) {
-      const { result: boxResult } = await setMultiBoxQty({ postingNumber, multiBoxQty });
-      // Ozon'un cevap şekli (result.result) hiç canlıda doğrulanmadı — yanlışsa GERÇEKTEN kabul
-      // edilmiş bir kutu sayısını "reddedildi" sanıp isteği burada durdurmak, isteği hiç
-      // durdurmadan yanlış varsaymaktan daha güvenli (2026-09-10'da code review'da tespit edildi:
-      // "!boxResult.result" nesnenin kendisi de olsa true çıkabiliyordu). Ham cevabı logluyoruz ki
-      // ilk gerçek bölme denemesinde şekil farklı çıkarsa hemen görülüp düzeltilebilsin.
-      console.log(`[shipOrder] ${postingNumber} setMultiBoxQty ham cevap:`, JSON.stringify(boxResult));
-      if (boxResult?.result !== true) {
-        throw new Error("Ozon'un kutu sayısını kabul edip etmediği doğrulanamadı — sipariş paketlenmedi, tekrar deneyebilirsiniz.");
-      }
-    }
-  } catch (error) {
-    // Buraya kadar Ozon'a GERÇEK bir ship isteği HİÇ gitmedi (setMultiBoxQty ayrı, geri alınabilir
-    // bir çağrı) — kilidi güvenle serbest bırakabiliriz.
+  const productItems = freshItems.map((item) => ({ product_id: Number(item.ozonSku), quantity: item.quantity }));
+  const totalUnits = productItems.reduce((sum, item) => sum + item.quantity, 0);
+  if (multiBoxQty != null && multiBoxQty > totalUnits) {
     await releaseShipClaim(postingNumber);
-    throw error;
+    throw new Error(`Bu siparişte toplam ${totalUnits} adet var — ${multiBoxQty} kutuya bölünemez.`);
   }
+  const packages = multiBoxQty != null && multiBoxQty > 1 ? distributeIntoPackages(productItems, multiBoxQty) : [{ products: productItems }];
 
   let shipResult: unknown;
   try {
-    const response = await shipFbsPosting({
-      postingNumber,
-      packages: [
-        {
-          products: freshItems.map((item) => ({
-            product_id: Number(item.ozonSku),
-            quantity: item.quantity,
-          })),
-        },
-      ],
-    });
+    const response = await shipFbsPosting({ postingNumber, packages });
     shipResult = response.result;
     console.log(`[shipOrder] ${postingNumber} shipFbsPosting ham cevap:`, JSON.stringify(shipResult));
   } catch (shipError) {
@@ -806,13 +911,18 @@ export async function shipOrder(postingNumber: string, multiBoxQty?: number) {
       shipError.status < 500 &&
       shipError.status !== 409;
     if (definitelyRejectedByOzon) {
+      // Ozon isteği AÇIKÇA reddetti (400 gibi, 409 hariç) — belirsizlik yok, kilidi güvenle serbest
+      // bırakıyoruz. SafeShipFailureError ile sarmalanıyor ki API route'u bunu "belirsiz, Ozon
+      // panelinden kontrol edin" değil, "kesinlikle güvenli, tekrar deneyebilirsiniz" olarak
+      // göstersin (2026-09-11'de gerçek bir siparişte yaşandı — POSTING_DOES_NOT_HAVE_MULTI_BOX_PRODUCT
+      // gibi net bir red bile eskiden gereksiz yere korkutucu gösteriliyordu).
       await releaseShipClaim(postingNumber);
-    } else {
-      console.error(
-        `[shipOrder] ${postingNumber}: shipFbsPosting belirsiz bir hatayla başarısız oldu (Ozon'a isteğin ulaşıp ulaşmadığı bilinmiyor) — sipariş BİLEREK kilitli bırakıldı, Ozon panelinden elle kontrol edilmeli. Gerçekten paketlenmediyse bkz. src/scripts/clear-stuck-ship-claim.ts.`,
-        shipError,
-      );
+      throw new SafeShipFailureError(shipError);
     }
+    console.error(
+      `[shipOrder] ${postingNumber}: shipFbsPosting belirsiz bir hatayla başarısız oldu (Ozon'a isteğin ulaşıp ulaşmadığı bilinmiyor) — sipariş BİLEREK kilitli bırakıldı, Ozon panelinden elle kontrol edilmeli. Gerçekten paketlenmediyse bkz. src/scripts/clear-stuck-ship-claim.ts.`,
+      shipError,
+    );
     throw shipError;
   }
 

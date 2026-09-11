@@ -75,7 +75,27 @@ Yerel sunucuda hem Türkçe karakterli hem gerçek "%" içeren (iki ayrı gerçe
 offerId'ler; hem sayfa hem API uçları (GET ve PATCH/POST yazma dahil) tek tek `curl` ile test edilip
 hepsinin doğru çalıştığı doğrulandı.
 
-## 3. Ozon "Topla" (paketleme onayı + gerekirse bölme) akışı (KOD YAZILDI — 2026-09-10, HENÜZ CANLI SİPARİŞTE TEST EDİLMEDİ)
+## 3. Ozon "Topla" (paketleme onayı + gerekirse bölme) akışı (KOD YAZILDI — CANLIDA KISMEN TEST EDİLDİ)
+
+**GERÇEK CANLI TEST SONUÇLARI (2026-09-11):**
+- **Tek kutulu (bölmesiz) "Topla": BAŞARILI.** Gerçek bir siparişte (72904747-0230-1) denendi,
+  sipariş gerçekten paketlendi (local durum doğru şekilde `awaiting_deliver`'a geçti). Kargo
+  etiketi ilk denemede "henüz hazır değil" hatası verdi — bu BEKLENEN bir davranış (Ozon etiketi
+  paketlemeden birkaç dakika sonra üretiyor), birkaç dakika sonra tekrar denenince inmesi gerekiyor.
+- **Kutuya bölme: İLK DENEME BAŞARISIZ OLDU, KÖK NEDEN BULUNUP DÜZELTİLDİ.** Gerçek bir siparişte
+  (71019016-0179-1, 2 adet tek ürün) "2 kutuya böl" denendi, Ozon **`POSTING_DOES_NOT_HAVE_MULTI_BOX_PRODUCT`**
+  hatasıyla reddetti. Sipariş bulunduğu duruma GÜVENLE geri döndü (kilit serbest, hiçbir gerçek
+  sevkiyat isteği gitmedi — doğrulandı). **Kök neden:** `/v3/posting/multiboxqty/set` uç noktası
+  kullanılmıştı, ama bu uç nokta BAMBAŞKA bir senaryo için (rFBS Aggregator şeması + Ozon'un TEK bir
+  ürünü "çok kutulu" olarak işaretlediği, standart FBS'te geçersiz olan bir durum). Kullanıcının
+  Ozon panelinden doğrudan doğruladığı gibi bu siparişin bölünmesi mümkün VE gerekliydi, sadece
+  yöntem yanlıştı. **Doğru yöntem (resmi Ozon dokümantasyonunda birebir örnekle doğrulandı):**
+  `multiboxqty/set`'e HİÇ gerek yok — `/v4/posting/fbs/ship` isteğindeki `packages` dizisine
+  BİRDEN FAZLA eleman göndermek (ör. 2 adetlik tek ürünü 2 kutuya bölmek için: `packages: [{products:
+  [{product_id, quantity: 1}]}, {products: [{product_id, quantity: 1}]}]`). Kod bu şekilde düzeltildi
+  (bkz. `orders.service.ts` `distributeIntoPackages`), `setMultiBoxQty` tamamen kaldırıldı. **Bu
+  düzeltilmiş hali HENÜZ canlıda tekrar denenmedi** — bir sonraki adım kullanıcının aynı ya da
+  benzer bir siparişte bölmeyi tekrar denemesi.
 
 **İstek:** Ozon panelinde, bir sipariş "awaiting_packaging" durumundayken "Topla" dendiğinde
 paketleme onaylanıyor ve (ör. ağırlık yanlış girildiyse) siparişi birden fazla kutuya/gönderiye
@@ -97,11 +117,10 @@ istedi ("uzun sürecek", "ben ilerde yaparım").
   çağrılmayan, yarım bırakılmış bir `shipFbsPosting` fonksiyonu var ama o eski `/v2/posting/fbs/ship`
   sürümünü kullanıyor — gerçek çağrı öncesi güncel `/v4` sürümü resmi dokümantasyondan bir kez daha
   teyit edilmeli, kaynaklar arasında sürüm numarası tutarsızlığı görüldü.
-- Kutuya bölme: ayrı bir endpoint — `POST /v3/posting/multiboxqty/set`, istek:
-  `{ posting_number, multi_box_qty }`. **Akış sırası önemli:** önce `/v3/posting/fbs/get` ile
-  siparişin `is_multibox` alanına bakılır (Ozon ağırlık/boyut tutarsızlığı tespit ederse kendisi
-  `true` yapıyor); `true` ise `ship` çağrısından ÖNCE `multiboxqty/set` ile kutu sayısı bildirilmeli.
-  Tek kutulu siparişlerde bu adım atlanıp doğrudan `ship` çağrılabilir.
+- ~~Kutuya bölme: ayrı bir endpoint — `POST /v3/posting/multiboxqty/set`...~~ **YANLIŞ ÇIKTI —
+  bkz. yukarıdaki "GERÇEK CANLI TEST SONUÇLARI".** Bu uç nokta standart FBS'te bölme için
+  KULLANILMAMALI, gerçek bir siparişte `POSTING_DOES_NOT_HAVE_MULTI_BOX_PRODUCT` hatasıyla
+  reddedildi. Doğrusu: `ship` isteğinin `packages` dizisine birden fazla eleman göndermek.
 - Ayrıca `/v4/posting/fbs/ship/package` diye üçüncü, kısmi paketleme için bir endpoint daha var
   (muhtemelen seri numarası zorunlu ürünler için) — bu özellik kapsamında şimdilik gerekli değil.
 - **Kullanıcı notu (2026-09-10):** Ozon'un kendi panelinde, "ilk durumdaki" (awaiting_packaging)

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getOrderDetail, computeOrderAmount, computeOrderCost, computeOrderEstimatedProfit } from "@/modules/orders/orders.service";
+import { getOrderDetail, computeOrderAmount, computeOrderCost, computeOrderEstimatedProfit, getShipmentDelayInfo } from "@/modules/orders/orders.service";
 import { productPath } from "@/utils/decodeOfferId";
 import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
 import { CopyableField } from "./CopyableField";
@@ -78,6 +78,7 @@ export default async function OrderDetailPage({
   const realFeesRub = sumRealFeesRub(order.transactions);
   const realFeesUsd = realFeesRub != null && usdToRubRate ? realFeesRub / usdToRubRate : null;
   const possibleNetProfit = computeOrderEstimatedProfit(order.items, realShippingUsd, realFeesUsd);
+  const shipmentDelay = getShipmentDelayInfo(order);
 
   return (
     <div className="page-wide">
@@ -150,8 +151,15 @@ export default async function OrderDetailPage({
         </div>
         {raw?.shipment_date && (
           <div>
-            <div className="hint">Kargo Tarihi</div>
-            <div className="value" style={{ fontSize: 15 }}>{new Date(raw.shipment_date).toLocaleDateString("tr-TR")}</div>
+            <div className="hint">Kargoya Verme Süresi</div>
+            <div className="value" style={{ fontSize: 15, color: shipmentDelay.isDelayed ? "var(--danger)" : undefined }}>
+              {new Date(raw.shipment_date).toLocaleDateString("tr-TR")}
+              {shipmentDelay.isDelayed && (
+                <div className="hint" style={{ color: "var(--danger)" }}>
+                  {shipmentDelay.daysLate === 0 ? "bugün gecikti" : `${shipmentDelay.daysLate} gün gecikti`}
+                </div>
+              )}
+            </div>
           </div>
         )}
         {customerName && <CopyableField label="Ad Soyad" value={customerName.trim()} />}

@@ -55,9 +55,13 @@ export interface OzonFbsShipResponse {
 
 // Siparişi paketleyip kargoya hazır hale getirir — Ozon panelindeki "Topla" ile aynı adım, siparişi
 // 1. durumdan (awaiting_packaging) 2. duruma geçirir ve kargo etiketinin oluşmasını TETİKLER
-// (etiket bu çağrıdan ÖNCE üretilmiyor, bkz. BEKLEYEN-GELISTIRMELER.md #3, kullanıcı notu).
-// Sipariş birden fazla kutuya bölünecekse bu çağrıdan ÖNCE setMultiBoxQty ile kutu sayısı
-// bildirilmiş olmalı.
+// (etiket bu çağrıdan ÖNCE üretilmiyor, bkz. BEKLEYEN-GELISTIRMELER.md #3, kullanıcı notu). Sipariş
+// birden fazla kutuya bölünecekse `packages` dizisine BİRDEN FAZLA eleman gönderilir — Ozon'un
+// resmi dokümantasyonu bunu tam bu şekilde tarif ediyor (2026-09-11'de doğrulandı, bkz.
+// orders.service.ts distributeIntoPackages). NOT: `/v3/posting/multiboxqty/set` diye AYRI bir uç
+// nokta da var ama o BAMBAŞKA bir senaryo için (rFBS Aggregator şeması + Ozon'un TEK bir ürünü
+// "çok kutulu" olarak işaretlediği durum) — standart FBS siparişinde bölme için KULLANILMAMALI,
+// denendi ve "POSTING_DOES_NOT_HAVE_MULTI_BOX_PRODUCT" hatasıyla reddedildi.
 export function shipFbsPosting(params: {
   postingNumber: string;
   packages: Array<{ products: Array<{ product_id: number; quantity: number }> }>;
@@ -69,24 +73,9 @@ export function shipFbsPosting(params: {
   );
 }
 
-export interface OzonMultiBoxQtySetResponse {
-  result: { result: boolean };
-}
-
-// Sipariş birden fazla kutuya/gönderiye bölünecekse shipFbsPosting'den ÖNCE çağrılmalı — Ozon
-// panelinde bu seçenek sadece paketteki toplam ürün adedi 1'den fazlaysa çıkıyor (kullanıcı notu,
-// bkz. BEKLEYEN-GELISTIRMELER.md #3).
-export function setMultiBoxQty(params: { postingNumber: string; multiBoxQty: number }) {
-  return ozonPost<OzonMultiBoxQtySetResponse>(
-    "/v3/posting/multiboxqty/set",
-    { posting_number: params.postingNumber, multi_box_qty: params.multiBoxQty },
-    { retry: false },
-  );
-}
-
-// shipFbsPosting/setMultiBoxQty gibi GERÇEK, geri alınamaz bir yazma isteği — otomatik retry
-// burada da kapalı (2026-09-10'da code review'da tespit edildi: henüz hiçbir yerden çağrılmıyor
-// ama ileride bağlanırsa aynı çift-işlem riskini taşıyordu).
+// shipFbsPosting gibi GERÇEK, geri alınamaz bir yazma isteği — otomatik retry burada da kapalı
+// (2026-09-10'da code review'da tespit edildi: henüz hiçbir yerden çağrılmıyor ama ileride
+// bağlanırsa aynı çift-işlem riskini taşıyordu).
 export function cancelFbsPosting(params: { postingNumber: string; cancelReasonId: number; cancelReasonMessage?: string }) {
   return ozonPost(
     "/v2/posting/fbs/cancel",

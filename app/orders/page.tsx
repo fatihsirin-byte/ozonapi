@@ -5,6 +5,7 @@ import {
   computeOrderEstimatedProfit,
   getOrderFilterCounts,
   findSearchMatchingOrderIds,
+  getShipmentDelayInfo,
 } from "@/modules/orders/orders.service";
 import { getRealShippingAndFeesUsdByPosting } from "@/modules/finance/pnl-report.service";
 import { getUsdToTryRate } from "@/pricing/fx-rate";
@@ -55,11 +56,12 @@ function getShipmentDate(rawPayload: unknown): string | null {
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; page?: string; invoicedToday?: string; q?: string }>;
+  searchParams: Promise<{ status?: string; page?: string; invoicedToday?: string; delayed?: string; q?: string }>;
 }) {
   const params = await searchParams;
   const page = parsePageParam(params.page);
   const showInvoicedToday = params.invoicedToday === "1";
+  const showDelayed = params.delayed === "1";
   const todayRange = getIstanbulTodayRangeUtc();
   // getUsdToTryRate() matchingIds'e bağlı değil — arama sorgusunu (pahalı ILIKE) beklemeden hemen
   // paralel başlatılıyor (2026-09-10'da code review'da tespit edildi — daha önce matchingIds'in
@@ -74,18 +76,48 @@ export default async function OrdersPage({
   // listOrders ile birlikte paralel başlatılıyor, sadece kargo maliyeti orders'ı bekliyor
   // (2026-09-10'da code review'da tespit edildi — filterCounts listOrders'ı gereksiz yere
   // sırayla bekliyordu).
-  const [{ orders, total }, liveTryRate, filterCounts] = await Promise.all([
-    listOrders({
-      status: showInvoicedToday ? undefined : params.status,
-      invoicedSince: showInvoicedToday ? todayRange.start : undefined,
-      invoicedTo: showInvoicedToday ? todayRange.end : undefined,
-      matchingIds,
-      skip: (page - 1) * 50,
-      take: 50,
-    }),
-    liveTryRatePromise,
-    getOrderFilterCounts({ matchingIds, invoicedSince: todayRange.start, invoicedTo: todayRange.end }),
-  ]);
+  const listOrdersPromise = listOrders({
+    status: showInvoicedToday || showDelayed ? undefined : params.status,
+    invoicedSince: showInvoicedToday ? todayRange.start : undefined,
+    invoicedTo: showInvoicedToday ? todayRange.end : undefined,
+    delayedOnly: showDelayed,
+    matchingIds,
+    skip: (page - 1) * 50,
+    take: 50,
+  });
+  // "Gecikenler" sekmesi aktifken listOrders'ın kendi delayedOnly dalı zaten AYNI matchingIds ile
+  // tüm gecikmiş siparişleri taramış oluyor (total = doğru sayı) — bu durumda getOrderFilterCounts'ın
+  // kendi (aynı pahalı) taramayı TEKRAR yapmasını önlemek için önce listOrders'ı bekleyip sayıyı ona
+  // devrediyoruz; showDelayed false iken hâlâ tam paralel çalışıyor (2026-09-11'de code review'da
+  // tespit edildi: iki fonksiyon paralel çalıştığı için birbirinin sonucunu göremiyordu).
+  let orders: Awaited<typeof listOrdersPromise>["orders"];
+  let total: number;
+  let liveTryRate: Awaited<typeof liveTryRatePromise>;
+  let filterCounts: Awaited<ReturnType<typeof getOrderFilterCounts>>;
+  if (showDelayed) {
+    const listResult = await listOrdersPromise;
+    orders = listResult.orders;
+    total = listResult.total;
+    [liveTryRate, filterCounts] = await Promise.all([
+      liveTryRatePromise,
+      getOrderFilterCounts({
+        matchingIds,
+        invoicedSince: todayRange.start,
+        invoicedTo: todayRange.end,
+        knownDelayedCount: total,
+      }),
+    ]);
+  } else {
+    const listResult = await Promise.all([
+      listOrdersPromise,
+      liveTryRatePromise,
+      getOrderFilterCounts({ matchingIds, invoicedSince: todayRange.start, invoicedTo: todayRange.end }),
+    ]);
+    orders = listResult[0].orders;
+    total = listResult[0].total;
+    liveTryRate = listResult[1];
+    filterCounts = listResult[2];
+  }
   const { shipping: realShippingByPosting, fees: realFeesByPosting } = await getRealShippingAndFeesUsdByPosting(
     orders.map((o) => o.postingNumber),
   );
@@ -94,7 +126,7 @@ export default async function OrdersPage({
   // (status/invoicedToday/q) tek bir yerden üretiyor — daha önce ikisi ayrı ayrı elle yazılmıştı
   // (2026-09-10'da code review'da tespit edildi: iki yerde aynı mantığın tekrarlanması, yeni bir
   // filtre eklendiğinde birinin unutulma riskini taşıyordu).
-  function ordersQuery(overrides: { status?: string; invoicedToday?: string } = {}) {
+  function ordersQuery(overrides: { status?: string; invoicedToday?: string; delayed?: string } = {}) {
     const qs = new URLSearchParams(overrides);
     if (params.q) qs.set("q", params.q);
     return qs.toString();
@@ -104,7 +136,7 @@ export default async function OrdersPage({
   // linkler de aramayı korumalı — aksi halde kullanıcı "iphone" aratıp "Teslim Edildi (2)" görüp
   // tıkladığında arama sıfırlanır ve gördüğü sayı ile indiği liste birbirini tutmazdı (2026-09-10'da
   // code review'da tespit edildi).
-  function filterHref(overrides: { status?: string; invoicedToday?: string }) {
+  function filterHref(overrides: { status?: string; invoicedToday?: string; delayed?: string }) {
     const s = ordersQuery(overrides);
     return s ? `/orders?${s}` : "/orders";
   }
@@ -112,6 +144,7 @@ export default async function OrdersPage({
   const currentQuery = ordersQuery({
     ...(params.status ? { status: params.status } : {}),
     ...(showInvoicedToday ? { invoicedToday: "1" } : {}),
+    ...(showDelayed ? { delayed: "1" } : {}),
   });
   const pageQueryPrefix = currentQuery ? `${currentQuery}&` : "";
 
@@ -128,20 +161,36 @@ export default async function OrdersPage({
 
       <div className="card" style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <Link href={filterHref({})}>
-          <button className={`btn-secondary${!params.status && !showInvoicedToday ? " active" : ""}`}>
+          <button className={`btn-secondary${!params.status && !showInvoicedToday && !showDelayed ? " active" : ""}`}>
             Tümü <span className="hint">({filterCounts.total})</span>
           </button>
         </Link>
         {STATUS_OPTIONS.map((s) => (
           <Link key={s} href={filterHref({ status: s })}>
-            <button className={`btn-secondary${params.status === s ? " active" : ""}`}>
+            {/* !showDelayed BİLEREK eklendi — delayed=1 aktifken listOrders status/invoicedToday'i
+                TAMAMEN yok sayıyor (bkz. yukarıdaki listOrders çağrısı), o yüzden URL'de ikisi
+                birlikte varsa (ör. ?delayed=1&status=delivered) sadece "Gecikenler" aktif
+                görünmeli, aksi halde iki buton aynı anda "aktif" görünüp gerçek filtreyle
+                çelişirdi (2026-09-11'de code review'da tespit edildi). */}
+            <button className={`btn-secondary${params.status === s && !showDelayed ? " active" : ""}`}>
               {translateOrderStatus(s)} <span className="hint">({filterCounts.byStatus[s] ?? 0})</span>
             </button>
           </Link>
         ))}
         <Link href={filterHref({ invoicedToday: "1" })}>
-          <button className={`btn-secondary${showInvoicedToday ? " active" : ""}`}>
+          <button className={`btn-secondary${showInvoicedToday && !showDelayed ? " active" : ""}`}>
             Bugün Faturası Kesilenler <span className="hint">({filterCounts.invoicedToday})</span>
+          </button>
+        </Link>
+        <Link href={filterHref({ delayed: "1" })}>
+          <button
+            className={`btn-secondary${showDelayed ? " active" : ""}`}
+            title="Ozon'un kargoya verme süresi geçmiş ama hâlâ kargoya teslim edilmemiş siparişler (durumdan bağımsız)"
+          >
+            Gecikenler{" "}
+            <span className="hint" style={{ color: filterCounts.delayedCount > 0 ? "var(--danger)" : undefined }}>
+              ({filterCounts.delayedCount})
+            </span>
           </button>
         </Link>
         {showInvoicedToday && <InvoicedTodayZipButton />}
@@ -176,6 +225,7 @@ export default async function OrdersPage({
             <tbody>
               {orders.map((o) => {
                 const shipmentDate = getShipmentDate(o.rawPayload);
+                const delay = getShipmentDelayInfo(o);
                 return (
                   <tr key={o.id}>
                     <td>
@@ -186,7 +236,14 @@ export default async function OrdersPage({
                       <span className="badge pending">{translateOrderStatus(o.status)}</span>
                     </td>
                     <td>{o.orderDate ? new Date(o.orderDate).toLocaleString("tr-TR") : "-"}</td>
-                    <td>{shipmentDate ? new Date(shipmentDate).toLocaleDateString("tr-TR") : "-"}</td>
+                    <td>
+                      {shipmentDate ? new Date(shipmentDate).toLocaleDateString("tr-TR") : "-"}
+                      {delay.isDelayed && (
+                        <div className="hint" style={{ color: "var(--danger)" }}>
+                          {delay.daysLate === 0 ? "bugün gecikti" : `${delay.daysLate} gün gecikti`}
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         {o.items.map((item) => (

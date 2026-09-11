@@ -34,15 +34,3 @@ export function getAnalyticsByDay(dateFrom: string, dateTo: string) {
     limit: 1000,
   });
 }
-
-// SKU bazında kırılım — "en çok satan ürünler" tablosu için (sadece ciro/adet, dimension
-// name'i Ozon zaten ürün adıyla dolduruyor, local DB join'e gerek yok).
-export function getAnalyticsBySku(dateFrom: string, dateTo: string, limit = 1000) {
-  return ozonPost<OzonAnalyticsResponse>("/v1/analytics/data", {
-    date_from: dateFrom,
-    date_to: dateTo,
-    dimension: ["sku"],
-    metrics: ["revenue", "ordered_units"],
-    limit,
-  });
-}

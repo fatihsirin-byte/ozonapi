@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { LabelDownloadButton } from "./LabelDownloadButton";
 
 // Ozon panelinde "Topla" dendiğinde kutuya bölme seçeneği SADECE paketteki toplam ürün adedi
 // 1'den fazlaysa çıkıyor (kullanıcı notu, bkz. BEKLEYEN-GELISTIRMELER.md #3) — burada da aynı
@@ -53,13 +54,17 @@ export function ShipOrderButton({
         setError(data.error ?? "Paketlenemedi");
         return;
       }
-      setResult(data.postingNumbers ?? []);
+      // BİLEREK data.postingNumbers DEĞİL data.syncedPostings kullanılıyor — postingNumbers,
+      // Ozon'un ham ship cevabının (hiç canlıda doğrulanmamış) ayrıştırılmasından geliyor ve boş
+      // çıkabilir; syncedPostings ise shipOrder'ın GERÇEKTEN senkronize ettiği (en azından orijinal
+      // posting'i içeren) liste — hep en az bir posting içerir (2026-09-11'de code review'da tespit
+      // edildi: boş dizi gelirse kullanıcı hiç etiket indirme butonu göremiyordu).
+      setResult(data.syncedPostings?.length > 0 ? data.syncedPostings : [postingNumber]);
       setStep("idle");
-      // router.refresh() sayfayı hemen yeniden çizdiriyor — order.status artık "awaiting_packaging"
-      // olmadığından bu bileşen anında kaldırılıp "Paketlendi" mesajı hiç görünmeden kayboluyordu
-      // (2026-09-10'da code review'da tespit edildi). Kullanıcı mesajı görsün diye kısa bir
-      // gecikme bırakılıyor.
-      setTimeout(() => router.refresh(), 2500);
+      // BİLEREK router.refresh() ÇAĞIRMIYORUZ — çağırırsak order.status artık "awaiting_packaging"
+      // olmadığından bu bileşen anında kaldırılıp aşağıdaki etiket indirme butonları kullanıcı
+      // henüz tıklayamadan kaybolurdu (2026-09-10/11'de code review + kullanıcı talebi: "barkodlarını
+      // o ekrana çeksek"). Kullanıcı "Tamam" deyince (aşağıda) elle yeniliyoruz.
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bilinmeyen hata");
     } finally {
@@ -69,8 +74,23 @@ export function ShipOrderButton({
 
   if (result) {
     return (
-      <div className="hint" style={{ color: "var(--success)" }}>
-        Paketlendi{result.length > 1 ? ` — ${result.length} kutuya bölündü (${result.join(", ")})` : ""}
+      <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: 260 }}>
+        <div style={{ color: "var(--success)", fontWeight: 500 }}>
+          Paketlendi{result.length > 1 ? ` — ${result.length} kutuya bölündü` : ""}
+        </div>
+        {/* Yeni posting'ler (bölünmüşse HER BİRİ) hemen senkronize edildi (bkz. shipOrder) — kargo
+            etiketini indirmek/yazdırmak için sayfayı değiştirmeye gerek yok, buradan yapılabilir. */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {result.map((pn) => (
+            <div key={pn} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="hint" style={{ minWidth: 140 }}>{pn}</span>
+              <LabelDownloadButton postingNumber={pn} />
+            </div>
+          ))}
+        </div>
+        <button type="button" className="btn-secondary" onClick={() => router.refresh()}>
+          Tamam, sayfayı yenile
+        </button>
       </div>
     );
   }

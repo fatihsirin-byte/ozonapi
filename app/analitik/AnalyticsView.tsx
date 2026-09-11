@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { productPath } from "@/utils/decodeOfferId";
 
 interface DayRow {
   date: string;
@@ -26,11 +25,12 @@ interface Totals {
 }
 
 interface TopProduct {
-  sku: string;
+  offerId: string;
   name: string;
-  revenue: number;
+  image: string | null;
+  revenueUsd: number;
   orderedUnits: number;
-  offerId: string | null;
+  href: string;
 }
 
 const RANGE_OPTIONS = [
@@ -43,8 +43,18 @@ function toDateStr(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function fmtRub(n: number): string {
-  return `₽${n.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`;
+// "Genel Bakış" (görüntülenme/sepete ekleme gibi) Ozon'un analitik uç noktasından geliyor, o da
+// revenue'yu HER ZAMAN RUB döner (bkz. src/ozon/analytics.ts) — API tarafında dolara çevrildi,
+// çevrilemediği nadir durumda (kur çekilemedi) ham RUB olarak kalır, o yüzden burada da hangi para
+// biriminde olduğu ayrıca belirtiliyor (2026-09-11, kullanıcı talebi: "ciroyu ruble gösteriyor
+// dolar yap").
+function fmtRevenue(n: number, currency: "USD" | "RUB"): string {
+  const symbol = currency === "USD" ? "$" : "₽";
+  return `${symbol}${n.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`;
+}
+
+function fmtUsd(n: number): string {
+  return `$${n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function fmtNum(n: number): string {
@@ -53,7 +63,7 @@ function fmtNum(n: number): string {
 
 // Basit, tek seri (günlük ciro) çubuk grafik — inline SVG, hover'da tarih+değer gösterir.
 // Tek seri olduğu için legend gerekmiyor (başlık zaten seriyi adlandırıyor).
-function RevenueBarChart({ days }: { days: DayRow[] }) {
+function RevenueBarChart({ days, currency }: { days: DayRow[]; currency: "USD" | "RUB" }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const width = 720;
   const height = 220;
@@ -138,7 +148,7 @@ function RevenueBarChart({ days }: { days: DayRow[] }) {
           <div className="hint" style={{ margin: 0 }}>
             {days[hoverIndex].date}
           </div>
-          <strong>{fmtRub(days[hoverIndex].revenue)}</strong>
+          <strong>{fmtRevenue(days[hoverIndex].revenue, currency)}</strong>
         </div>
       )}
     </div>
@@ -149,9 +159,15 @@ export function AnalyticsView() {
   const [rangeDays, setRangeDays] = useState(14);
   const [days, setDays] = useState<DayRow[]>([]);
   const [totals, setTotals] = useState<Totals | null>(null);
+  const [revenueCurrency, setRevenueCurrency] = useState<"USD" | "RUB">("USD");
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+
   const [products, setProducts] = useState<TopProduct[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [productsLoading, setProductsLoading] = useState(true);
+  const [productsError, setProductsError] = useState<string | null>(null);
+  const [productSearchInput, setProductSearchInput] = useState("");
+  const [productQuery, setProductQuery] = useState("");
 
   const { from, to } = useMemo(() => {
     const toDate = new Date();
@@ -159,24 +175,45 @@ export function AnalyticsView() {
     return { from: toDateStr(fromDate), to: toDateStr(toDate) };
   }, [rangeDays]);
 
+  // "Genel Bakış" (görüntülenme/sepete ekleme vb.) Ozon'un kendi analitik uç noktasından geliyor,
+  // o hâlâ 429 (rate limit) verebilir — bu yüzden ayrı bir yükleme/hata durumu var, "En Çok Satan
+  // Ürünler" (artık local veriden, Ozon'a hiç gitmiyor) bundan ETKİLENMESİN diye (2026-09-11,
+  // kullanıcı talebi: önceden ikisi TEK bir hata durumunu paylaşıyordu, biri başarısız olunca
+  // diğeri başarılı olsa bile hiç gösterilmiyordu).
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    Promise.all([
-      fetch(`/api/analytics/overview?from=${from}&to=${to}`).then((r) => r.json()),
-      fetch(`/api/analytics/products?from=${from}&to=${to}&limit=15`).then((r) => r.json()),
-    ])
-      .then(([overview, topProducts]) => {
+    setOverviewLoading(true);
+    setOverviewError(null);
+    fetch(`/api/analytics/overview?from=${from}&to=${to}`)
+      .then((r) => r.json())
+      .then((overview) => {
         if (overview.error) {
-          setError(overview.error);
+          setOverviewError(overview.error);
           return;
         }
         setDays(overview.days ?? []);
         setTotals(overview.totals ?? null);
-        setProducts(topProducts.items ?? []);
+        setRevenueCurrency(overview.revenueCurrency === "RUB" ? "RUB" : "USD");
       })
-      .finally(() => setLoading(false));
+      .catch((err) => setOverviewError(err instanceof Error ? err.message : "Bilinmeyen hata"))
+      .finally(() => setOverviewLoading(false));
   }, [from, to]);
+
+  useEffect(() => {
+    setProductsLoading(true);
+    setProductsError(null);
+    const q = productQuery ? `&q=${encodeURIComponent(productQuery)}` : "";
+    fetch(`/api/analytics/products?from=${from}&to=${to}&limit=15${q}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) {
+          setProductsError(data.error);
+          return;
+        }
+        setProducts(data.items ?? []);
+      })
+      .catch((err) => setProductsError(err instanceof Error ? err.message : "Bilinmeyen hata"))
+      .finally(() => setProductsLoading(false));
+  }, [from, to, productQuery]);
 
   return (
     <div className="card">
@@ -193,19 +230,19 @@ export function AnalyticsView() {
         ))}
       </div>
 
-      {loading ? (
+      {overviewLoading ? (
         <div className="hint">Yükleniyor...</div>
-      ) : error ? (
+      ) : overviewError ? (
         <div className="hint" style={{ color: "var(--danger)" }}>
-          {error}
+          {overviewError}
         </div>
       ) : (
         <>
           {totals && (
             <div className="summary-grid" style={{ marginBottom: 24 }}>
               <div>
-                <div className="hint">Toplam Ciro (₽)</div>
-                <div className="value">{fmtRub(totals.revenue)}</div>
+                <div className="hint">Toplam Ciro</div>
+                <div className="value">{fmtRevenue(totals.revenue, revenueCurrency)}</div>
               </div>
               <div>
                 <div className="hint">Sipariş Adedi</div>
@@ -242,43 +279,88 @@ export function AnalyticsView() {
             <strong>Günlük Ciro</strong>
           </div>
           {days.length > 0 ? (
-            <RevenueBarChart days={days} />
+            <RevenueBarChart days={days} currency={revenueCurrency} />
           ) : (
             <div className="hint">Bu tarih aralığında veri yok.</div>
           )}
-
-          <div style={{ marginTop: 32, marginBottom: 8 }}>
-            <strong>En Çok Satan Ürünler</strong>
-          </div>
-          {products.length === 0 ? (
-            <div className="empty-state">Bu tarih aralığında satış yok.</div>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Ürün</th>
-                  <th>Ciro (₽)</th>
-                  <th>Adet</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((p) => (
-                  <tr key={p.sku}>
-                    <td>
-                      {p.offerId ? (
-                        <Link href={productPath(p.offerId)}>{p.name || p.sku}</Link>
-                      ) : (
-                        p.name || p.sku
-                      )}
-                    </td>
-                    <td>{fmtRub(p.revenue)}</td>
-                    <td>{fmtNum(p.orderedUnits)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
         </>
+      )}
+
+      <div style={{ marginTop: 32, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <strong>En Çok Satan Ürünler</strong>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            type="text"
+            value={productSearchInput}
+            onChange={(e) => setProductSearchInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") setProductQuery(productSearchInput.trim());
+            }}
+            placeholder="Ürün adı ya da SKU ara..."
+            style={{ minWidth: 240 }}
+          />
+          <button className="btn-secondary" onClick={() => setProductQuery(productSearchInput.trim())}>
+            Ara
+          </button>
+          {productQuery && (
+            <button
+              className="btn-secondary"
+              onClick={() => {
+                setProductSearchInput("");
+                setProductQuery("");
+              }}
+            >
+              Temizle
+            </button>
+          )}
+        </div>
+      </div>
+      {/* Bu tablo artık Ozon'un analitik uç noktasına (429/rate-limit'e sık takılan) değil, bizim
+          local sipariş verimize bağlı — bkz. orders.service.ts getTopSellingProducts (2026-09-11,
+          kullanıcı talebi) — bu yüzden Genel Bakış'tan bağımsız kendi yükleme/hata durumunu kullanıyor. */}
+      {productsLoading ? (
+        <div className="hint">Yükleniyor...</div>
+      ) : productsError ? (
+        <div className="hint" style={{ color: "var(--danger)" }}>
+          {productsError}
+        </div>
+      ) : products.length === 0 ? (
+        <div className="empty-state">
+          {productQuery ? `"${productQuery}" için sonuç bulunamadı.` : "Bu tarih aralığında satış yok."}
+        </div>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Ürün</th>
+              <th>Ciro ($)</th>
+              <th>Adet</th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((p) => (
+              <tr key={p.offerId}>
+                <td>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {p.image && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={p.image}
+                        alt=""
+                        width={32}
+                        height={32}
+                        style={{ objectFit: "cover", borderRadius: 4, flexShrink: 0 }}
+                      />
+                    )}
+                    <Link href={p.href}>{p.name || p.offerId}</Link>
+                  </div>
+                </td>
+                <td>{fmtUsd(p.revenueUsd)}</td>
+                <td>{fmtNum(p.orderedUnits)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   );

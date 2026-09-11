@@ -26,6 +26,69 @@ function extractGtipCode(rawValue: string): string {
   return match ? match[0] : rawValue.trim();
 }
 
+// Tek bir Ozon posting'ini local Order/OrderItem'a upsert eder — syncFbsOrders'ın (toplu, tarih
+// aralığı bazlı) VE shipOrder'ın (paketlemeden hemen sonra, TEK posting için anında) ortak
+// kullandığı çekirdek mantık (2026-09-11, kullanıcı talebi: "paket bölünce yeni siparişi hemen
+// göster, 15 dakika cron'unu bekleme" — daha önce bu mantık sadece syncFbsOrders içinde vardı).
+async function upsertPostingIntoDb(posting: OzonFbsPosting) {
+  // Bazı posting'lerde (örn. aggregator akışı) order_date boş/geçersiz geliyor — bu durumda
+  // in_process_at'e düşüyoruz, o da yoksa alanı boş bırakıyoruz (upsert'in patlamaması için).
+  const rawDate = posting.order_date || posting.in_process_at;
+  const parsedDate = rawDate ? new Date(rawDate) : null;
+  const orderDate = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
+
+  const order = await prisma.order.upsert({
+    where: { postingNumber: posting.posting_number },
+    create: {
+      postingNumber: posting.posting_number,
+      status: posting.status,
+      scheme: "fbs",
+      orderDate,
+      rawPayload: posting as unknown as object,
+    },
+    update: {
+      status: posting.status,
+      rawPayload: posting as unknown as object,
+    },
+  });
+
+  for (const item of posting.products ?? []) {
+    let product = await prisma.product.findUnique({ where: { offerId: item.offer_id } });
+    // Ürün panelden değil, doğrudan Ozon'un kendi arayüzünden açıldıysa bizim DB'mizde hiç
+    // kaydı olmuyor — görsel/isim panelde boş kalıyordu. Bu durumda Ozon'dan aynı
+    // importFromOzon() ile (bkz. products.service.ts, "Ozon'dan içe aktar" butonuyla aynı
+    // mantık) canlı ürün bilgisini çekip otomatik bir Product kaydı açıyoruz (2026-08-24,
+    // kullanıcı talebi). costPrice bilinmediği için boş kalır — kâr hesabı bunu bekleyene
+    // kadar "bilinmiyor" döner, sipariş senkronizasyonunu engellemez.
+    if (!product) {
+      try {
+        product = await importFromOzon(item.offer_id);
+      } catch (error) {
+        console.error(`[upsertPostingIntoDb] ${item.offer_id} Ozon'dan otomatik içe aktarılamadı:`, error);
+      }
+    }
+    await prisma.orderItem.upsert({
+      where: { orderId_offerId: { orderId: order.id, offerId: item.offer_id } },
+      create: {
+        orderId: order.id,
+        productId: product?.id,
+        offerId: item.offer_id,
+        ozonSku: item.sku != null ? BigInt(item.sku) : null,
+        quantity: item.quantity,
+        price: item.price,
+      },
+      update: {
+        productId: product?.id,
+        ozonSku: item.sku != null ? BigInt(item.sku) : null,
+        quantity: item.quantity,
+        price: item.price,
+      },
+    });
+  }
+
+  return order;
+}
+
 // Ozon'daki siparişleri (ve kalemlerini) çekip local DB'ye upsert eder, durum/PNL takibi için kullanılır.
 export async function syncFbsOrders(params: { since: string; to: string; status?: string }) {
   let offset = 0;
@@ -37,61 +100,7 @@ export async function syncFbsOrders(params: { since: string; to: string; status?
     const { result } = await listFbsPostings({ ...params, offset, limit });
 
     for (const posting of result.postings) {
-      // Bazı posting'lerde (örn. aggregator akışı) order_date boş/geçersiz geliyor — bu durumda
-      // in_process_at'e düşüyoruz, o da yoksa alanı boş bırakıyoruz (upsert'in patlamaması için).
-      const rawDate = posting.order_date || posting.in_process_at;
-      const parsedDate = rawDate ? new Date(rawDate) : null;
-      const orderDate = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
-
-      const order = await prisma.order.upsert({
-        where: { postingNumber: posting.posting_number },
-        create: {
-          postingNumber: posting.posting_number,
-          status: posting.status,
-          scheme: "fbs",
-          orderDate,
-          rawPayload: posting as unknown as object,
-        },
-        update: {
-          status: posting.status,
-          rawPayload: posting as unknown as object,
-        },
-      });
-
-      for (const item of posting.products ?? []) {
-        let product = await prisma.product.findUnique({ where: { offerId: item.offer_id } });
-        // Ürün panelden değil, doğrudan Ozon'un kendi arayüzünden açıldıysa bizim DB'mizde hiç
-        // kaydı olmuyor — görsel/isim panelde boş kalıyordu. Bu durumda Ozon'dan aynı
-        // importFromOzon() ile (bkz. products.service.ts, "Ozon'dan içe aktar" butonuyla aynı
-        // mantık) canlı ürün bilgisini çekip otomatik bir Product kaydı açıyoruz (2026-08-24,
-        // kullanıcı talebi). costPrice bilinmediği için boş kalır — kâr hesabı bunu bekleyene
-        // kadar "bilinmiyor" döner, sipariş senkronizasyonunu engellemez.
-        if (!product) {
-          try {
-            product = await importFromOzon(item.offer_id);
-          } catch (error) {
-            console.error(`[syncFbsOrders] ${item.offer_id} Ozon'dan otomatik içe aktarılamadı:`, error);
-          }
-        }
-        await prisma.orderItem.upsert({
-          where: { orderId_offerId: { orderId: order.id, offerId: item.offer_id } },
-          create: {
-            orderId: order.id,
-            productId: product?.id,
-            offerId: item.offer_id,
-            ozonSku: item.sku != null ? BigInt(item.sku) : null,
-            quantity: item.quantity,
-            price: item.price,
-          },
-          update: {
-            productId: product?.id,
-            ozonSku: item.sku != null ? BigInt(item.sku) : null,
-            quantity: item.quantity,
-            price: item.price,
-          },
-        });
-      }
-
+      await upsertPostingIntoDb(posting);
       synced.push(posting);
     }
 
@@ -358,6 +367,149 @@ export async function getRecentOrders(since: Date) {
     include: { items: { include: { product: true } } },
     orderBy: { createdAt: "asc" },
   });
+}
+
+export interface TopSellingProduct {
+  offerId: string;
+  name: string;
+  image: string | null;
+  revenueUsd: number;
+  orderedUnits: number;
+}
+
+// "En Çok Satan Ürünler" — BİLEREK Ozon'un /v1/analytics/data uç noktası (ANALİTİK sayfasının
+// "Genel Bakış" bölümü, görüntülenme/sepete ekleme gibi bizde hiç olmayan veriler için hâlâ
+// kullanılıyor) yerine kendi local sipariş verimizden hesaplanıyor: (1) bu veri zaten satış
+// tutarı/adet için Ozon'da senkronize edilmiş halde duruyor, ayrı bir Ozon isteğine hiç gerek yok;
+// (2) Ozon'un analitik uç noktası sık sık "rate limit" (429) hatası veriyordu — kullanıcı bunu
+// yaşadı (2026-09-11); (3) bizim price alanımız zaten USD, Ozon'un analitiği ise HER ZAMAN RUB
+// dönüyor (bkz. src/ozon/analytics.ts) — local veri kullanmak bu ruble/dolar karışıklığını da
+// kökünden çözüyor.
+export async function getTopSellingProducts(params: {
+  since: Date;
+  to: Date;
+  limit: number;
+  search?: string;
+}): Promise<TopSellingProduct[]> {
+  const search = params.search?.trim().toLowerCase();
+  const items = await prisma.orderItem.findMany({
+    where: {
+      order: {
+        orderDate: { gte: params.since, lte: params.to },
+        status: { not: "cancelled" },
+      },
+      ...(search
+        ? {
+            OR: [
+              { offerId: { contains: search, mode: "insensitive" as const } },
+              { product: { name: { contains: search, mode: "insensitive" as const } } },
+              { product: { nameRu: { contains: search, mode: "insensitive" as const } } },
+            ],
+          }
+        : {}),
+    },
+    include: { product: true },
+  });
+
+  const byOfferId = new Map<string, TopSellingProduct>();
+  for (const item of items) {
+    const revenue = Number(item.price) * item.quantity;
+    const existing = byOfferId.get(item.offerId);
+    if (existing) {
+      existing.revenueUsd += revenue;
+      existing.orderedUnits += item.quantity;
+    } else {
+      const images = item.product?.images;
+      byOfferId.set(item.offerId, {
+        offerId: item.offerId,
+        name: item.product?.name ?? item.offerId,
+        image: Array.isArray(images) ? ((images as string[])[0] ?? null) : null,
+        revenueUsd: revenue,
+        orderedUnits: item.quantity,
+      });
+    }
+  }
+
+  return [...byOfferId.values()].sort((a, b) => b.revenueUsd - a.revenueUsd).slice(0, params.limit);
+}
+
+// Haftalık gruplamada bir tarihin ait olduğu haftanın PAZARTESİ'sini anahtar olarak kullanıyoruz
+// (gerçek ISO hafta numarası değil — takvim yılı sınırında karışıklık çıkarmayan, sıralanabilir
+// basit bir "hafta başlangıcı" anahtarı yeterli).
+function weekStartKey(date: Date): string {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = d.getUTCDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diffToMonday);
+  return d.toISOString().slice(0, 10);
+}
+
+export interface ProductSalesBucket {
+  period: string; // günlükte "YYYY-MM-DD", haftalıkta o haftanın Pazartesi'si
+  unitsSold: number;
+  revenueUsd: number;
+  avgSalePriceUsd: number;
+  profitUsd: number | null; // alış fiyatı hiç girilmemişse null
+}
+
+// Ürün detay sayfasındaki "Satış Geçmişi" grafiği/tablosu için — bu ürünün geçmiş siparişlerini
+// günlük/haftalık gruplayıp o dönemin satış tutarı + tahmini kârını hesaplar. Kâr, computePriceBreakdown
+// ile (Fiyat Hesaplayıcı'nın kullandığı AYNI formül) o KALEMİN kendi satış fiyatı üzerinden
+// hesaplanıyor — bir siparişteki diğer ürünlerin payını (gerçek kargo/komisyon gibi sipariş
+// seviyesindeki verileri) tek bir ürüne bölüştürmeye çalışmak (bkz. computeOrderEstimatedProfit)
+// burada anlamlı bir şekilde mümkün değil, o yüzden BİLEREK her zaman tahmini formül kullanılıyor
+// (2026-09-11, kullanıcı talebi: "ürünün satış grafiğini göster ... o günlerdeki satış fiyatı ve
+// karlarla birlikte").
+export async function getProductSalesHistory(
+  offerId: string,
+  params: { since: Date; to: Date; granularity: "day" | "week" },
+): Promise<ProductSalesBucket[]> {
+  const [product, items] = await Promise.all([
+    prisma.product.findUnique({ where: { offerId } }),
+    prisma.orderItem.findMany({
+      where: {
+        offerId,
+        order: { orderDate: { gte: params.since, lte: params.to }, status: { not: "cancelled" } },
+      },
+      include: { order: { select: { orderDate: true } } },
+    }),
+  ]);
+
+  const buckets = new Map<string, { unitsSold: number; revenueUsd: number; profitUsd: number }>();
+  for (const item of items) {
+    const orderDate = item.order.orderDate;
+    if (!orderDate) continue;
+    const key = params.granularity === "day" ? orderDate.toISOString().slice(0, 10) : weekStartKey(orderDate);
+
+    let profit = 0;
+    if (product?.costPrice) {
+      const breakdown = computePriceBreakdown(
+        product.costPrice,
+        product.weightGrams,
+        { widthCm: product.widthCm, heightCm: product.heightCm, depthCm: product.depthCm },
+        Number(item.price),
+        product.heavyPackaging,
+        product.cargoWeightGrams,
+      );
+      if (breakdown) profit = breakdown.profitUsd * item.quantity;
+    }
+
+    const existing = buckets.get(key) ?? { unitsSold: 0, revenueUsd: 0, profitUsd: 0 };
+    existing.unitsSold += item.quantity;
+    existing.revenueUsd += Number(item.price) * item.quantity;
+    existing.profitUsd += profit;
+    buckets.set(key, existing);
+  }
+
+  return [...buckets.entries()]
+    .map(([period, v]) => ({
+      period,
+      unitsSold: v.unitsSold,
+      revenueUsd: v.revenueUsd,
+      avgSalePriceUsd: v.unitsSold > 0 ? v.revenueUsd / v.unitsSold : 0,
+      profitUsd: product?.costPrice ? v.profitUsd : null,
+    }))
+    .sort((a, b) => a.period.localeCompare(b.period));
 }
 
 export async function getOrderDetail(postingNumber: string) {
@@ -661,43 +813,55 @@ export async function shipOrder(postingNumber: string, multiBoxQty?: number) {
   // yukarı fırlatmaz (bir önceki denemede TAM BURADA bir ayrıştırma hatası kilidi yanlışlıkla
   // serbest bırakıyordu, 2026-09-10'da code review'da tespit edildi).
   const postingNumbers = extractShippedPostingNumbers(shipResult);
-  try {
-    // shipResult'un şeklinden bağımsız olarak (bkz. extractShippedPostingNumbers'ın açıklaması —
-    // hiç canlıda test edilmedi) güncel durumu her zaman Ozon'dan BİZZAT doğruluyoruz; postingNumbers
-    // dizisinin uzunluğuna/şekline körlemesine güvenip "awaiting_deliver" yazmıyoruz (2026-09-10'da
-    // code review'da tespit edildi — Ozon boş/beklenmedik bir cevap dönerse gerçekte paketlenmemiş
-    // bir siparişi "paketlendi" gibi göstermiş olurduk).
-    try {
-      const { result: fresh } = await getFbsPosting(postingNumber);
-      if (fresh.status === "awaiting_packaging") {
-        // Ozon'un durum güncellemesi ANINDA olmayabilir — ship'ten hemen sonra sorulan bu değer
-        // hâlâ ESKİ (paketlenmeden önceki) durumu yansıtıyor olabilir. Bunu olduğu gibi yazarsak
-        // GERÇEKTEN paketlenmiş bir siparişi yanlışlıkla "hâlâ awaiting_packaging" gösterip
-        // shipClaimedAt kilidiyle birleşince kalıcı "kilitli" görünümüne yol açardı (2026-09-10'da
-        // code review'da tespit edildi) — bu durumda ham/muhtemelen bayat veriyi YAZMIYORUZ,
-        // aşağıdaki iyimser "awaiting_deliver" yedeğine düşüyoruz.
-        console.log(`[shipOrder] ${postingNumber} paketlendi ama Ozon hâlâ eski durumu (awaiting_packaging) dönüyor — muhtemelen gecikme, iyimser değer yazılıyor`);
-        await prisma.order.update({ where: { postingNumber }, data: { status: "awaiting_deliver" } });
-      } else {
-        await prisma.order.update({
-          where: { postingNumber },
-          data: { status: fresh.status, rawPayload: fresh as unknown as object },
-        });
-      }
-    } catch (error) {
-      console.error(`[shipOrder] ${postingNumber} paketlendi ama güncel durum çekilemedi:`, error);
-      await prisma.order.update({ where: { postingNumber }, data: { status: "awaiting_deliver" } });
-    }
-    if (postingNumbers.length !== 1 || postingNumbers[0] !== postingNumber) {
-      // Bölünmüş (ya da beklenmedik şekilli) cevap — yeni posting numaraları farklı olabilir,
-      // kalem düzeyinde tam uzlaştırma sadece syncFbsOrders'ta var; bir sonraki cron turuna bırakılıyor.
-      console.log(`[shipOrder] ${postingNumber} beklenmedik/bölünmüş sonuç: ${JSON.stringify(postingNumbers)} — tam uzlaştırma sync cron'da yapılacak`);
-    }
-  } catch (error) {
-    console.error(`[shipOrder] ${postingNumber} paketlendi ama local durum güncellenemedi:`, error);
-  }
+  // Boş/beklenmedik şekilli bir cevap gelirse bile en azından ORİJİNAL posting'i senkronize etmeyi
+  // deniyoruz — hiç posting numarası çıkaramadıysak varsayılan olarak kendisini kullanıyoruz.
+  const postingsToSync = postingNumbers.length > 0 ? postingNumbers : [postingNumber];
 
-  return { postingNumbers };
+  // Ozon'a GERÇEKTEN paketlendi bildirildikten sonra, kullanıcı 15 dakikalık sync cron'unu
+  // beklemeden yeni posting'leri (bölünmüşse HER BİRİNİ, kendi kalemleriyle) hemen görebilsin diye
+  // anında senkronize ediyoruz — syncFbsOrders'ın kullandığı AYNI upsertPostingIntoDb fonksiyonuyla
+  // (2026-09-11, kullanıcı talebi: "sync yapıp barkodlarını o ekrana çeksek" — bölünen her yeni
+  // posting artık Siparişler listesinde ANINDA, tam bir satır olarak görünüyor, "yeni sipariş" gibi
+  // ayrı ayrı). Bu adımlardan hiçbiri kilidi geri almaz/yukarı fırlatmaz — Ozon'a GERÇEK istek
+  // zaten gitti, buradan sonrası best-effort; biri başarısız olursa bir sonraki sync cron turu
+  // (~15 dakika) yine de düzeltir. Postingler BİRBİRİNDEN BAĞIMSIZ olduğu için paralel çekiliyor
+  // (2026-09-11'de code review'da tespit edildi — art arda beklemek, çok kutuya bölünen bir
+  // siparişte kullanıcıyı gereksiz yere N kat bekletiyordu).
+  await Promise.allSettled(
+    postingsToSync.map(async (pn) => {
+      const { result: fresh } = await getFbsPosting(pn);
+      if (pn === postingNumber && fresh.status === "awaiting_packaging") {
+        // Ozon'un durum güncellemesi ANINDA olmayabilir — ORİJİNAL posting için ship'ten hemen
+        // sonra sorulan bu değer hâlâ ESKİ (paketlenmeden önceki) durumu yansıtıyor olabilir.
+        // Bunu olduğu gibi yazarsak GERÇEKTEN paketlenmiş bir siparişi yanlışlıkla "hâlâ
+        // awaiting_packaging" gösterip shipClaimedAt kilidiyle birleşince kalıcı "kilitli"
+        // görünümüne yol açardı (2026-09-10'da code review'da tespit edildi) — bu durumda
+        // ham/muhtemelen bayat veriyi YAZMIYORUZ, iyimser "awaiting_deliver"e düşüyoruz. Yeni
+        // (bölünmeden doğan) posting'lerde bu özel durum söz konusu değil, doğrudan upsert ediliyor.
+        console.log(`[shipOrder] ${pn} paketlendi ama Ozon hâlâ eski durumu (awaiting_packaging) dönüyor — muhtemelen gecikme, iyimser değer yazılıyor`);
+        await prisma.order.update({ where: { postingNumber: pn }, data: { status: "awaiting_deliver" } });
+      } else {
+        await upsertPostingIntoDb(fresh);
+      }
+    }),
+  ).then((results) => {
+    results.forEach((r, i) => {
+      if (r.status === "rejected") {
+        console.error(`[shipOrder] ${postingsToSync[i]} paketlendi ama hemen senkronize edilemedi — bir sonraki sync cron turunda düzelecek:`, r.reason);
+      }
+    });
+  });
+  // ORİJİNAL posting HER ZAMAN kendi local durumu en azından "awaiting_deliver"a çekilmiş olarak
+  // döner — anında senkronizasyonu başarısız olsa bile (bkz. yukarıdaki catch), kullanıcı bu
+  // ekranda en azından O siparişin etiketini deneyebilsin diye (2026-09-11'de code review'da
+  // tespit edildi: sadece BAŞARILI olanlar dönseydi, orijinal posting'in senkronu başarısız olup
+  // diğerleri (bölünmüşse) başarılı olduğunda orijinal listeden düşerdi).
+  await prisma.order
+    .updateMany({ where: { postingNumber, status: "awaiting_packaging" }, data: { status: "awaiting_deliver" } })
+    .catch(() => {});
+  const syncedPostings = postingsToSync.includes(postingNumber) ? postingsToSync : [postingNumber, ...postingsToSync];
+
+  return { postingNumbers, syncedPostings };
 }
 
 // ETGB salt-okunur — Ozon/kargo firması otomatik oluşturuyor, biz sadece siparişin tarihi

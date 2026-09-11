@@ -151,6 +151,10 @@ model Order {
   // (2026-09-10'da code review'da tespit edildi).
   @@index([status])
   @@index([parasutInvoicedAt])
+  // Analitik sayfasındaki "En Çok Satan Ürünler" ve ürün detayındaki "Satış Geçmişi" grafiği artık
+  // local veriden hesaplanıyor (bkz. orders.service.ts getTopSellingProducts/getProductSalesHistory)
+  // — ikisi de orderDate aralığına göre filtreliyor (2026-09-11'de code review'da tespit edildi).
+  @@index([orderDate])
 }
 
 model OrderItem {

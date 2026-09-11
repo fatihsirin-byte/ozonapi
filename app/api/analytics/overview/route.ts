@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAnalyticsByDay, ANALYTICS_METRICS } from "@/ozon/analytics";
 import { OzonApiError } from "@/ozon/client";
+import { getUsdToRubRate } from "@/pricing/fx-rate";
 
 // Metrik dizisindeki sıra ANALYTICS_METRICS'teki sırayla birebir eşleşiyor (Ozon dizi olarak
 // dönüyor, isim eşlemesi biz yapıyoruz).
@@ -13,19 +14,24 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { result } = await getAnalyticsByDay(dateFrom, dateTo);
+    const [{ result }, usdToRubRate] = await Promise.all([getAnalyticsByDay(dateFrom, dateTo), getUsdToRubRate()]);
     const toMetricObject = (metrics: number[]) => {
       const obj: Record<string, number> = {};
       ANALYTICS_METRICS.forEach((key, i) => {
         obj[key] = metrics[i] ?? 0;
       });
+      // Ozon'un analitik uç noktası "revenue"yu HER ZAMAN RUB döner (hesabın sözleşme para
+      // birimi USD olsa da) — sitedeki diğer her yer ($ olarak) dolar gösterdiği için burada da
+      // çeviriyoruz; kur çekilemezse (ağ hatası) ham RUB değeri kalır, sayfa çökmesin diye
+      // (2026-09-11, kullanıcı talebi: "ciroyu ruble gösteriyor dolar yap").
+      if (usdToRubRate) obj.revenue = obj.revenue / usdToRubRate;
       return obj;
     };
 
     const days = result.data.map((row) => ({ date: row.dimensions[0]?.id ?? "", ...toMetricObject(row.metrics) }));
     days.sort((a, b) => a.date.localeCompare(b.date));
 
-    return NextResponse.json({ days, totals: toMetricObject(result.totals) });
+    return NextResponse.json({ days, totals: toMetricObject(result.totals), revenueCurrency: usdToRubRate ? "USD" : "RUB" });
   } catch (error) {
     if (error instanceof OzonApiError) {
       return NextResponse.json({ error: error.message, ozon: error.body }, { status: error.status ?? 502 });

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getProduct } from "@/modules/products/products.service";
 import { decodeOfferId } from "@/utils/decodeOfferId";
 import { ProductEditForm } from "./ProductEditForm";
+import { ProductSalesChart } from "./ProductSalesChart";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         </div>
       </div>
       <ProductEditForm product={serializedProduct} />
+      <ProductSalesChart offerId={offerId} />
     </div>
   );
 }

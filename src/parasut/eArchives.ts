@@ -17,6 +17,16 @@ export interface ParasutEArchiveResponse {
   data: ParasutEArchive;
 }
 
+// showEArchive'in (PDF durumu) cevabı createEArchive'inkinden FARKLI — PDF henüz GİB tarafında
+// hazırlanmadıysa "data" alanı hiç gelmiyor (2026-09-11'de canlıda doğrulandı). Bunu AYRI bir tip
+// olarak (data OPSİYONEL) tanımlamak, ileride showEArchive'i doğrudan çağırıp eskisi gibi
+// res.data.attributes yazan birinin bunu derleme zamanında fark etmesini sağlıyor — createEArchive
+// için hâlâ data her zaman var, o yüzden onun tipi (ParasutEArchiveResponse) değişmedi (2026-09-11'de
+// code review'da tespit edildi).
+export interface ParasutEArchivePdfResponse {
+  data?: ParasutEArchive;
+}
+
 export function createEArchive(salesInvoiceId: string, vatExemptionReasonCode = "301") {
   return parasutPost<ParasutEArchiveResponse>("e_archives", {
     data: {
@@ -32,7 +42,7 @@ export function createEArchive(salesInvoiceId: string, vatExemptionReasonCode = 
 }
 
 export function showEArchive(eArchiveId: string) {
-  return parasutGet<ParasutEArchiveResponse>(`e_archives/${eArchiveId}/pdf`);
+  return parasutGet<ParasutEArchivePdfResponse>(`e_archives/${eArchiveId}/pdf`);
 }
 
 // Bir sales_invoice'a bağlı e-Arşiv'in id'sini bulur (varsa) — include=active_e_document ile.
@@ -45,10 +55,28 @@ export async function findActiveEArchiveId(salesInvoiceId: string): Promise<stri
 }
 
 // PDF'in kendisi değil, S3'teki geçici (presigned) indirme linkini döner — asıl dosyayı çekmek
-// için bu link AYRICA fetch edilmeli (2026-09-09, automation-nextjs projesindeki pattern).
+// için bu link AYRICA fetch edilmeli (2026-09-09, automation-nextjs projesindeki pattern). PDF
+// GİB tarafında henüz hazırlanmadıysa Paraşüt bu uç noktada "data" alanı OLMAYAN bir cevap
+// dönüyor (2026-09-11'de canlıda doğrulandı) — bu NORMAL/beklenen bir durum, hata değil, o yüzden
+// BİLEREK ?. ile null'a düşürülüyor (önceden res.data.attributes doğrudan okunuyordu, bu da bu
+// bekleme anında bir TypeError fırlatıp resolveInvoicePdf'in catch'ine düşüyordu — gerçek Paraşüt
+// hatalarıyla (geçersiz token, tükenmiş 429 tekrar denemesi vb.) aynı kefeye konmasına yol
+// açıyordu, 2026-09-11'de code review'da tespit edildi).
 export async function getEArchivePdfUrl(eArchiveId: string): Promise<string | null> {
   const res = await showEArchive(eArchiveId);
-  return (res.data.attributes.url as string | undefined) ?? null;
+  const url = (res?.data?.attributes?.url as string | undefined) ?? null;
+  // "data" alanı YOKSA (henüz hazır değil, doğrulanmış normal durum) ya da VARKEN de "url" YOKSA
+  // (görülmemiş, olası GERÇEKTEN bozuk bir durum) — ikisi de sessizce null döndürülüyor ama en
+  // azından burada iz bırakılıyor; aksi halde her iki durum da hiçbir yerde loglanmadan sonsuza
+  // dek "İşleniyor" gösterilebilirdi (2026-09-11'de code review'da tespit edildi).
+  if (!url) {
+    console.log(
+      `[parasut] eArchive ${eArchiveId} için henüz PDF url'i yok (data: ${res?.data ? "var" : "yok"}, attributes.url: ${
+        res?.data?.attributes ? "yok/boş" : "attributes de yok"
+      }) — tekrar denenecek.`,
+    );
+  }
+  return url;
 }
 
 // archiveExists=true → Paraşüt'te bu fatura için bir e-Arşiv kaydı GERÇEKTEN VAR (PDF henüz hazır
@@ -91,6 +119,13 @@ export async function resolveInvoicePdf(invoiceId: string, allowRetry: boolean):
   if (!eArchiveId) return { status: "processing", archiveExists: false };
 
   try {
+    // PDF henüz hazır değilse (GİB tarafında birkaç saniye/dakika sürebiliyor) getEArchivePdfUrl
+    // artık ARTIK EXCEPTION FIRLATMIYOR, sadece null dönüyor (bkz. yukarıdaki fonksiyon) — bu
+    // yüzden bu catch bloğuna düşen HER ŞEY gerçekten beklenmedik bir hata demektir (geçersiz
+    // token, tükenmiş 429 tekrar denemesi, config eksikliği vb.); "normal bekleme" ile "gerçek
+    // arıza"yı ayırt etmek için exception tipine bakmaya (önceki yazım) artık gerek yok (2026-09-11'de
+    // code review'da tespit edildi — TypeError sniff'i, ileride farklı bir TypeError'ı da yanlışlıkla
+    // "normal" sayabilirdi).
     const pdfUrl = await getEArchivePdfUrl(eArchiveId);
     if (!pdfUrl) return { status: "processing", archiveExists: true };
     return { status: "ready", pdfUrl, archiveExists: true };

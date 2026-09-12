@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAnalyticsByDay, ANALYTICS_METRICS } from "@/ozon/analytics";
 import { OzonApiError } from "@/ozon/client";
 import { getUsdToRubRate } from "@/pricing/fx-rate";
+import { getDailySalesStats } from "@/modules/orders/orders.service";
+import { istanbulDayBoundsUtc } from "@/utils/dateTr";
 
 // Metrik dizisindeki sıra ANALYTICS_METRICS'teki sırayla birebir eşleşiyor (Ozon dizi olarak
 // dönüyor, isim eşlemesi biz yapıyoruz).
@@ -14,7 +16,18 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [{ result }, usdToRubRate] = await Promise.all([getAnalyticsByDay(dateFrom, dateTo), getUsdToRubRate()]);
+    // Ozon'un "day" dimension'ı Moskova saatine göre gruplanıyor gibi görünüyor — Türkiye de yıl
+    // boyu sabit UTC+3 (DST yok) olduğu için sayısal olarak hep eşit; yerel sipariş verimizi de
+    // (sipariş adedi + satılan ürün adedi, Günlük Ciro grafiğinin tooltip'i için) AYNI takvim
+    // günlerine göre çekip aşağıda tarihe göre eşliyoruz (2026-09-12, kullanıcı talebi).
+    const { start: dailyStatsSince } = istanbulDayBoundsUtc(dateFrom);
+    const { end: dailyStatsTo } = istanbulDayBoundsUtc(dateTo);
+    const [{ result }, usdToRubRate, dailySales] = await Promise.all([
+      getAnalyticsByDay(dateFrom, dateTo),
+      getUsdToRubRate(),
+      getDailySalesStats({ since: dailyStatsSince, to: dailyStatsTo }),
+    ]);
+    const salesByDate = new Map(dailySales.map((d) => [d.date, d]));
     const toMetricObject = (metrics: number[]) => {
       const obj: Record<string, number> = {};
       ANALYTICS_METRICS.forEach((key, i) => {
@@ -28,7 +41,14 @@ export async function GET(request: NextRequest) {
       return obj;
     };
 
-    const days = result.data.map((row) => ({ date: row.dimensions[0]?.id ?? "", ...toMetricObject(row.metrics) }));
+    const days = result.data.map((row) => {
+      const date = row.dimensions[0]?.id ?? "";
+      const sales = salesByDate.get(date);
+      // orderCount/unitsSold Ozon'un analitik metriklerinden DEĞİL, yukarıdaki yerel sipariş
+      // sorgusundan geliyor — "Günlük Ciro" grafiğinde ciro'nun yanında sipariş adedi ve satılan
+      // ürün adedini de göstermek için (bkz. getDailySalesStats açıklaması).
+      return { date, ...toMetricObject(row.metrics), orderCount: sales?.orderCount ?? 0, unitsSold: sales?.unitsSold ?? 0 };
+    });
     days.sort((a, b) => a.date.localeCompare(b.date));
 
     return NextResponse.json({ days, totals: toMetricObject(result.totals), revenueCurrency: usdToRubRate ? "USD" : "RUB" });

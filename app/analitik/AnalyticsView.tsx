@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { istanbulDateStr } from "@/utils/dateTr";
 
 interface DayRow {
   date: string;
@@ -12,6 +13,11 @@ interface DayRow {
   conv_tocart: number;
   returns: number;
   cancellations: number;
+  // Ozon'un analitik metriklerinden değil, sunucudaki yerel sipariş verisinden geliyor (bkz.
+  // app/api/analytics/overview/route.ts + orders.service.ts getDailySalesStats) — "Günlük Ciro"
+  // grafiğinin tooltip'inde ciro'nun yanında gösteriliyor (2026-09-12, kullanıcı talebi).
+  orderCount: number;
+  unitsSold: number;
 }
 
 interface Totals {
@@ -34,14 +40,11 @@ interface TopProduct {
 }
 
 const RANGE_OPTIONS = [
+  { label: "Bugün", days: 1 },
   { label: "Son 7 gün", days: 7 },
   { label: "Son 14 gün", days: 14 },
   { label: "Son 30 gün", days: 30 },
 ];
-
-function toDateStr(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
 
 // "Genel Bakış" (görüntülenme/sepete ekleme gibi) Ozon'un analitik uç noktasından geliyor, o da
 // revenue'yu HER ZAMAN RUB döner (bkz. src/ozon/analytics.ts) — API tarafında dolara çevrildi,
@@ -61,9 +64,22 @@ function fmtNum(n: number): string {
   return n.toLocaleString("tr-TR");
 }
 
-// Basit, tek seri (günlük ciro) çubuk grafik — inline SVG, hover'da tarih+değer gösterir.
-// Tek seri olduğu için legend gerekmiyor (başlık zaten seriyi adlandırıyor).
-function RevenueBarChart({ days, currency }: { days: DayRow[]; currency: "USD" | "RUB" }) {
+// Basit, tek seri (günlük ciro) çubuk grafik — inline SVG, hover'da tarih+değer+sipariş/ürün adedi
+// gösterir. Bir çubuğa tıklamak o günü "seçili" yapar (bkz. AnalyticsView'daki selectedDate) —
+// üst özet kartları ve "En Çok Satan Ürünler" o güne göre güncellenir, aynı çubuğa tekrar
+// tıklamak seçimi kaldırır (2026-09-12, kullanıcı talebi). Tek seri olduğu için legend gerekmiyor
+// (başlık zaten seriyi adlandırıyor).
+function RevenueBarChart({
+  days,
+  currency,
+  selectedDate,
+  onSelectDate,
+}: {
+  days: DayRow[];
+  currency: "USD" | "RUB";
+  selectedDate: string | null;
+  onSelectDate: (date: string) => void;
+}) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const width = 720;
   const height = 220;
@@ -91,6 +107,8 @@ function RevenueBarChart({ days, currency }: { days: DayRow[]; currency: "USD" |
           const x = padding.left + i * slotW + (slotW - barW) / 2;
           const y = padding.top + plotH - barH;
           const isHovered = hoverIndex === i;
+          const isSelected = d.date === selectedDate;
+          const fill = isSelected ? "var(--success)" : isHovered ? "var(--accent-hover)" : "var(--accent)";
           return (
             <g key={d.date}>
               <rect
@@ -99,12 +117,13 @@ function RevenueBarChart({ days, currency }: { days: DayRow[]; currency: "USD" |
                 width={barW}
                 height={Math.max(barH, 1)}
                 rx={3}
-                fill={isHovered ? "var(--accent-hover)" : "var(--accent)"}
+                fill={fill}
                 onMouseEnter={() => setHoverIndex(i)}
                 onMouseLeave={() => setHoverIndex((h) => (h === i ? null : h))}
+                onClick={() => onSelectDate(d.date)}
                 style={{ cursor: "pointer" }}
               />
-              {/* Görünmez, tam yükseklikte hit-target — küçük çubuklarda da hover kolay tetiklensin */}
+              {/* Görünmez, tam yükseklikte hit-target — küçük çubuklarda da hover/tıklama kolay tetiklensin */}
               <rect
                 x={padding.left + i * slotW}
                 y={padding.top}
@@ -113,6 +132,8 @@ function RevenueBarChart({ days, currency }: { days: DayRow[]; currency: "USD" |
                 fill="transparent"
                 onMouseEnter={() => setHoverIndex(i)}
                 onMouseLeave={() => setHoverIndex((h) => (h === i ? null : h))}
+                onClick={() => onSelectDate(d.date)}
+                style={{ cursor: "pointer" }}
               />
               {(i === 0 || i === days.length - 1 || i % Math.ceil(days.length / 6) === 0) && (
                 <text
@@ -149,6 +170,9 @@ function RevenueBarChart({ days, currency }: { days: DayRow[]; currency: "USD" |
             {days[hoverIndex].date}
           </div>
           <strong>{fmtRevenue(days[hoverIndex].revenue, currency)}</strong>
+          <div className="hint" style={{ margin: 0 }}>
+            {fmtNum(days[hoverIndex].orderCount)} sipariş · {fmtNum(days[hoverIndex].unitsSold)} ürün
+          </div>
         </div>
       )}
     </div>
@@ -169,11 +193,31 @@ export function AnalyticsView() {
   const [productSearchInput, setProductSearchInput] = useState("");
   const [productQuery, setProductQuery] = useState("");
 
+  // Grafikte bir güne tıklanınca o günü "seçili" yapar — üst özet kartları ve "En Çok Satan
+  // Ürünler" artık 7/14/30 günlük aralık yerine SADECE bu güne göre gösterilir; aynı güne tekrar
+  // tıklamak (ya da "Son 7/14/30 gün" butonlarından birine geçmek) seçimi temizler (2026-09-12,
+  // kullanıcı talebi).
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  // "Bugün/Son 7/14/30 gün" aralığı — DİKKAT: sunucu ya da tarayıcının kendi saat dilimi ne olursa
+  // olsun, Türkiye takvim gününe göre hesaplanıyor (istanbulDateStr, bkz. utils/dateTr.ts). Önceden
+  // burada tarayıcının UTC gününü (toISOString) kullanan bir hesap vardı — İstanbul saatiyle UTC
+  // arasındaki 3 saatlik fark yüzünden gece yarısı ile sabah 03:00 arasında "bugün" bir gün eksik
+  // hesaplanıyordu; bu hem "Bugün" filtresi hem de mevcut "Son 7/14/30 gün" aralıkları için
+  // düzeltildi (2026-09-12, kullanıcı talebi: "Bugün" sekmesi Türkiye saatine göre olsun).
   const { from, to } = useMemo(() => {
-    const toDate = new Date();
-    const fromDate = new Date(Date.now() - (rangeDays - 1) * 24 * 60 * 60 * 1000);
-    return { from: toDateStr(fromDate), to: toDateStr(toDate) };
+    const now = new Date();
+    const fromDate = new Date(now.getTime() - (rangeDays - 1) * 24 * 60 * 60 * 1000);
+    return { from: istanbulDateStr(fromDate), to: istanbulDateStr(now) };
   }, [rangeDays]);
+
+  // Bir gün seçiliyken özet kartları o günün satırından (days içindeki DayRow) türetiliyor — ayrı
+  // bir API isteğine gerek yok, zaten mevcut aralık için çekilmiş günlük veri içinde duruyor.
+  const effectiveTotals: Totals | null = selectedDate ? (days.find((d) => d.date === selectedDate) ?? null) : totals;
+  // "En Çok Satan Ürünler" ise ayrı bir uç noktadan geldiği için (bkz. aşağıdaki effect) seçili
+  // günün from/to'su olarak kendi tarihini kullanır.
+  const productsFrom = selectedDate ?? from;
+  const productsTo = selectedDate ?? to;
 
   // "Genel Bakış" (görüntülenme/sepete ekleme vb.) Ozon'un kendi analitik uç noktasından geliyor,
   // o hâlâ 429 (rate limit) verebilir — bu yüzden ayrı bir yükleme/hata durumu var, "En Çok Satan
@@ -202,7 +246,7 @@ export function AnalyticsView() {
     setProductsLoading(true);
     setProductsError(null);
     const q = productQuery ? `&q=${encodeURIComponent(productQuery)}` : "";
-    fetch(`/api/analytics/products?from=${from}&to=${to}&limit=15${q}`)
+    fetch(`/api/analytics/products?from=${productsFrom}&to=${productsTo}&limit=15${q}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.error) {
@@ -213,7 +257,7 @@ export function AnalyticsView() {
       })
       .catch((err) => setProductsError(err instanceof Error ? err.message : "Bilinmeyen hata"))
       .finally(() => setProductsLoading(false));
-  }, [from, to, productQuery]);
+  }, [productsFrom, productsTo, productQuery]);
 
   return (
     <div className="card">
@@ -222,8 +266,13 @@ export function AnalyticsView() {
           <button
             key={opt.days}
             type="button"
-            className={`btn-secondary${rangeDays === opt.days ? " active" : ""}`}
-            onClick={() => setRangeDays(opt.days)}
+            className={`btn-secondary${!selectedDate && rangeDays === opt.days ? " active" : ""}`}
+            onClick={() => {
+              setRangeDays(opt.days);
+              // Aralık butonlarından biri seçilince, grafikteki gün seçimini temizle — aksi halde
+              // yeni aralığın dışında kalmış eski bir gün seçili görünmeye devam ederdi.
+              setSelectedDate(null);
+            }}
           >
             {opt.label}
           </button>
@@ -238,48 +287,64 @@ export function AnalyticsView() {
         </div>
       ) : (
         <>
-          {totals && (
+          {effectiveTotals && (
             <div className="summary-grid" style={{ marginBottom: 24 }}>
               <div>
                 <div className="hint">Toplam Ciro</div>
-                <div className="value">{fmtRevenue(totals.revenue, revenueCurrency)}</div>
+                <div className="value">{fmtRevenue(effectiveTotals.revenue, revenueCurrency)}</div>
               </div>
               <div>
                 <div className="hint">Sipariş Adedi</div>
-                <div className="value">{fmtNum(totals.ordered_units)}</div>
+                <div className="value">{fmtNum(effectiveTotals.ordered_units)}</div>
               </div>
               <div>
                 <div className="hint">Görüntülenme</div>
-                <div className="value">{fmtNum(totals.hits_view)}</div>
+                <div className="value">{fmtNum(effectiveTotals.hits_view)}</div>
               </div>
               <div>
                 <div className="hint">Sepete Ekleme</div>
-                <div className="value">{fmtNum(totals.hits_tocart)}</div>
+                <div className="value">{fmtNum(effectiveTotals.hits_tocart)}</div>
               </div>
               <div>
                 <div className="hint">Sepete Ekleme Oranı</div>
-                <div className="value">%{totals.conv_tocart.toLocaleString("tr-TR", { maximumFractionDigits: 2 })}</div>
+                <div className="value">%{effectiveTotals.conv_tocart.toLocaleString("tr-TR", { maximumFractionDigits: 2 })}</div>
               </div>
               <div>
                 <div className="hint">İade</div>
-                <div className="value" style={{ color: totals.returns > 0 ? "var(--danger)" : undefined }}>
-                  {fmtNum(totals.returns)}
+                <div className="value" style={{ color: effectiveTotals.returns > 0 ? "var(--danger)" : undefined }}>
+                  {fmtNum(effectiveTotals.returns)}
                 </div>
               </div>
               <div>
                 <div className="hint">İptal</div>
-                <div className="value" style={{ color: totals.cancellations > 0 ? "var(--danger)" : undefined }}>
-                  {fmtNum(totals.cancellations)}
+                <div className="value" style={{ color: effectiveTotals.cancellations > 0 ? "var(--danger)" : undefined }}>
+                  {fmtNum(effectiveTotals.cancellations)}
                 </div>
               </div>
             </div>
           )}
 
-          <div style={{ marginBottom: 8 }}>
+          <div style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <strong>Günlük Ciro</strong>
+            {selectedDate && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setSelectedDate(null)}
+                style={{ fontSize: 12, padding: "2px 8px" }}
+                title="Gün seçimini temizle ve genel aralığa dön"
+              >
+                {selectedDate} seçili ✕
+              </button>
+            )}
           </div>
           {days.length > 0 ? (
-            <RevenueBarChart days={days} currency={revenueCurrency} />
+            <RevenueBarChart
+              days={days}
+              currency={revenueCurrency}
+              selectedDate={selectedDate}
+              onSelectDate={(date) => setSelectedDate((prev) => (prev === date ? null : date))}
+            />
           ) : (
             <div className="hint">Bu tarih aralığında veri yok.</div>
           )}

@@ -6,6 +6,7 @@ import { WAREHOUSE_UNDER_500G } from "../../ozon/warehouses";
 import { importFromOzon, syncMissingProductsFromOzon } from "../products/products.service";
 import { computePriceBreakdown } from "../../pricing/formula";
 import { effectiveCargoWeightGrams, estimateShippingForWeight, productWeightSource, WEIGHT_SOURCE_LABEL } from "../finance/pnl-report.service";
+import { istanbulDateStr } from "../../utils/dateTr";
 import {
   uploadInvoiceFile,
   createOrUpdateInvoice,
@@ -577,6 +578,38 @@ export async function getTopSellingProducts(params: {
   }
 
   return [...byOfferId.values()].sort((a, b) => b.revenueUsd - a.revenueUsd).slice(0, params.limit);
+}
+
+export interface DailySalesStat {
+  date: string; // "YYYY-MM-DD", Europe/Istanbul takvim günü (bkz. utils/dateTr.ts)
+  orderCount: number;
+  unitsSold: number;
+}
+
+// Analitik sayfasındaki "Günlük Ciro" grafiğinde ciro'nun yanında sipariş adedi ve satılan ürün
+// adedini de göstermek için — Ozon'un /v1/analytics/data uç noktasındaki "ordered_units" metriği
+// sipariş SAYISI değil, satılan BİRİM sayısıdır ve o uç nokta zaten sipariş sayısını hiç vermiyor;
+// bu yüzden ikisini de yerel sipariş verimizden hesaplıyoruz (2026-09-12, kullanıcı talebi: "Bugün"
+// filtresi + günlük grafiğe sipariş/ürün adedi). Ozon'un "day" dimension'ıyla aynı takvim gününe
+// düşsün diye istanbulDateStr ile grupluyoruz (bkz. dateTr.ts — Moskova/İstanbul saati sayısal
+// olarak hep eşit). getTopSellingProducts ile aynı gerekçeyle iptal edilen siparişler hariç tutuluyor.
+export async function getDailySalesStats(params: { since: Date; to: Date }): Promise<DailySalesStat[]> {
+  const orders = await prisma.order.findMany({
+    where: { orderDate: { gte: params.since, lte: params.to }, status: { not: "cancelled" } },
+    select: { orderDate: true, items: { select: { quantity: true } } },
+  });
+
+  const byDate = new Map<string, { orderCount: number; unitsSold: number }>();
+  for (const order of orders) {
+    if (!order.orderDate) continue;
+    const key = istanbulDateStr(order.orderDate);
+    const existing = byDate.get(key) ?? { orderCount: 0, unitsSold: 0 };
+    existing.orderCount += 1;
+    existing.unitsSold += order.items.reduce((sum, i) => sum + i.quantity, 0);
+    byDate.set(key, existing);
+  }
+
+  return [...byDate.entries()].map(([date, v]) => ({ date, ...v }));
 }
 
 // Haftalık gruplamada bir tarihin ait olduğu haftanın PAZARTESİ'sini anahtar olarak kullanıyoruz

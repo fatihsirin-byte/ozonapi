@@ -20,6 +20,7 @@ import { ShipOrderButton } from "./ShipOrderButton";
 import { RealWeightInput } from "./RealWeightInput";
 import { ParasutInvoiceButton } from "../ParasutInvoiceButton";
 import { EtgbInfo } from "./EtgbInfo";
+import { AseShipmentButton } from "./AseShipmentButton";
 import {
   estimateShippingForWeight,
   effectiveCargoWeightGrams,
@@ -118,6 +119,15 @@ export default async function OrderDetailPage({
             initialConfirmed={order.parasutInvoiceNoConfirmed}
             initialPdfCached={order.parasutInvoicePdfCached}
           />
+          {order.parasutInvoiceId && (
+            <AseShipmentButton
+              postingNumber={order.postingNumber}
+              invoiceConfirmed={order.parasutInvoiceNoConfirmed}
+              initialSentAt={order.aseShipmentSentAt ? order.aseShipmentSentAt.toISOString() : null}
+              initialSuccess={order.aseShipmentSuccess}
+              initialMessage={order.aseShipmentMessage}
+            />
+          )}
           <Link href="/orders">
             <button className="btn-secondary">← Siparişler</button>
           </Link>
@@ -208,7 +218,14 @@ export default async function OrderDetailPage({
         </div>
         <div>
           <div className="hint">ETGB / Gümrük</div>
-          <EtgbInfo postingNumber={order.postingNumber} />
+          <EtgbInfo
+            postingNumber={order.postingNumber}
+            aseShipment={{
+              sentAt: order.aseShipmentSentAt ? order.aseShipmentSentAt.toISOString() : null,
+              success: order.aseShipmentSuccess,
+              message: order.aseShipmentMessage,
+            }}
+          />
         </div>
       </div>
 

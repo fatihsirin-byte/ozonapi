@@ -13,26 +13,26 @@ interface AseShipmentData {
   message: string | null;
 }
 
-// Salt-okunur — ETGB (Türk gümrük beyannamesi) Ozon/kargo firması (ASE&GBS) tarafından kargo
-// süreci içinde otomatik oluşturuluyor, biz burada sadece siparişe bağlı olanı gösteriyoruz.
-export function EtgbInfo({ postingNumber }: { postingNumber: string }) {
+// ASE durumu artık sunucu bileşeninden (page.tsx) PROP olarak geliyor, kendi fetch'iyle DEĞİL
+// (2026-09-13 code review'da tespit edildi): burada ayrıca çekilseydi, "ASE'ye Gönder" butonuna
+// basılıp gönderim bittiğinde (bkz. AseShipmentButton.tsx router.refresh() çağrısı) bu bileşen
+// sayfa yeniden yüklenene kadar BAYAT kalırdı — iki bileşen aynı anda farklı durum gösterirdi.
+// ETGB'nin kendisi (Ozon/ASE&GBS'nin otomatik oluşturduğu resmi beyan) hâlâ zamanla değişebildiği
+// için o kısım eskisi gibi kendi fetch'ini yapmaya devam ediyor.
+export function EtgbInfo({ postingNumber, aseShipment }: { postingNumber: string; aseShipment: AseShipmentData | null }) {
   const [loading, setLoading] = useState(true);
   const [etgb, setEtgb] = useState<EtgbData | null>(null);
-  const [aseShipment, setAseShipment] = useState<AseShipmentData | null>(null);
 
   useEffect(() => {
     fetch(`/api/orders/${encodeURIComponent(postingNumber)}/etgb`)
       .then((r) => r.json())
-      .then((data) => {
-        setEtgb(data.etgb);
-        setAseShipment(data.aseShipment ?? null);
-      })
+      .then((data) => setEtgb(data.etgb))
       .finally(() => setLoading(false));
   }, [postingNumber]);
 
-  // ASE (xlive.ase.com.tr) gümrük bildirimi — fatura Paraşüt'te kesinleşince otomatik gönderiliyor
-  // (bkz. src/ase/orderShipment.ts). Bu, ETGB'nin kendisi değil — bizim ASE'ye YOLLADIĞIMIZ
-  // bildirimin sonucu, salt-okunur bir gösterge.
+  // ASE (xlive.ase.com.tr) gümrük bildirimi — "ASE'ye Gönder" butonuyla (bkz. AseShipmentButton.tsx)
+  // ELLE tetiklenir (2026-09-13, kullanıcı talebi: otomatik gönderim kaldırıldı). Burası ETGB'nin
+  // kendisi değil, bizim ASE'ye YOLLADIĞIMIZ bildirimin sonucunu gösteren salt-okunur bir özet.
   const aseStatus =
     aseShipment?.sentAt == null ? null : aseShipment.success ? (
       <div className="hint" style={{ color: "var(--success)" }}>

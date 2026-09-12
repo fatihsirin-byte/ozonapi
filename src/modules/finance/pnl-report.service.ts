@@ -313,7 +313,15 @@ export async function getPnlRows(params?: { since?: Date; to?: Date }): Promise<
 // code review'da tespit edildi) — bu yüzden burada getPnlRows'u DEĞİŞTİRMEDEN (o, Kâr/Zarar
 // sayfasının kendi UTC bazlı tarih filtresiyle uyumlu kalmalı), sadece bu fonksiyona özel olarak
 // siparişlerin gerçek (Date) orderDate'ini ayrıca çekip istanbulDateStr ile yeniden anahtarlıyoruz.
-export async function getDailyProfitStats(params: { since: Date; to: Date }): Promise<Record<string, number>> {
+export interface DailyProfitAndCost {
+  profitUsd: number;
+  // Toplam maliyet (alış fiyatı × adet) — Analitik sayfasında ciro/kârın yanında gösterilsin diye
+  // eklendi (2026-09-13, kullanıcı talebi: "toplam cost ekle"). Kâr/Zarar sayfasıyla AYNI
+  // summarizePnlRows() sonucundan geliyor, ayrı bir hesap yok.
+  costUsd: number;
+}
+
+export async function getDailyProfitStats(params: { since: Date; to: Date }): Promise<Record<string, DailyProfitAndCost>> {
   const [rows, orders] = await Promise.all([
     getPnlRows(params),
     prisma.order.findMany({
@@ -333,9 +341,10 @@ export async function getDailyProfitStats(params: { since: Date; to: Date }): Pr
     list.push(row);
     byDate.set(date, list);
   }
-  const result: Record<string, number> = {};
+  const result: Record<string, DailyProfitAndCost> = {};
   for (const [date, dateRows] of byDate) {
-    result[date] = summarizePnlRows(dateRows).profit;
+    const totals = summarizePnlRows(dateRows);
+    result[date] = { profitUsd: totals.profit, costUsd: totals.totalCost };
   }
   return result;
 }

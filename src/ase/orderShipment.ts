@@ -19,10 +19,13 @@ function toAseInvoiceDateString(date: Date): string {
   return shifted.toISOString().replace("Z", "+03:00");
 }
 
-// Aynı sipariş için üst üste gelen poll istekleri (bkz. çağıran route) eş zamanlı birden fazla
-// gönderimi tetiklemesin diye basit bir in-flight kilit — sonuç DB'ye yazılana kadar aynı
-// postingNumber için ikinci bir çağrı sessizce atlanır.
-const inFlight = new Set<string>();
+// Butona art arda hızlı tıklanması (çift tıklama, iki açık sekme) aynı sipariş için eş zamanlı
+// birden fazla gönderimi tetiklemesin diye bir in-flight kilit — ikinci çağrı YENİ bir gönderim
+// BAŞLATMAZ ama devam eden gönderimin AYNI promise'ini bekler (Set değil Map, 2026-09-13 code
+// review'da tespit edildi): çağıran route (ase-shipment/route.ts) sendOrderToAse dönünce Order'ı
+// okuyup sonucu kullanıcıya gösteriyor — eskiden ikinci çağrı hemen (iş bitmeden) dönüp henüz
+// güncellenmemiş/eski satırı okutuyordu, kullanıcıya "tıklama hiçbir şey yapmadı" izlenimi verirdi.
+const inFlight = new Map<string, Promise<void>>();
 
 async function recordResult(postingNumber: string, success: boolean, message: string) {
   try {
@@ -35,14 +38,24 @@ async function recordResult(postingNumber: string, success: boolean, message: st
   }
 }
 
-// Bir Ozon siparişini ASE'ye (gümrük/ETGB) bildirir. Fatura numarası KESİNLEŞMEDEN (bkz.
-// Order.parasutInvoiceNoConfirmed) hiçbir şey yapmaz — henüz geçici olabilecek bir numarayı
-// gümrüğe bildirmemek için (bkz. app/api/orders/[postingNumber]/parasut-invoice/pdf/route.ts).
-// TASARIM GEREĞİ hiçbir zaman exception fırlatmaz — bu, ana fatura akışının bir eklentisi,
-// başarısız olsa bile faturanın kesilmiş olmasını etkilememeli (2026-09-12, görev talimatı).
-export async function sendOrderToAse(postingNumber: string): Promise<void> {
-  if (inFlight.has(postingNumber)) return;
-  inFlight.add(postingNumber);
+// Bir Ozon siparişini ASE'ye (gümrük/ETGB) bildirir. SADECE ELLE, kullanıcı sipariş sayfasındaki
+// "ASE'ye Gönder" butonuna bastığında çağrılır (bkz. app/api/orders/[postingNumber]/ase-shipment/route.ts)
+// — önceki bir sürümde hem fatura PDF durumu kontrol edilirken hem 15 dakikalık cron'da otomatik
+// deneniyordu, kullanıcı bunu öngörülemez bulup kaldırılmasını istedi (2026-09-13). Fatura numarası
+// KESİNLEŞMEDEN (bkz. Order.parasutInvoiceNoConfirmed) hiçbir şey yapmaz — henüz geçici olabilecek
+// bir numarayı gümrüğe bildirmemek için. TASARIM GEREĞİ hiçbir zaman exception fırlatmaz — çağıran
+// route sonucu (isSuccess/mesaj) DB'den okuyup kullanıcıya gösterir.
+export function sendOrderToAse(postingNumber: string): Promise<void> {
+  const existing = inFlight.get(postingNumber);
+  if (existing) return existing;
+  const promise = doSendOrderToAse(postingNumber).finally(() => {
+    inFlight.delete(postingNumber);
+  });
+  inFlight.set(postingNumber, promise);
+  return promise;
+}
+
+async function doSendOrderToAse(postingNumber: string): Promise<void> {
   try {
     const order = await getOrderDetail(postingNumber);
     if (!order) {
@@ -56,8 +69,8 @@ export async function sendOrderToAse(postingNumber: string): Promise<void> {
     }
 
     if (order.aseShipmentSuccess) {
-      // Daha önce başarıyla gönderildi — çağıran taraf artık her "hazır" kontrolünde tekrar
-      // deniyor (bkz. pdf/route.ts), bu yüzden burada tekrar göndermemek için ayrıca kontrol ediyoruz.
+      // Daha önce başarıyla gönderildi — buton tekrar tıklansa bile ikinci bir gönderime izin
+      // vermiyoruz (2026-09-13, kullanıcı talebi: gönderim artık SADECE elle, butonla yapılıyor).
       return;
     }
 
@@ -153,31 +166,5 @@ export async function sendOrderToAse(postingNumber: string): Promise<void> {
     const message = err instanceof Error ? err.message : "Bilinmeyen hata";
     console.error(`[ase] Gönderim sırasında beklenmedik hata (posting ${postingNumber}):`, err);
     await recordResult(postingNumber, false, message);
-  } finally {
-    inFlight.delete(postingNumber);
-  }
-}
-
-// sendOrderToAse'in TEK tetikleyicisi olan parasut-invoice/pdf/route.ts, bir sipariş sayfası
-// AÇIKKEN ve fatura numarası henüz "confirmed" DEĞİLKEN çağrılıyor (bkz. ParasutInvoiceButton.tsx
-// retryable/initialConfirmed mantığı — zaten doğrulanmış faturalarda kasıtlı olarak hiç canlı
-// kontrol yapılmıyor, 2026-09-10 tarihli ayrı bir performans düzeltmesi). Yani kimse o sipariş
-// sayfasını tekrar açmazsa (ya da açtığında fatura zaten onaylanmışsa) ASE'ye gönderim BİR DAHA
-// hiç denenmez — code review'da tespit edildi (2026-09-13). Bunun için, zaten 15 dakikada bir
-// çalışan sipariş senkronizasyon cron'una (bkz. src/scripts/sync-orders-cron.ts) bir de bunu
-// ekliyoruz: fatura numarası kesinleşmiş ama ASE'ye henüz başarıyla gönderilmemiş TÜM siparişleri
-// bulup gönderir — kimse sayfayı açmasa bile güvenilir şekilde çalışır, pdf/route.ts'teki
-// tetikleme ise sadece "mümkünse hemen gönder" için bir ek hızlandırma olarak kalır.
-export async function dispatchPendingAseShipments(): Promise<void> {
-  const pending = await prisma.order.findMany({
-    where: { parasutInvoiceNoConfirmed: true, aseShipmentSuccess: { not: true } },
-    select: { postingNumber: true },
-  });
-  for (const { postingNumber } of pending) {
-    await sendOrderToAse(postingNumber);
-    // ASE hız sınırı: istekler arası en az 300ms (bkz. ase api.pdf) — sendOrderToAse zaten en az
-    // bir HTTP isteği içerdiğinden pratikte bu süre çoktan geçmiş oluyor, yine de garanti altına
-    // almak için küçük bir bekleme ekleniyor.
-    await new Promise((resolve) => setTimeout(resolve, 350));
   }
 }

@@ -23,6 +23,9 @@ interface DayRow {
   // pnl-report.service.ts getDailyProfitStats. Sadece "delivered" siparişleri kapsar (2026-09-13,
   // kullanıcı talebi: "kar hesaplarken siparişlerdeki gibi ... orda kurallar var").
   profitUsd: number;
+  // Toplam alış maliyeti (adet × birim alış fiyatı) — profitUsd ile AYNI kaynaktan (getDailyProfitStats)
+  // geliyor, aynı "sadece delivered" kısıtına tabi (2026-09-13, kullanıcı talebi: "toplam cost ekle").
+  costUsd: number;
 }
 
 interface Totals {
@@ -34,6 +37,7 @@ interface Totals {
   returns: number;
   cancellations: number;
   profitUsd: number;
+  costUsd: number;
 }
 
 interface TopProduct {
@@ -190,6 +194,13 @@ function RevenueBarChart({
 
 export function AnalyticsView() {
   const [rangeDays, setRangeDays] = useState(14);
+  // Elle seçilen tek tarih ya da tarih aralığı — doluysa rangeDays'in yerini alır (2026-09-13,
+  // kullanıcı talebi: "gün filtresi ekle tek tarih ya da tarih aralığı"). Tek tarih, from===to
+  // olan bir aralık olarak modelleniyor — ayrı bir "tek gün modu" eklemeye gerek yok, kullanıcı
+  // ikinci tarihi boş bırakırsa zaten ilkiyle aynı kabul ediliyor.
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
+  const [customFromInput, setCustomFromInput] = useState("");
+  const [customToInput, setCustomToInput] = useState("");
   const [days, setDays] = useState<DayRow[]>([]);
   const [totals, setTotals] = useState<Totals | null>(null);
   const [revenueCurrency, setRevenueCurrency] = useState<"USD" | "RUB">("USD");
@@ -215,10 +226,11 @@ export function AnalyticsView() {
   // hesaplanıyordu; bu hem "Bugün" filtresi hem de mevcut "Son 7/14/30 gün" aralıkları için
   // düzeltildi (2026-09-12, kullanıcı talebi: "Bugün" sekmesi Türkiye saatine göre olsun).
   const { from, to } = useMemo(() => {
+    if (customRange) return customRange;
     const now = new Date();
     const fromDate = new Date(now.getTime() - (rangeDays - 1) * 24 * 60 * 60 * 1000);
     return { from: istanbulDateStr(fromDate), to: istanbulDateStr(now) };
-  }, [rangeDays]);
+  }, [rangeDays, customRange]);
 
   // Bir gün seçiliyken özet kartları o günün satırından (days içindeki DayRow) türetiliyor — ayrı
   // bir API isteğine gerek yok, zaten mevcut aralık için çekilmiş günlük veri içinde duruyor.
@@ -275,9 +287,10 @@ export function AnalyticsView() {
           <button
             key={opt.days}
             type="button"
-            className={`btn-secondary${!selectedDate && rangeDays === opt.days ? " active" : ""}`}
+            className={`btn-secondary${!selectedDate && !customRange && rangeDays === opt.days ? " active" : ""}`}
             onClick={() => {
               setRangeDays(opt.days);
+              setCustomRange(null);
               // Aralık butonlarından biri seçilince, grafikteki gün seçimini temizle — aksi halde
               // yeni aralığın dışında kalmış eski bir gün seçili görünmeye devam ederdi.
               setSelectedDate(null);
@@ -286,6 +299,48 @@ export function AnalyticsView() {
             {opt.label}
           </button>
         ))}
+      </div>
+
+      {/* Elle tarih filtresi — ikinci alan boş bırakılırsa tek günlük bir aralık olarak
+          uygulanıyor (2026-09-13, kullanıcı talebi). */}
+      <div className="filter-bar" style={{ marginTop: 8, alignItems: "center" }}>
+        <input
+          type="date"
+          value={customFromInput}
+          onChange={(e) => setCustomFromInput(e.target.value)}
+          aria-label="Başlangıç tarihi"
+        />
+        <span className="hint">–</span>
+        <input
+          type="date"
+          value={customToInput}
+          onChange={(e) => setCustomToInput(e.target.value)}
+          aria-label="Bitiş tarihi (boş bırakılırsa tek gün)"
+        />
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={!customFromInput}
+          onClick={() => {
+            setCustomRange({ from: customFromInput, to: customToInput || customFromInput });
+            setSelectedDate(null);
+          }}
+        >
+          Uygula
+        </button>
+        {customRange && (
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              setCustomRange(null);
+              setCustomFromInput("");
+              setCustomToInput("");
+            }}
+          >
+            Temizle
+          </button>
+        )}
       </div>
 
       {overviewLoading ? (
@@ -307,6 +362,10 @@ export function AnalyticsView() {
                 <div className="value" style={{ color: effectiveTotals.profitUsd < 0 ? "var(--danger)" : undefined }}>
                   {fmtUsd(effectiveTotals.profitUsd)}
                 </div>
+              </div>
+              <div>
+                <div className="hint">Toplam Maliyet</div>
+                <div className="value">{fmtUsd(effectiveTotals.costUsd)}</div>
               </div>
               <div>
                 <div className="hint">Sipariş Adedi</div>

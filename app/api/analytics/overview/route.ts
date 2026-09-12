@@ -49,25 +49,28 @@ export async function GET(request: NextRequest) {
       // orderCount/unitsSold Ozon'un analitik metriklerinden DEĞİL, yukarıdaki yerel sipariş
       // sorgusundan geliyor — "Günlük Ciro" grafiğinde ciro'nun yanında sipariş adedi ve satılan
       // ürün adedini de göstermek için (bkz. getDailySalesStats açıklaması).
-      // profitUsd Kâr/Zarar sayfasıyla AYNI kurallarla (getPnlRows/computeRowMetrics — gerçek
-      // kargo/komisyon varsa o, yoksa tahmini formül) hesaplanıyor ve SADECE "delivered" siparişleri
-      // kapsıyor (2026-09-13, kullanıcı talebi) — henüz teslim edilmemiş güncel günlerde 0 görünmesi
-      // normaldir, bkz. getDailyProfitStats.
+      // profitUsd/costUsd Kâr/Zarar sayfasıyla AYNI kurallarla (getPnlRows/computeRowMetrics —
+      // gerçek kargo/komisyon varsa o, yoksa tahmini formül) hesaplanıyor ve SADECE "delivered"
+      // siparişleri kapsıyor (2026-09-13, kullanıcı talebi) — henüz teslim edilmemiş güncel
+      // günlerde 0 görünmesi normaldir, bkz. getDailyProfitStats. costUsd = alış maliyeti (adet ×
+      // birim alış fiyatı), toplam ciro/kârın yanında gösterilsin diye eklendi.
       return {
         date,
         ...toMetricObject(row.metrics),
         orderCount: sales?.orderCount ?? 0,
         unitsSold: sales?.unitsSold ?? 0,
-        profitUsd: profitByDate[date] ?? 0,
+        profitUsd: profitByDate[date]?.profitUsd ?? 0,
+        costUsd: profitByDate[date]?.costUsd ?? 0,
       };
     });
     days.sort((a, b) => a.date.localeCompare(b.date));
 
-    const totalProfitUsd = Object.values(profitByDate).reduce((sum, v) => sum + v, 0);
+    const totalProfitUsd = Object.values(profitByDate).reduce((sum, v) => sum + v.profitUsd, 0);
+    const totalCostUsd = Object.values(profitByDate).reduce((sum, v) => sum + v.costUsd, 0);
 
     return NextResponse.json({
       days,
-      totals: { ...toMetricObject(result.totals), profitUsd: totalProfitUsd },
+      totals: { ...toMetricObject(result.totals), profitUsd: totalProfitUsd, costUsd: totalCostUsd },
       revenueCurrency: usdToRubRate ? "USD" : "RUB",
     });
   } catch (error) {

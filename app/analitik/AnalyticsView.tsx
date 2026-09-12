@@ -382,7 +382,7 @@ export function AnalyticsView() {
                 <div className="value">{fmtNum(effectiveTotals.hits_tocart)}</div>
               </div>
               <div>
-                <div className="hint">Sepete Ekleme Oranı</div>
+                <div className="hint" style={{ whiteSpace: "nowrap" }}>Sepete Ekleme %</div>
                 <div className="value">%{effectiveTotals.conv_tocart.toLocaleString("tr-TR", { maximumFractionDigits: 2 })}</div>
               </div>
               <div>

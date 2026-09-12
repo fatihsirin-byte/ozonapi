@@ -482,6 +482,27 @@ th {
   font-weight: 600;
 }
 
+/* Analitik sayfasındaki özet kartları (2026-09-13, kullanıcı talebi: "tek satıra sığdır") —
+   kart sayısı 9'a çıkınca (Kâr/Maliyet eklenince) normal .summary-grid genişliğiyle taşıyordu;
+   burada daha dar kartlarla tek satırda tutuluyor, çok dar ekranlarda taşma yerine yatay kaydırma
+   (overflow-x) devreye giriyor. */
+.analytics-summary-grid {
+  flex-wrap: nowrap;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.analytics-summary-grid > div {
+  min-width: 100px;
+  padding: 10px 12px;
+  flex: 1 1 0;
+}
+
+.analytics-summary-grid .value {
+  font-size: 17px;
+}
+
 .toast-stack {
   position: fixed;
   top: 76px;

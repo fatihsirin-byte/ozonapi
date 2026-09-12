@@ -1,7 +1,6 @@
 import { prisma } from "../../db/prisma";
 import { computeBillingWeightGrams } from "../../pricing/formula";
 import { getUsdToRubRate } from "../../pricing/fx-rate";
-import { istanbulDateStr } from "../../utils/dateTr";
 
 // Fiyat formülüyle (src/pricing/formula.ts) aynı oranlar — kalem bazlı kâr/zarar raporunda
 // (UI tablosu + CSV indirme) hem canlı sayı hem CSV formülü olarak kullanılıyor, tek yerden
@@ -297,56 +296,6 @@ export async function getPnlRows(params?: { since?: Date; to?: Date }): Promise<
     }
   }
   return rows;
-}
-
-// Analitik sayfasındaki "Günlük Ciro" grafiğine kâr eklemek için (2026-09-13, kullanıcı talebi:
-// "kar hesaplarken siparişlerdeki gibi komisyon kargo ücreti falan her şey düş, orda kurallar
-// var") — AYNI kâr/zarar kurallarını (getPnlRows + computeRowMetrics: gerçek kargo/komisyon
-// varsa o, yoksa ağırlık bazlı tahmini formül) gün bazında özetler. getPnlRows gibi SADECE
-// "delivered" siparişleri kapsar — henüz teslim edilmemiş siparişlerin o günkü kârı bilinemez,
-// bu yüzden bazı (özellikle yakın tarihli) günlerde kâr 0 görünebilir, bu beklenen bir durumdur.
-//
-// GÜN ANAHTARI: getPnlRows'un kendi orderDate alanı UTC takvim gününe göre (toISOString().slice)
-// — oysa bu değerler Analitik sayfasında Türkiye saatine göre gruplanmış ciro/sipariş verisiyle
-// (bkz. getDailySalesStats, istanbulDateStr) BİRLİKTE gösteriliyor. İkisi farklı gün anahtarı
-// kullanırsa 21:00-23:59 UTC arası verilen siparişlerin kârı yanlış güne düşerdi (2026-09-13,
-// code review'da tespit edildi) — bu yüzden burada getPnlRows'u DEĞİŞTİRMEDEN (o, Kâr/Zarar
-// sayfasının kendi UTC bazlı tarih filtresiyle uyumlu kalmalı), sadece bu fonksiyona özel olarak
-// siparişlerin gerçek (Date) orderDate'ini ayrıca çekip istanbulDateStr ile yeniden anahtarlıyoruz.
-export interface DailyProfitAndCost {
-  profitUsd: number;
-  // Toplam maliyet (alış fiyatı × adet) — Analitik sayfasında ciro/kârın yanında gösterilsin diye
-  // eklendi (2026-09-13, kullanıcı talebi: "toplam cost ekle"). Kâr/Zarar sayfasıyla AYNI
-  // summarizePnlRows() sonucundan geliyor, ayrı bir hesap yok.
-  costUsd: number;
-}
-
-export async function getDailyProfitStats(params: { since: Date; to: Date }): Promise<Record<string, DailyProfitAndCost>> {
-  const [rows, orders] = await Promise.all([
-    getPnlRows(params),
-    prisma.order.findMany({
-      where: { status: "delivered", orderDate: { gte: params.since, lte: params.to } },
-      select: { postingNumber: true, orderDate: true },
-    }),
-  ]);
-  const istanbulDateByPosting = new Map(
-    orders.filter((o) => o.orderDate != null).map((o) => [o.postingNumber, istanbulDateStr(o.orderDate!)]),
-  );
-
-  const byDate = new Map<string, PnlRow[]>();
-  for (const row of rows) {
-    const date = istanbulDateByPosting.get(row.postingNumber);
-    if (!date) continue;
-    const list = byDate.get(date) ?? [];
-    list.push(row);
-    byDate.set(date, list);
-  }
-  const result: Record<string, DailyProfitAndCost> = {};
-  for (const [date, dateRows] of byDate) {
-    const totals = summarizePnlRows(dateRows);
-    result[date] = { profitUsd: totals.profit, costUsd: totals.totalCost };
-  }
-  return result;
 }
 
 // Kargo Kontrolü sekmesi için: Ozon'un gerçek kargo kesintisini işlediği (yani teslimattan sonra

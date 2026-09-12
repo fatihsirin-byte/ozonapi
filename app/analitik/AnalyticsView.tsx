@@ -18,13 +18,15 @@ interface DayRow {
   // grafiğinin tooltip'inde ciro'nun yanında gösteriliyor (2026-09-12, kullanıcı talebi).
   orderCount: number;
   unitsSold: number;
-  // Kâr/Zarar sayfasıyla AYNI kurallarla (komisyon, kargo — gerçek varsa o, yoksa tahmini formül,
-  // maliyet düşülmüş) hesaplanıyor, HER ZAMAN USD — bkz. app/api/analytics/overview/route.ts +
-  // pnl-report.service.ts getDailyProfitStats. Sadece "delivered" siparişleri kapsar (2026-09-13,
-  // kullanıcı talebi: "kar hesaplarken siparişlerdeki gibi ... orda kurallar var").
+  // Siparişler listesindeki "Olası Net Kâr" ile AYNI kurallarla (computeOrderEstimatedProfit —
+  // gerçek kargo/komisyon varsa o, yoksa şişirilmiş ağırlıktan tahmini formül) hesaplanıyor, HER
+  // ZAMAN USD — bkz. app/api/analytics/overview/route.ts + orders.service.ts getDailyProfitStats.
+  // Sipariş DURUMUNA bakılmaksızın (delivered olması gerekmiyor) hesaplanır (2026-09-13, kullanıcı
+  // düzeltmesi: ilk sürüm Kâr/Zarar'ın "sadece delivered" kısıtını kullanıyordu, yakın tarihli
+  // günlerde hep 0 gösteriyordu).
   profitUsd: number;
   // Toplam alış maliyeti (adet × birim alış fiyatı) — profitUsd ile AYNI kaynaktan (getDailyProfitStats)
-  // geliyor, aynı "sadece delivered" kısıtına tabi (2026-09-13, kullanıcı talebi: "toplam cost ekle").
+  // geliyor, aynı kapsam (delivered şartı yok).
   costUsd: number;
 }
 
@@ -352,7 +354,7 @@ export function AnalyticsView() {
       ) : (
         <>
           {effectiveTotals && (
-            <div className="summary-grid" style={{ marginBottom: 24 }}>
+            <div className="summary-grid analytics-summary-grid" style={{ marginBottom: 24 }}>
               <div>
                 <div className="hint">Toplam Ciro</div>
                 <div className="value">{fmtRevenue(effectiveTotals.revenue, revenueCurrency)}</div>

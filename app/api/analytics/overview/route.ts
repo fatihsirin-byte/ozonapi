@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAnalyticsByDay, ANALYTICS_METRICS } from "@/ozon/analytics";
 import { OzonApiError } from "@/ozon/client";
 import { getUsdToRubRate } from "@/pricing/fx-rate";
-import { getDailySalesStats } from "@/modules/orders/orders.service";
-import { getDailyProfitStats } from "@/modules/finance/pnl-report.service";
+import { getDailySalesStats, getDailyProfitStats } from "@/modules/orders/orders.service";
 import { istanbulDayBoundsUtc } from "@/utils/dateTr";
 
 // Metrik dizisindeki sıra ANALYTICS_METRICS'teki sırayla birebir eşleşiyor (Ozon dizi olarak
@@ -49,11 +48,12 @@ export async function GET(request: NextRequest) {
       // orderCount/unitsSold Ozon'un analitik metriklerinden DEĞİL, yukarıdaki yerel sipariş
       // sorgusundan geliyor — "Günlük Ciro" grafiğinde ciro'nun yanında sipariş adedi ve satılan
       // ürün adedini de göstermek için (bkz. getDailySalesStats açıklaması).
-      // profitUsd/costUsd Kâr/Zarar sayfasıyla AYNI kurallarla (getPnlRows/computeRowMetrics —
-      // gerçek kargo/komisyon varsa o, yoksa tahmini formül) hesaplanıyor ve SADECE "delivered"
-      // siparişleri kapsıyor (2026-09-13, kullanıcı talebi) — henüz teslim edilmemiş güncel
-      // günlerde 0 görünmesi normaldir, bkz. getDailyProfitStats. costUsd = alış maliyeti (adet ×
-      // birim alış fiyatı), toplam ciro/kârın yanında gösterilsin diye eklendi.
+      // profitUsd/costUsd Siparişler listesindeki "Olası Net Kâr" ile AYNI kurallarla
+      // (computeOrderEstimatedProfit — gerçek kargo/komisyon varsa o, yoksa şişirilmiş ağırlıktan
+      // tahmini formül) hesaplanıyor, sipariş DURUMUNA bakılmaksızın (2026-09-13, kullanıcı
+      // düzeltmesi: ilk sürüm Kâr/Zarar'ın "sadece delivered" kısıtını kullanıyordu, bu yüzden
+      // yakın tarihli günlerde hep 0 görünüyordu — bkz. getDailyProfitStats). costUsd = alış
+      // maliyeti (adet × birim alış fiyatı).
       return {
         date,
         ...toMetricObject(row.metrics),

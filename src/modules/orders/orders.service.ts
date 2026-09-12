@@ -5,7 +5,7 @@ import { OzonApiError } from "../../ozon/client";
 import { WAREHOUSE_UNDER_500G } from "../../ozon/warehouses";
 import { importFromOzon, syncMissingProductsFromOzon } from "../products/products.service";
 import { computePriceBreakdown } from "../../pricing/formula";
-import { effectiveCargoWeightGrams, estimateShippingForWeight, productWeightSource, WEIGHT_SOURCE_LABEL } from "../finance/pnl-report.service";
+import { effectiveCargoWeightGrams, estimateShippingForWeight, productWeightSource, WEIGHT_SOURCE_LABEL, getRealShippingAndFeesUsdByPosting } from "../finance/pnl-report.service";
 import { istanbulDateStr } from "../../utils/dateTr";
 import {
   uploadInvoiceFile,
@@ -610,6 +610,47 @@ export async function getDailySalesStats(params: { since: Date; to: Date }): Pro
   }
 
   return [...byDate.entries()].map(([date, v]) => ({ date, ...v }));
+}
+
+export interface DailyProfitAndCost {
+  profitUsd: number;
+  costUsd: number;
+}
+
+// Analitik sayfasındaki "Günlük Ciro" grafiğine kâr/maliyet eklemek için (2026-09-13, kullanıcı
+// talebi: "kar hesaplarken siparişlerdeki gibi hesapla, orda kurallar var — önce gerçek, sonra
+// şişirilmiş ağırlıktan"). DÜZELTME (2026-09-13): ilk sürüm Kâr/Zarar sayfasının getPnlRows'unu
+// kullanıyordu — o SADECE "delivered" siparişleri kapsadığı için yakın tarihli (henüz teslim
+// edilmemiş) günlerde kâr hep 0 çıkıyordu, kullanıcı bunu "kâr gözükmüyor, 0 olamaz" diye
+// bildirdi. "Siparişlerdeki gibi" ifadesi aslında Kâr/Zarar sayfasını değil, Siparişler
+// listesindeki/sipariş detayındaki "Olası Net Kâr" hesabını (computeOrderEstimatedProfit) işaret
+// ediyor — o, sipariş DURUMUNA bakmaksızın her sipariş için Ozon GERÇEKTEN kargo/komisyon
+// kestiyse onu, kesmediyse ağırlık bazlı (şişirilmiş, bkz. effectiveCargoWeightGrams) tahmini
+// tarifeyi kullanır. Burada da AYNI fonksiyonu, AYNI şekilde (getRealShippingAndFeesUsdByPosting
+// ile toplu gerçek kargo/ücret verisi) çağırıyoruz — app/orders/page.tsx'teki "Olası Net Kâr"
+// sütunuyla birebir aynı mantık. getDailySalesStats gibi sadece iptaller hariç tutuluyor.
+export async function getDailyProfitStats(params: { since: Date; to: Date }): Promise<Record<string, DailyProfitAndCost>> {
+  const orders = await prisma.order.findMany({
+    where: { orderDate: { gte: params.since, lte: params.to }, status: { not: "cancelled" } },
+    include: { items: { include: { product: true } } },
+  });
+  const { shipping, fees } = await getRealShippingAndFeesUsdByPosting(orders.map((o) => o.postingNumber));
+
+  const result: Record<string, DailyProfitAndCost> = {};
+  for (const order of orders) {
+    if (!order.orderDate) continue;
+    const date = istanbulDateStr(order.orderDate);
+    const bucket = result[date] ?? { profitUsd: 0, costUsd: 0 };
+
+    const cost = computeOrderCost(order.items);
+    if (cost != null) bucket.costUsd += cost;
+
+    const profit = computeOrderEstimatedProfit(order.items, shipping.get(order.postingNumber), fees.get(order.postingNumber));
+    if (profit != null) bucket.profitUsd += profit;
+
+    result[date] = bucket;
+  }
+  return result;
 }
 
 // Haftalık gruplamada bir tarihin ait olduğu haftanın PAZARTESİ'sini anahtar olarak kullanıyoruz

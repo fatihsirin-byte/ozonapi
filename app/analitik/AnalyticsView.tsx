@@ -18,6 +18,11 @@ interface DayRow {
   // grafiğinin tooltip'inde ciro'nun yanında gösteriliyor (2026-09-12, kullanıcı talebi).
   orderCount: number;
   unitsSold: number;
+  // Kâr/Zarar sayfasıyla AYNI kurallarla (komisyon, kargo — gerçek varsa o, yoksa tahmini formül,
+  // maliyet düşülmüş) hesaplanıyor, HER ZAMAN USD — bkz. app/api/analytics/overview/route.ts +
+  // pnl-report.service.ts getDailyProfitStats. Sadece "delivered" siparişleri kapsar (2026-09-13,
+  // kullanıcı talebi: "kar hesaplarken siparişlerdeki gibi ... orda kurallar var").
+  profitUsd: number;
 }
 
 interface Totals {
@@ -28,6 +33,7 @@ interface Totals {
   conv_tocart: number;
   returns: number;
   cancellations: number;
+  profitUsd: number;
 }
 
 interface TopProduct {
@@ -173,6 +179,9 @@ function RevenueBarChart({
           <div className="hint" style={{ margin: 0 }}>
             {fmtNum(days[hoverIndex].orderCount)} sipariş · {fmtNum(days[hoverIndex].unitsSold)} ürün
           </div>
+          <div className="hint" style={{ margin: 0, color: days[hoverIndex].profitUsd < 0 ? "var(--danger)" : undefined }}>
+            Kâr: {fmtUsd(days[hoverIndex].profitUsd)}
+          </div>
         </div>
       )}
     </div>
@@ -292,6 +301,12 @@ export function AnalyticsView() {
               <div>
                 <div className="hint">Toplam Ciro</div>
                 <div className="value">{fmtRevenue(effectiveTotals.revenue, revenueCurrency)}</div>
+              </div>
+              <div>
+                <div className="hint">Toplam Kâr</div>
+                <div className="value" style={{ color: effectiveTotals.profitUsd < 0 ? "var(--danger)" : undefined }}>
+                  {fmtUsd(effectiveTotals.profitUsd)}
+                </div>
               </div>
               <div>
                 <div className="hint">Sipariş Adedi</div>

@@ -413,11 +413,34 @@ function csvEscape(value: string | number): string {
   return str;
 }
 
-const WEIGHT_SOURCE_LABEL: Record<PnlRow["weightSource"], string> = {
+// UI tablosu (PnlMainTable) ve sipariş detay penceresi (OrderDetailModal) de AYNI etiketleri
+// kullanıyor — üçünün kendi kopyasını tutması, ileride kaynak isimlendirmesi değişince
+// birinin unutulup tutarsız kalmasına yol açardı (2026-09-12'de code review'da tespit edildi).
+export const WEIGHT_SOURCE_LABEL: Record<PnlRow["weightSource"], string> = {
   measured: "Ölçülmüş (gerçek)",
   estimated: "Tahmini (inflated)",
   unknown: "",
 };
+
+// "unknown" iken hiçbir şey eklenmeyen ortak biçim yardımcıları — PnlMainTable'daki bir yerde ve
+// OrderDetailModal'daki iki yerde (toplam üç çağrı noktasında) aynı
+// "weightSource !== 'unknown' ? ... : ''" kontrolü tekrarlanmasın diye (2026-09-12'de code
+// review'da tespit edildi: WEIGHT_SOURCE_LABEL'ı merkezileştirmek yetmedi, onu saran koşul de
+// üç çağrı noktasında ayrı ayrı duruyordu). weightSourceParenthetical/Suffix aynı "unknown" kontrolünü
+// TEKRAR yazmak yerine tek bir iç fonksiyona (weightSourceLabelOrEmpty) delege eder.
+function weightSourceLabelOrEmpty(weightSource: PnlRow["weightSource"]): string {
+  return weightSource === "unknown" ? "" : WEIGHT_SOURCE_LABEL[weightSource];
+}
+
+export function weightSourceParenthetical(weightSource: PnlRow["weightSource"]): string {
+  const label = weightSourceLabelOrEmpty(weightSource);
+  return label ? ` (${label})` : "";
+}
+
+export function weightSourceSuffix(weightSource: PnlRow["weightSource"]): string {
+  const label = weightSourceLabelOrEmpty(weightSource);
+  return label ? ` ${label}` : "";
+}
 
 // pnl-export CLI scripti VE "CSV İndir" butonu aynı bu fonksiyonu kullanıyor — komisyon/marj/
 // kargo oranlarını sheet üzerinde değiştirip anında yeniden hesaplatabilsin diye sabit sayı

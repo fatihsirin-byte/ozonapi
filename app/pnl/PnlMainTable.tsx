@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { computeRowMetrics, estimateShippingForWeight, type PnlRow } from "@/modules/finance/pnl-report.service";
+import { computeRowMetrics, estimateShippingForWeight, weightSourceParenthetical, type PnlRow } from "@/modules/finance/pnl-report.service";
 import { CopyableProductName } from "./CopyableProductName";
 import { OrderDetailModal } from "./OrderDetailModal";
 import { Pagination } from "./Pagination";
@@ -17,12 +17,6 @@ function fmtPct(n: number | null) {
   if (n == null) return "-";
   return `${n.toLocaleString("tr-TR", { maximumFractionDigits: 1 })}%`;
 }
-
-const WEIGHT_SOURCE_LABEL = {
-  measured: "Ölçülmüş",
-  estimated: "Tahmini",
-  unknown: "-",
-} as const;
 
 type SortKey = "orderDate" | "status" | "productName" | "quantity" | "totalSale" | "totalCost" | "profit" | "marginPct";
 
@@ -200,7 +194,12 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
                     {sortKey === col.key && (sortDir === "asc" ? " ▲" : " ▼")}
                   </th>
                 ))}
-                <th style={{ whiteSpace: "nowrap" }}>Ağırlık / Kargo</th>
+                <th
+                  style={{ whiteSpace: "nowrap" }}
+                  title="Kargo ücretinin neyle hesaplandığını gösterir: Ozon o siparişin kargo kesintisini gerçekten işlediyse gerçek tutar (gerçek), işlemediyse ölçülmüş (gerçek tartılmış) ya da tahmini (girilen ağırlıktan şişirilmiş) ağırlıktan hesaplanan tahmin kullanılır."
+                >
+                  Ağırlık / Kargo
+                </th>
                 <th style={{ whiteSpace: "nowrap" }}>Tahmini Kargo (Ağırlıktan)</th>
                 <th style={{ whiteSpace: "nowrap" }}>Fark (Gerçek − Tahmini)</th>
               </tr>
@@ -284,7 +283,7 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
                       ) : (
                         <>
                           {row.cargoWeightGrams != null ? `${Math.round(row.cargoWeightGrams)}g` : "-"}
-                          {row.weightSource !== "unknown" && ` (${WEIGHT_SOURCE_LABEL[row.weightSource]})`}
+                          {weightSourceParenthetical(row.weightSource)}
                         </>
                       )}
                     </td>

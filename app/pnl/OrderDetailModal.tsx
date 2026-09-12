@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { computeRowMetrics, type PnlRow, type PnlRowMetrics } from "@/modules/finance/pnl-report.service";
+import {
+  computeRowMetrics,
+  weightSourceParenthetical,
+  weightSourceSuffix,
+  type PnlRow,
+  type PnlRowMetrics,
+} from "@/modules/finance/pnl-report.service";
 import { CopyableProductName } from "./CopyableProductName";
 
 function fmtMoney(n: number) {
@@ -168,11 +174,24 @@ export function OrderDetailModal({
                   )}
                 </div>
                 <div className="hint" style={{ marginTop: 4 }}>
-                  Adet: {row.quantity} · Net: {row.netWeightGrams != null ? `${row.netWeightGrams}g` : "-"} · Kargo:{" "}
+                  Adet: {row.quantity} · Net: {row.netWeightGrams != null ? `${row.netWeightGrams}g` : "-"} · Birim Kargo Ağırlığı:{" "}
                   {row.cargoWeightGrams != null ? `${Math.round(row.cargoWeightGrams)}g` : "-"}
+                  {weightSourceParenthetical(row.weightSource)}
                   {row.widthCm != null && row.heightCm != null && row.depthCm != null && (
                     <> · {row.widthCm}×{row.heightCm}×{row.depthCm} cm</>
                   )}
+                </div>
+                <div
+                  className="hint"
+                  style={{ marginTop: 2 }}
+                  title="Ozon o siparişin kargo kesintisini gerçekten işlediyse (genelde teslimattan sonra) gerçek tutar kullanılır; işlemediyse toplam kargo ağırlığından (birim ağırlık × adet) tahmini hesaplanır."
+                >
+                  Kargo ücreti: {m.shipping != null ? fmtMoney(m.shipping) : "-"} —{" "}
+                  {row.realShippingUsd != null
+                    ? `Ozon'un gerçek kestiği tutar${row.approximateShippingSplit ? " (siparişteki diğer ürünlerle paylaştırılmış)" : ""}`
+                    : row.cargoWeightGrams != null
+                      ? `toplam ${Math.round(row.cargoWeightGrams * row.quantity)}g${weightSourceSuffix(row.weightSource)} ağırlıktan tahmin edildi`
+                      : "ağırlık yok, hesaplanamadı"}
                 </div>
                 <div style={{ display: "flex", gap: 14, marginTop: 6, marginBottom: 8 }}>
                   <div>

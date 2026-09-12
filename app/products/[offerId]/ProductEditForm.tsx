@@ -24,6 +24,7 @@ interface ProductData {
   heightCm: number | null;
   depthCm: number | null;
   heavyPackaging: boolean;
+  gtipOverride: string | null;
 }
 
 interface CloneAttribute {
@@ -71,6 +72,8 @@ export function ProductEditForm({ product }: { product: ProductData }) {
         : null),
   );
   const [savingWeight, setSavingWeight] = useState(false);
+  const [gtipOverride, setGtipOverride] = useState(product.gtipOverride ?? "");
+  const [savingGtip, setSavingGtip] = useState(false);
 
   // Net ağırlık YA DA ağır ambalaj işareti değiştirildiğinde kargo ağırlığını otomatik yeniden
   // hesaplar (paketleme payı + gerekirse hacimsel ağırlık) — kullanıcı isterse kaydetmeden önce
@@ -107,6 +110,29 @@ export function ProductEditForm({ product }: { product: ProductData }) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Bilinmeyen hata" });
     } finally {
       setSavingWeight(false);
+    }
+  }
+  // ASE (xlive.ase.com.tr) gümrük/ETGB entegrasyonu için GTİP override — Ozon'a HİÇBİR şey
+  // gönderilmiyor, bu yüzden "alreadyCreated" kilidine tabi değil (2026-09-12, kullanıcı kararı).
+  async function saveGtipOverride() {
+    setSavingGtip(true);
+    setMessage(null);
+    try {
+      const res = await fetch(productApiPath(product.offerId), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gtipOverride: gtipOverride || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error ?? "Güncelleme başarısız" });
+        return;
+      }
+      setMessage({ type: "success", text: "GTİP kodu kaydedildi." });
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Bilinmeyen hata" });
+    } finally {
+      setSavingGtip(false);
     }
   }
   const [showCalculator, setShowCalculator] = useState(false);
@@ -345,6 +371,23 @@ export function ProductEditForm({ product }: { product: ProductData }) {
           {!alreadyCreated && (
             <div className="hint">Kategori/özellik bilgilerini "Kategori & Özellikler" sekmesinden düzenleyebilirsiniz.</div>
           )}
+          <div className="field" style={{ marginTop: 16 }}>
+            <label>GTİP (HS Kodu) Override — ASE gümrük entegrasyonu için</label>
+            <input
+              type="text"
+              value={gtipOverride}
+              onChange={(e) => setGtipOverride(e.target.value)}
+              placeholder="Boş bırakılırsa Ozon'a girilmiş GTİP önerisi kullanılır"
+            />
+            <div className="hint">
+              Doluysa, ASE'ye gönderilen gümrük bildiriminde Ozon'daki GTİP önerisi yerine bu kod kullanılır.
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <button className="btn-primary" disabled={savingGtip} onClick={saveGtipOverride}>
+                {savingGtip ? "Kaydediliyor..." : "GTİP Kodunu Kaydet"}
+              </button>
+            </div>
+          </div>
         </>
       )}
 

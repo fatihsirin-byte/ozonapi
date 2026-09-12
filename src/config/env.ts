@@ -23,4 +23,15 @@ export const env = {
   parasutPassword: process.env.PARASUT_PASSWORD,
   parasutCompanyId: process.env.PARASUT_COMPANY_ID,
   parasutBaseUrl: process.env.PARASUT_BASE_URL ?? "https://api.parasut.com",
+
+  // ASE (xlive.ase.com.tr) gümrük/ETGB entegrasyonu — Paraşüt gibi required() ile zorunlu
+  // tutulmuyor, eksikse gerçekten kullanılacağı yerde (src/ase/client.ts) anlamlı hata verilir.
+  aseBaseUrl: process.env.ASE_BASE_URL ?? "https://xlive.ase.com.tr/api",
+  aseClientId: process.env.ASE_CLIENT_ID,
+  aseSecretKey: process.env.ASE_SECRET_KEY,
+  // Hiçbir ASE isteğinde kullanılmıyor — kasıtlı: GetToken sadece ClientId/SecretKey/LevelId alıyor,
+  // seller id API dokümanında bir istek alanı olarak hiç geçmiyor. Gerçek GetToken çağrısıyla
+  // doğrulandı: dönen JWT'nin içine ASE tarafından zaten gömülüyor ("sellerid" claim'i, ClientId'ye
+  // bağlı olarak sunucu tarafında belirleniyor) — burada sadece referans/dokümantasyon amaçlı duruyor.
+  aseSellerId: process.env.ASE_SELLER_ID,
 };

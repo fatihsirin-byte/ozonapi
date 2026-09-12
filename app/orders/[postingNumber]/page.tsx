@@ -19,6 +19,7 @@ import { LabelDownloadButton } from "./LabelDownloadButton";
 import { ShipOrderButton } from "./ShipOrderButton";
 import { RealWeightInput } from "./RealWeightInput";
 import { ParasutInvoiceButton } from "../ParasutInvoiceButton";
+import { EtgbInfo } from "./EtgbInfo";
 import {
   estimateShippingForWeight,
   effectiveCargoWeightGrams,
@@ -204,6 +205,10 @@ export default async function OrderDetailPage({
         )}
         <div>
           <PurchaseInvoiceField postingNumber={order.postingNumber} initialValue={order.purchaseInvoiceNumber} />
+        </div>
+        <div>
+          <div className="hint">ETGB / Gümrük</div>
+          <EtgbInfo postingNumber={order.postingNumber} />
         </div>
       </div>
 

@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { syncFbsOrders } from "../modules/orders/orders.service";
 import { syncTransactionsForDateRange } from "../modules/finance/finance.service";
 import { backfillMissingStock } from "../modules/products/products.service";
+import { dispatchPendingAseShipments } from "../ase/orderShipment";
 
 const DEFAULT_STOCK = 100;
 
@@ -30,6 +31,16 @@ async function runSync() {
     }
   } catch (error) {
     console.error(`[sync-orders-cron] ${new Date().toISOString()} — stok backfill hatası:`, error);
+  }
+
+  // ASE'ye (gümrük/ETGB) bildirim — bkz. dispatchPendingAseShipments açıklaması: sadece sipariş
+  // sayfası açıldığında tetiklenen mekanizma (parasut-invoice/pdf/route.ts) tek başına yeterli
+  // değil, kimse sayfayı açmazsa gönderim hiç denenmiyordu (2026-09-13, code review'da tespit
+  // edildi) — burası güvenilir asıl tetikleyici.
+  try {
+    await dispatchPendingAseShipments();
+  } catch (error) {
+    console.error(`[sync-orders-cron] ${new Date().toISOString()} — ASE gönderim hatası:`, error);
   }
 }
 

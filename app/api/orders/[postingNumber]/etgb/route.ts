@@ -12,5 +12,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ pos
   }
 
   const etgb = await fetchEtgbForOrder(decoded, order.orderDate);
-  return NextResponse.json({ etgb });
+  // ASE (xlive.ase.com.tr) gümrük bildirimi sonucu — salt-okunur, bkz. src/ase/orderShipment.ts.
+  return NextResponse.json({
+    etgb,
+    aseShipment: {
+      sentAt: order.aseShipmentSentAt,
+      success: order.aseShipmentSuccess,
+      message: order.aseShipmentMessage,
+    },
+  });
 }

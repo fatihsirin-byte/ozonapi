@@ -4,6 +4,7 @@ import { resolveInvoicePdfForOrder } from "@/parasut/eArchives";
 import { showSalesInvoice } from "@/parasut/invoices";
 import { INVOICE_CLAIM_SENTINEL } from "@/parasut/orderInvoice";
 import { cacheInvoicePdfIfMissing } from "@/parasut/pdfCache";
+import { sendOrderToAse } from "@/ase/orderShipment";
 
 // Fatura kesildikten sonra Paraşüt'ün e-Arşiv'i GİB'e gönderip resmileştirmesi (Paraşüt panelinde
 // "GÖNDERİLİYOR" durumu) birkaç saniye/dakika sürebiliyor — bu esnada bizim tahmini bastığımız
@@ -19,7 +20,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const decodedPostingNumber = decodeURIComponent(postingNumber);
   const order = await prisma.order.findUnique({
     where: { postingNumber: decodedPostingNumber },
-    select: { parasutInvoiceId: true, parasutInvoiceNoConfirmed: true },
+    select: { parasutInvoiceId: true, parasutInvoiceNoConfirmed: true, aseShipmentSuccess: true },
   });
 
   if (!order?.parasutInvoiceId || order.parasutInvoiceId === INVOICE_CLAIM_SENTINEL) {
@@ -53,6 +54,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   // tekrar denenir; true olduktan sonra (gerçek numara elde edildiğinde) bir daha denenmez — aylar
   // önce kesilmiş, numarası çoktan netleşmiş faturalar için gereksiz Paraşüt isteği atılmaz.
   let invoiceNo: string | null = null;
+  let justConfirmed = false;
   if (!order.parasutInvoiceNoConfirmed) {
     try {
       const invoice = await showSalesInvoice(order.parasutInvoiceId);
@@ -62,11 +64,26 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
           where: { postingNumber: decodedPostingNumber },
           data: { parasutInvoiceNo: invoiceNo, parasutInvoiceNoConfirmed: true },
         });
+        justConfirmed = true;
       }
     } catch {
       // Gerçek numara okunamazsa mevcut (muhtemelen geçici) değer kalır — bir sonraki kontrolde
       // tekrar denenir, PDF linki bu arada yine de çalışır.
     }
+  }
+
+  // Fatura numarası kesinleştiyse (şimdi ya da daha önce) VE ASE'ye gönderim daha önce başarılı
+  // olmadıysa, her "ready" kontrolünde tekrar denenir (2026-09-12 code review: tek seferlik deneme
+  // kalıcı olarak başarısız kalabiliyordu, retry yolu yoktu). sendOrderToAse kendi içinde zaten
+  // "daha önce başarılı olduysa dokunma" ve "aynı anda ikinci çağrıyı atla" kontrollerini yapıyor.
+  // BİLEREK await EDİLMİYOR — bu route sadece fatura/PDF durumunu döndürmeli, ASE'nin (yavaş
+  // olabilecek) HTTP çağrısı yüzünden ön yüzün "hazır" bilgisini beklemesi doğru değil (2026-09-12
+  // code review bulgusu). Uygulama kalıcı bir Node süreci olarak (pm2) çalıştığından, response
+  // döndükten sonra da bu promise arka planda tamamlanmaya devam eder.
+  if ((justConfirmed || order.parasutInvoiceNoConfirmed) && !order.aseShipmentSuccess) {
+    sendOrderToAse(decodedPostingNumber).catch((err) => {
+      console.error(`[ase] sendOrderToAse beklenmedik şekilde fırlattı (posting ${decodedPostingNumber}):`, err);
+    });
   }
 
   // invoiceNo'yu (güncellendiyse) yanıta da ekliyoruz — aksi halde DB'ye yazılan doğru numara

@@ -30,6 +30,11 @@ model Product {
   // = taban.costPrice/weightGrams × unitsInPack olarak "Yeniden Hesapla" ile senkronlanabilir.
   // Kutu/Display gibi toplu varyantları restore ederken kullanılıyor (bkz. src/scripts/restore-bulk-pack-variants.ts).
   packBaseOfferId       String?
+  // ASE (xlive.ase.com.tr) gümrük/ETGB entegrasyonu için GTİP (HS kodu) override — panelde ürün
+  // düzenleme ekranından elle girilir. Doluysa ASE'ye gönderilirken bu kullanılır, boşsa Ozon'a
+  // zaten girilmiş öneri (bkz. suggestHsCodesForOrder, orders.service.ts) kullanılır (2026-09-12,
+  // kullanıcı talebi/kararı).
+  gtipOverride          String?
   widthCm               Int?
   heightCm              Int?
   depthCm               Int?
@@ -141,6 +146,14 @@ model Order {
   // sonra BİLEREK null'a geri döndürülmüyor (denetim izi + "bu sipariş bizim butonumuzla
   // paketlendi" kaydı olarak kalıyor).
   shipClaimedAt DateTime?
+  // ASE (xlive.ase.com.tr) gümrük/ETGB entegrasyonu — fatura numarası KESİNLEŞTİĞİ an (bkz.
+  // parasutInvoiceNoConfirmed, app/api/orders/[postingNumber]/parasut-invoice/pdf/route.ts) bir
+  // kez gönderilir (bkz. src/ase/orderShipment.ts sendOrderToAse). Hata durumunda da bu alanlar
+  // dolar (aseShipmentSuccess=false + aseShipmentMessage) — fatura akışını ENGELLEMEZ, sadece
+  // sonucu kaydeder (2026-09-12, kullanıcı talebi).
+  aseShipmentSentAt     DateTime?
+  aseShipmentSuccess    Boolean?
+  aseShipmentMessage    String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

@@ -593,6 +593,13 @@ export async function setCostPriceOnly(offerId: string, costPrice: string) {
   return prisma.product.update({ where: { offerId }, data: { costPrice } });
 }
 
+// Sadece bizim DB'mizdeki GTİP (HS kodu) override'ını kaydeder — Ozon'a HİÇBİR şey gönderilmez.
+// ASE (xlive.ase.com.tr) gümrük/ETGB entegrasyonu, bu alan doluysa Ozon'a girilmiş öneri yerine
+// bunu kullanır (bkz. src/ase/orderShipment.ts, 2026-09-12, kullanıcı kararı).
+export async function updateGtipOverride(offerId: string, gtipOverride: string | null) {
+  return prisma.product.update({ where: { offerId }, data: { gtipOverride } });
+}
+
 // priceOverride verilirse (Fiyat Hesaplayıcı modalında elle girilen satış fiyatı) formülü
 // yeniden hesaplamadan doğrudan o fiyat Ozon'a gönderilir — aksi halde costPrice'tan
 // formülle hesaplanan önerilen fiyat kullanılır (mevcut davranış).

@@ -3,6 +3,8 @@ import {
   listOrders,
   computeOrderAmount,
   computeOrderEstimatedProfit,
+  computeOrderWeightInfo,
+  orderWeightSourceLabel,
   getOrderFilterCounts,
   findSearchMatchingOrderIds,
   getShipmentDelayInfo,
@@ -235,6 +237,12 @@ export default async function OrdersPage({
                   Kalan Süre
                 </th>
                 <th style={{ whiteSpace: "nowrap" }}>Ürün</th>
+                <th
+                  style={{ whiteSpace: "nowrap" }}
+                  title="Ozon o siparişin kargo kesintisini gerçekten işlediyse (genelde teslimattan sonra) Olası Net Kâr'daki kargo ücreti o gerçek tutardır, aşağıdaki ağırlık o zaman sadece bilgi amaçlıdır. İşlemediyse Olası Net Kâr'daki kargo ücreti aşağıdaki ağırlıktan (tartılmış gerçek mi, yoksa girilen ağırlıktan hesaplanan tahmini mi olduğu parantez içinde) hesaplanır."
+                >
+                  Kargo Ağırlığı
+                </th>
                 <th style={{ whiteSpace: "nowrap" }}>Tutar</th>
                 <th style={{ whiteSpace: "nowrap" }} title="Fatura kesilmiş siparişlerde o günün gerçek faturasıyla birebir aynı, kesin tutar. Kesilmemişlerde bugünün canlı kuruyla hesaplanan tahmini değer.">
                   TL Satış Fiyatı
@@ -332,6 +340,26 @@ export default async function OrdersPage({
                           </div>
                         ))}
                       </div>
+                    </td>
+                    <td>
+                      {(() => {
+                        const w = computeOrderWeightInfo(o.items);
+                        const usedRealShipping = realShippingByPosting.get(o.postingNumber) != null;
+                        if (w.totalGrams == null) {
+                          return usedRealShipping ? (
+                            <span className="hint">gerçek kesinti kullanıldı</span>
+                          ) : (
+                            <span className="hint">-</span>
+                          );
+                        }
+                        const label = orderWeightSourceLabel(w.source);
+                        return (
+                          <span className="hint">
+                            {Math.round(w.totalGrams)}g{label && ` (${label})`}
+                            {usedRealShipping && " — bilgi amaçlı, gerçek kesinti kullanıldı"}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td>{formatMoney(computeOrderAmount(o.items))}</td>
                     <td>

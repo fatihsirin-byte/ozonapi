@@ -129,6 +129,23 @@ export function effectiveCargoWeightGrams(product: {
   );
 }
 
+// effectiveCargoWeightGrams'ın döndürdüğü ağırlığın hangi kaynaktan geldiğini söyler — Siparişler
+// sayfası ve sipariş detay sayfası da (PNL sayfasıyla aynı "ölçülmüş mü, tahmini mi" ayrımını)
+// göstersin diye tek yerden (2026-09-12, kullanıcı talebi: "hangi ağırlık kullanıldığını
+// bilemiyorum"). weightGrams VEYA cargoWeightGrams'tan herhangi biri doluysa "estimated" dönüyor —
+// cargoWeightGrams'ın kendisi ürün düzenleme formundan ELLE de girilmiş olabilir (weightConfirmed
+// hiç true olmadan), yani bu her zaman formülün otomatik hesapladığı bir değer değildir; sadece
+// weightConfirmed=true olduğunda "gerçek tartılmış ağırlık" garantisi var (2026-09-12'de code
+// review'da tespit edildi: eskiden sadece weightGrams'a bakıyordu, cargoWeightGrams elle girilip
+// weightGrams boş kalan üründe ağırlık gösterilirken kaynağı hiç etiketlenmiyordu).
+export function productWeightSource(
+  product: { weightConfirmed: boolean; weightGrams: number | null; cargoWeightGrams: number | null } | null,
+): PnlRow["weightSource"] {
+  if (!product) return "unknown";
+  if (product.weightConfirmed) return "measured";
+  return product.weightGrams != null || product.cargoWeightGrams != null ? "estimated" : "unknown";
+}
+
 // Bir posting'e ait FinanceTransaction satırlarındaki deliveryCharge'ları toplar. Ozon bunu
 // kesinti olarak (genelde negatif) döndürüyor — burada mutlak değer, yani pozitif bir "maliyet"
 // olarak dönülüyor. Teslimattan ÖNCE de posting için küçük düzeltme işlemleri (transaction satırı)
@@ -263,7 +280,7 @@ export async function getPnlRows(params?: { since?: Date; to?: Date }): Promise<
         quantity: item.quantity,
         unitSalePrice: Number(item.price),
         unitCostPrice: product?.costPrice != null ? Number(product.costPrice) : null,
-        weightSource: product?.weightConfirmed ? "measured" : product?.weightGrams != null ? "estimated" : "unknown",
+        weightSource: productWeightSource(product),
         cargoWeightGrams: effectiveCargoWeightGrams(product),
         netWeightGrams: product?.weightGrams ?? null,
         widthCm: product?.widthCm ?? null,
@@ -417,8 +434,8 @@ function csvEscape(value: string | number): string {
 // kullanıyor — üçünün kendi kopyasını tutması, ileride kaynak isimlendirmesi değişince
 // birinin unutulup tutarsız kalmasına yol açardı (2026-09-12'de code review'da tespit edildi).
 export const WEIGHT_SOURCE_LABEL: Record<PnlRow["weightSource"], string> = {
-  measured: "Ölçülmüş (gerçek)",
-  estimated: "Tahmini (inflated)",
+  measured: "Ölçülmüş, gerçek",
+  estimated: "Tahmini/elle girilmiş, henüz onaylanmamış",
   unknown: "",
 };
 
@@ -520,7 +537,7 @@ export function buildPnlCsv(rows: PnlRow[]): string {
   csvRows.push(csvEscape("Notlar:"));
   csvRows.push(csvEscape("- Bu dosyadaki fiyat/kâr hücreleri canlı formül — komisyon/marj/kargo oranlarını hücrelerden değiştirip anında yeniden hesaplatabilirsiniz."));
   csvRows.push(csvEscape("- \"Ağırlık Kaynağı\" = Ölçülmüş: ürün sipariş ekranından tartılıp elle girilmiş gerçek ağırlık kullanıldı."));
-  csvRows.push(csvEscape("- \"Ağırlık Kaynağı\" = Tahmini (inflated): ağırlık hiç güncellenmemiş, formülün paketleme payı eklediği eski tahmini ağırlık kullanıldı."));
+  csvRows.push(csvEscape("- \"Ağırlık Kaynağı\" = Tahmini/elle girilmiş: gerçek ağırlık hiç tartılıp onaylanmadı — formülün paketleme payı eklediği tahmini ağırlık ya da ürün düzenleme ekranından elle girilmiş bir kargo ağırlığı kullanıldı."));
   csvRows.push(
     csvEscape(
       "- Kargo Ücreti ve Net Kâr: Ozon o siparişin kargo/komisyon kesintisini GERÇEKTEN işlediyse (genelde teslimattan sonra) o gerçek tutar sabit sayı olarak kullanılır; işlemediyse fiyat formülündeki tahmini oranlarla hesaplanır. Komisyon/Lojistik Hizmet Bedeli/Banka Ücreti sütunları HER ZAMAN tahmini orana göredir (oranları hücrelerden değiştirip deneyebilirsiniz) — Net Kâr gerçek veri varken bu üç hücreye değil, gerçek toplam kesintiye bağlıdır.",

@@ -1,6 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getOrderDetail, computeOrderAmount, computeOrderCost, computeOrderEstimatedProfit, getShipmentDelayInfo, getWeightSplitWarning, orderTotalQuantity } from "@/modules/orders/orders.service";
+import {
+  getOrderDetail,
+  computeOrderAmount,
+  computeOrderCost,
+  computeOrderEstimatedProfit,
+  computeOrderWeightInfo,
+  orderWeightSourceLabel,
+  getShipmentDelayInfo,
+  getWeightSplitWarning,
+  orderTotalQuantity,
+} from "@/modules/orders/orders.service";
 import { productPath } from "@/utils/decodeOfferId";
 import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
 import { CopyableField } from "./CopyableField";
@@ -9,7 +19,14 @@ import { LabelDownloadButton } from "./LabelDownloadButton";
 import { ShipOrderButton } from "./ShipOrderButton";
 import { RealWeightInput } from "./RealWeightInput";
 import { ParasutInvoiceButton } from "../ParasutInvoiceButton";
-import { estimateShippingForWeight, effectiveCargoWeightGrams, sumRealShippingRub, sumRealFeesRub } from "@/modules/finance/pnl-report.service";
+import {
+  estimateShippingForWeight,
+  effectiveCargoWeightGrams,
+  productWeightSource,
+  weightSourceParenthetical,
+  sumRealShippingRub,
+  sumRealFeesRub,
+} from "@/modules/finance/pnl-report.service";
 import { getUsdToRubRate } from "@/pricing/fx-rate";
 import { translateOrderStatus } from "@/utils/orderStatus";
 
@@ -57,12 +74,10 @@ export default async function OrderDetailPage({
   // Tahmini kargo (ağırlıktan) + olası net kâr — PNL sayfasındaki aynı tarife/kademeli hesap
   // mantığı (kalemlerin toplam ağırlığı TEK SEFERDE formüle uygulanıyor, bkz. pnl-report.service.ts
   // computeRowMetrics yorumu) sipariş detayında da görülsün diye (2026-09-09, kullanıcı talebi).
-  const totalWeightForShipping = order.items.reduce((sum, item) => {
-    const w = effectiveCargoWeightGrams(item.product);
-    return w != null ? sum + w * item.quantity : sum;
-  }, 0);
-  const hasWeightData = order.items.every((item) => effectiveCargoWeightGrams(item.product) != null);
-  const estimatedShippingUsd = hasWeightData && totalWeightForShipping > 0 ? estimateShippingForWeight(totalWeightForShipping) : null;
+  const orderWeightInfo = computeOrderWeightInfo(order.items);
+  const totalWeightForShipping = orderWeightInfo.totalGrams ?? 0;
+  const estimatedShippingUsd = totalWeightForShipping > 0 ? estimateShippingForWeight(totalWeightForShipping) : null;
+  const weightSourceLabel = orderWeightSourceLabel(orderWeightInfo.source);
 
   // Ozon bu siparişin kargo kesintisini GERÇEKTEN işlediyse (teslimattan sonra) tahmini ağırlık
   // bazlı kargo yerine gerçek tutar kullanılır (2026-09-10, kullanıcı talebi). Siparişler
@@ -144,6 +159,12 @@ export default async function OrderDetailPage({
           <div className="value" style={{ color: "var(--danger)" }}>
             {estimatedShippingUsd == null ? <span className="hint">ağırlık yok</span> : formatMoney(estimatedShippingUsd)}
           </div>
+          {estimatedShippingUsd != null && (
+            <div className="hint" style={{ marginTop: 2 }}>
+              {Math.round(totalWeightForShipping)}g
+              {weightSourceLabel && ` (${weightSourceLabel})`} üzerinden hesaplandı
+            </div>
+          )}
         </div>
         <div>
           <div className="hint">Olası Net Kâr (kargo dahil)</div>
@@ -244,6 +265,8 @@ export default async function OrderDetailPage({
                           initialConfirmed={item.product.weightConfirmed}
                           initialWeightGrams={item.product.weightGrams}
                           initialPrice={item.product.price}
+                          currentBillingWeightGrams={effectiveCargoWeightGrams(item.product)}
+                          currentWeightSourceLabel={weightSourceParenthetical(productWeightSource(item.product)).trim()}
                         />
                       ) : (
                         <span className="hint">ürün yok</span>

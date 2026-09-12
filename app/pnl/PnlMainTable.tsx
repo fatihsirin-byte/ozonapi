@@ -196,7 +196,7 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
                 ))}
                 <th
                   style={{ whiteSpace: "nowrap" }}
-                  title="Kargo ücretinin neyle hesaplandığını gösterir: Ozon o siparişin kargo kesintisini gerçekten işlediyse gerçek tutar (gerçek), işlemediyse ölçülmüş (gerçek tartılmış) ya da tahmini (girilen ağırlıktan şişirilmiş) ağırlıktan hesaplanan tahmin kullanılır."
+                  title="Kargo ücretinin neyle hesaplandığını gösterir: Ozon o siparişin kargo kesintisini gerçekten işlediyse gerçek tutar, işlemediyse ölçülmüş (tartılıp onaylanmış gerçek) ya da tahmini/elle girilmiş (henüz tartılıp onaylanmamış) ağırlıktan hesaplanan tahmin kullanılır."
                 >
                   Ağırlık / Kargo
                 </th>

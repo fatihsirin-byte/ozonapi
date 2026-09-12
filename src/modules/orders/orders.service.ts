@@ -5,7 +5,7 @@ import { OzonApiError } from "../../ozon/client";
 import { WAREHOUSE_UNDER_500G } from "../../ozon/warehouses";
 import { importFromOzon, syncMissingProductsFromOzon } from "../products/products.service";
 import { computePriceBreakdown } from "../../pricing/formula";
-import { effectiveCargoWeightGrams, estimateShippingForWeight } from "../finance/pnl-report.service";
+import { effectiveCargoWeightGrams, estimateShippingForWeight, productWeightSource, WEIGHT_SOURCE_LABEL } from "../finance/pnl-report.service";
 import {
   uploadInvoiceFile,
   createOrUpdateInvoice,
@@ -153,6 +153,7 @@ interface EstimatedProfitItem {
     heightCm: number | null;
     depthCm: number | null;
     heavyPackaging: boolean;
+    weightConfirmed: boolean;
   } | null;
 }
 
@@ -181,8 +182,6 @@ export function computeOrderEstimatedProfit(
 
   let totalSaleMinusCost = 0;
   let totalEstimatedFeesUsd = 0;
-  let totalBillingWeightGrams = 0;
-  let anyWeightMissing = false;
 
   for (const item of items) {
     const product = item.product;
@@ -203,39 +202,66 @@ export function computeOrderEstimatedProfit(
     totalSaleMinusCost += (breakdown.actualPriceUsd - breakdown.costUsd) * item.quantity;
     const estimatedFeeUsd = breakdown.actualPriceUsd - breakdown.shippingUsd - breakdown.costUsd - breakdown.profitUsd;
     totalEstimatedFeesUsd += estimatedFeeUsd * item.quantity;
-
-    // ÖNEMLİ: kargo tarifesinin sabit taban ücreti (ör. $0.80) paket başına BİR KEZ uygulanır —
-    // birim ağırlığı quantity ile çarpıp tarifeyi TEK SEFERDE toplam ağırlığa uyguluyoruz, aksi
-    // halde (computePriceBreakdown'ın birim bazlı shippingUsd'sini quantity ile çarpmak gibi) taban
-    // ücret adet sayısı kadar tekrarlanıp kargo maliyeti olduğundan yüksek çıkardı (2026-09-10'da
-    // code review'da tespit edildi — pnl-report.service.ts'teki 2026-08-24 tarihli aynı düzeltmeyle
-    // tutarlı: "kalemlerin toplam ağırlığı TEK SEFERDE formüle uygulanıyor"). Ağırlık "var mı" kararı
-    // için effectiveCargoWeightGrams KULLANILIYOR — sipariş detay sayfasındaki bitişik "Tahmini
-    // Kargo" kartı da AYNI fonksiyonu kullanıyor; farklı bir kontrol (ör. computePriceBreakdown'ın
-    // kendi içindeki falsy kontrolü) kullanmak weightGrams=0 olan nadir bir üründe aynı sayfadaki
-    // iki kartın birbiriyle ÇELİŞMESİNE yol açıyordu (2026-09-10'da code review'da tespit edildi).
-    const unitBillingWeight = effectiveCargoWeightGrams(product);
-    if (unitBillingWeight == null) {
-      anyWeightMissing = true;
-    } else {
-      totalBillingWeightGrams += unitBillingWeight * item.quantity;
-    }
   }
 
   const feesUsd = realFeesUsd ?? totalEstimatedFeesUsd;
 
   if (realShippingUsd != null) return totalSaleMinusCost - feesUsd - realShippingUsd;
-  // totalBillingWeightGrams <= 0 burada ARTIK engel değil — tüm kalemlerin ağırlığı gerçekten
+  // ÖNEMLİ: kargo tarifesinin sabit taban ücreti (ör. $0.80) paket başına BİR KEZ uygulanır — bu
+  // yüzden birim ağırlıkları ayrı ayrı tarifeye sokmak yerine TOPLAM ağırlık (computeOrderWeightInfo,
+  // birim ağırlık × adet toplamı) tarifeye TEK SEFERDE uygulanıyor, aksi halde taban ücret adet
+  // sayısı kadar tekrarlanıp kargo maliyeti olduğundan yüksek çıkardı (2026-09-10'da code
+  // review'da tespit edildi). computeOrderWeightInfo, sipariş detay sayfasındaki bitişik "Tahmini
+  // Kargo" kartının ve Siparişler listesindeki "Kargo Ağırlığı" sütununun da kullandığı AYNI
+  // fonksiyon — üç yerin birbirinden bağımsız aynı toplama mantığını tekrarlaması, biri değişip
+  // diğeri değişmeyince sayfalar arasında ÇELİŞKİ yaratma riski taşırdı (2026-09-12'de code
+  // review'da tespit edildi).
+  const weightInfo = computeOrderWeightInfo(items);
+  // weightInfo.totalGrams <= 0 burada engel değil — tüm kalemlerin ağırlığı gerçekten
   // (cargoWeightGrams olarak) 0 girilmişse bu geçerli bir veridir, "bilinmiyor" değil; sadece
-  // anyWeightMissing (gerçekten hiç veri yoksa) null döndürülmeli (2026-09-10'da code review'da
+  // totalGrams null (gerçekten hiç veri yoksa) null döndürülmeli (2026-09-10'da code review'da
   // tespit edildi — önceki davranış bu durumda geçerli bir kâr rakamı dönerken bu engel "-" gösterip gerileme yaratıyordu).
-  if (anyWeightMissing) return null;
-  // pnl-report.service.ts'teki estimateShippingForWeight KULLANILIYOR (formula.ts'teki
-  // estimateShippingCostUsd DEĞİL) — sipariş detay sayfasındaki bitişik "Tahmini Kargo" kartı da
-  // bu fonksiyonu kullanıyor; aynı formül iki ayrı dosyada tekrar bakımlı kalırsa biri değişip
-  // diğeri değişmeyince aynı sayfada iki kart çelişebilirdi (2026-09-10'da code review'da tespit
-  // edildi). İkisi şu an birebir aynı formül, sadece TEK yerden geliyor olması garanti ediliyor.
-  return totalSaleMinusCost - feesUsd - estimateShippingForWeight(totalBillingWeightGrams);
+  if (weightInfo.totalGrams == null) return null;
+  return totalSaleMinusCost - feesUsd - estimateShippingForWeight(weightInfo.totalGrams);
+}
+
+export interface OrderWeightInfo {
+  // Siparişteki kalemlerin TOPLAM kargo ağırlığı (birim ağırlık × adet, tüm kalemler toplanmış) —
+  // "Tahmini Kargo (Ağırlıktan)" kartının VE computeOrderEstimatedProfit'in kullandığı ağırlıkla
+  // birebir aynı (computeOrderEstimatedProfit bu fonksiyonu çağırır). Herhangi bir kalemin
+  // ağırlığı yoksa null (kısmi toplam yanıltıcı olurdu).
+  totalGrams: number | null;
+  source: "measured" | "estimated" | "mixed" | "unknown";
+}
+
+// Siparişler listesi ve sipariş detay sayfası, kargo ücretinin GERÇEKTEN kaç gramdan ve hangi
+// kaynaktan (tartılmış gerçek ağırlık mı, yoksa girilen ağırlıktan hesaplanan şişirilmiş tahmini
+// mi) hesaplandığını göstersin diye (2026-09-12, kullanıcı talebi: "kargo fiyatı neyle
+// hesaplanıyor hangi ağırlık bunu bilemiyorum" — önceden bu rakam hiçbir ekranda gram olarak
+// görünmüyordu, sadece hesaplanan $ tutarı gösteriliyordu).
+export function computeOrderWeightInfo(
+  items: Array<{ quantity: number; product: Parameters<typeof effectiveCargoWeightGrams>[0] & Parameters<typeof productWeightSource>[0] }>,
+): OrderWeightInfo {
+  let totalGrams = 0;
+  const sources = new Set<ReturnType<typeof productWeightSource>>();
+  for (const item of items) {
+    const unitWeight = effectiveCargoWeightGrams(item.product);
+    if (unitWeight == null) return { totalGrams: null, source: "unknown" };
+    totalGrams += unitWeight * item.quantity;
+    sources.add(productWeightSource(item.product));
+  }
+  if (items.length === 0) return { totalGrams: null, source: "unknown" };
+  const source = sources.size > 1 ? "mixed" : [...sources][0];
+  return { totalGrams, source };
+}
+
+// Siparişler listesi VE sipariş detay sayfası aynı "karışık" (bazı kalemler ölçülmüş, bazıları
+// tahmini) durumunu göstersin diye tek yerden — PnlRow["weightSource"] üçlüsüne ek olarak burada
+// bir de "mixed" var, WEIGHT_SOURCE_LABEL onu kapsamıyor.
+export function orderWeightSourceLabel(source: OrderWeightInfo["source"]): string {
+  if (source === "mixed") return "karışık";
+  if (source === "unknown") return "";
+  return WEIGHT_SOURCE_LABEL[source];
 }
 
 // Sipariş arama kutusu (2026-09-09, kullanıcı talebi): müşteri adı, Ozon sipariş no, ürün SKU'su

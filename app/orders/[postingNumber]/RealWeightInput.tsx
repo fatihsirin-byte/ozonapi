@@ -8,11 +8,19 @@ export function RealWeightInput({
   initialConfirmed,
   initialWeightGrams,
   initialPrice,
+  currentBillingWeightGrams,
+  currentWeightSourceLabel,
 }: {
   offerId: string;
   initialConfirmed: boolean;
   initialWeightGrams: number | null;
   initialPrice: string;
+  // Henüz gerçek ağırlık girilmemişken kargo ücretinin ŞU AN hangi ağırlıktan hesaplandığını
+  // (girilen ağırlıktan formülle hesaplanan şişirilmiş tahmini ağırlık) burada göstermek için —
+  // önceden bu rakam hiçbir yerde görünmüyordu, kullanıcı kargo ücretinin nereden geldiğini
+  // anlayamıyordu (2026-09-12, kullanıcı talebi).
+  currentBillingWeightGrams: number | null;
+  currentWeightSourceLabel: string;
 }) {
   const [confirmed, setConfirmed] = useState(initialConfirmed);
   const [weightGrams, setWeightGrams] = useState(initialWeightGrams);
@@ -72,18 +80,29 @@ export function RealWeightInput({
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <input
-        type="number"
-        placeholder="Gerçek ağırlık (g)"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        style={{ width: 110 }}
-      />
-      <button type="button" className="btn-secondary" disabled={saving} onClick={save}>
-        {saving ? "..." : "Kaydet"}
-      </button>
-      {error && <span className="hint" style={{ color: "var(--danger)" }}>{error}</span>}
+    <div>
+      {currentBillingWeightGrams != null && (
+        <div
+          className="hint"
+          style={{ marginBottom: 4 }}
+          title="Gerçek ağırlık girilmediği için kargo ücreti şu an bu ağırlıktan tahmini hesaplanıyor"
+        >
+          Şu an kullanılan: {Math.round(currentBillingWeightGrams)}g {currentWeightSourceLabel}
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <input
+          type="number"
+          placeholder="Gerçek ağırlık (g)"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          style={{ width: 110 }}
+        />
+        <button type="button" className="btn-secondary" disabled={saving} onClick={save}>
+          {saving ? "..." : "Kaydet"}
+        </button>
+        {error && <span className="hint" style={{ color: "var(--danger)" }}>{error}</span>}
+      </div>
     </div>
   );
 }

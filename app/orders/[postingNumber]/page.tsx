@@ -251,6 +251,14 @@ export default async function OrderDetailPage({
               {order.items.map((item) => {
                 const thumbnail = Array.isArray(item.product?.images) ? (item.product?.images as string[])[0] : null;
                 const unitCost = item.product?.costPrice ? Number(item.product.costPrice) : null;
+                // Paket ürünlerde (ör. 6'lı kakao — bkz. Product.unitsInPack) Ozon'un sipariş
+                // satırındaki quantity kaç PAKET satıldığını gösterir, kaç FİZİKSEL adet değil —
+                // "Adet" sütununda gerçek adedi göstermek için unitsInPack ile çarpıyoruz
+                // (2026-09-13, kullanıcı talebi: "1 yerine 6 gibi yazdırmak"). Fiyat/maliyet
+                // hesapları BUNDAN ETKİLENMİYOR — item.price ve costPrice zaten paketin tamamı
+                // için (birim değil), değiştirilmeden kullanılıyor.
+                const unitsInPack = item.product?.unitsInPack ?? 1;
+                const effectiveQuantity = item.quantity * unitsInPack;
                 return (
                   <tr key={item.id}>
                     <td>
@@ -272,7 +280,14 @@ export default async function OrderDetailPage({
                       {item.product ? <Link href={productPath(item.offerId)}>{item.offerId}</Link> : item.offerId}
                     </td>
                     <td>{item.product?.name ?? "-"}</td>
-                    <td>{item.quantity}</td>
+                    <td>
+                      {effectiveQuantity}
+                      {unitsInPack > 1 && (
+                        <div className="hint" style={{ fontSize: 11 }}>
+                          {item.quantity} paket × {unitsInPack}
+                        </div>
+                      )}
+                    </td>
                     <td>${item.price}</td>
                     <td>{unitCost != null ? formatMoney(unitCost) : <span className="hint">yok</span>}</td>
                     <td>

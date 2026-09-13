@@ -329,7 +329,13 @@ export default async function OrdersPage({
                               <div style={{ width: 40, height: 40, borderRadius: 6, background: "var(--border)", flexShrink: 0 }} />
                             )}
                             <div>
-                              <div>{item.quantity} adet, {item.offerId} — {formatMoney(Number(item.price))}</div>
+                              {/* Paket ürünlerde (ör. 6'lı kakao) gerçek adet unitsInPack ile
+                                  çarpılıyor — bkz. app/orders/[postingNumber]/page.tsx aynı gerekçe
+                                  (2026-09-13, kullanıcı talebi). */}
+                              <div>
+                                {item.quantity * (item.product?.unitsInPack ?? 1)} adet, {item.offerId} —{" "}
+                                {formatMoney(Number(item.price))}
+                              </div>
                               <div className="hint">
                                 {item.product?.name ?? "-"}
                                 {item.product?.costPrice && (

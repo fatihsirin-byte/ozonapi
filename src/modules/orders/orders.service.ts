@@ -554,17 +554,23 @@ export async function getTopSellingProducts(params: {
       offerId: true,
       price: true,
       quantity: true,
-      product: { select: { name: true, images: true } },
+      product: { select: { name: true, images: true, unitsInPack: true } },
     },
   });
 
   const byOfferId = new Map<string, TopSellingProduct>();
   for (const item of items) {
     const revenue = Number(item.price) * item.quantity;
+    // Bir "paket" ürünün (ör. 6'lı kakao) içinde birden fazla satılabilir adet olabilir — bu SKU
+    // sipariş edildiğinde Ozon quantity'yi 1 olarak sayar ama gerçekte unitsInPack kadar ürün
+    // gitmiştir (bkz. Product.unitsInPack, restore-bulk-pack-variants.ts). Ciro'ya DOKUNULMUYOR
+    // (item.price zaten paketin tüm fiyatı), sadece "kaç adet sattık" burada gerçek adede
+    // çevriliyor (2026-09-13, kullanıcı talebi: "sipariş ürün adedine bu sayıyı yazdırmak").
+    const orderedUnits = item.quantity * (item.product?.unitsInPack ?? 1);
     const existing = byOfferId.get(item.offerId);
     if (existing) {
       existing.revenueUsd += revenue;
-      existing.orderedUnits += item.quantity;
+      existing.orderedUnits += orderedUnits;
     } else {
       const images = item.product?.images;
       byOfferId.set(item.offerId, {
@@ -572,7 +578,7 @@ export async function getTopSellingProducts(params: {
         name: item.product?.name ?? item.offerId,
         image: Array.isArray(images) ? ((images as string[])[0] ?? null) : null,
         revenueUsd: revenue,
-        orderedUnits: item.quantity,
+        orderedUnits,
       });
     }
   }
@@ -596,7 +602,7 @@ export interface DailySalesStat {
 export async function getDailySalesStats(params: { since: Date; to: Date }): Promise<DailySalesStat[]> {
   const orders = await prisma.order.findMany({
     where: { orderDate: { gte: params.since, lte: params.to }, status: { not: "cancelled" } },
-    select: { orderDate: true, items: { select: { quantity: true } } },
+    select: { orderDate: true, items: { select: { quantity: true, product: { select: { unitsInPack: true } } } } },
   });
 
   const byDate = new Map<string, { orderCount: number; unitsSold: number }>();
@@ -605,7 +611,9 @@ export async function getDailySalesStats(params: { since: Date; to: Date }): Pro
     const key = istanbulDateStr(order.orderDate);
     const existing = byDate.get(key) ?? { orderCount: 0, unitsSold: 0 };
     existing.orderCount += 1;
-    existing.unitsSold += order.items.reduce((sum, i) => sum + i.quantity, 0);
+    // Paket ürünlerde (ör. 6'lı kakao) gerçek satılan adet unitsInPack ile çarpılıyor — bkz.
+    // getTopSellingProducts'taki aynı gerekçe (2026-09-13, kullanıcı talebi).
+    existing.unitsSold += order.items.reduce((sum, i) => sum + i.quantity * (i.product?.unitsInPack ?? 1), 0);
     byDate.set(key, existing);
   }
 
@@ -715,7 +723,11 @@ export async function getProductSalesHistory(
     }
 
     const existing = buckets.get(key) ?? { unitsSold: 0, revenueUsd: 0, profitUsd: 0 };
-    existing.unitsSold += item.quantity;
+    // Paket ürünlerde (ör. 6'lı kakao) gerçek satılan adet unitsInPack ile çarpılıyor — bkz.
+    // getTopSellingProducts/getDailySalesStats'taki aynı gerekçe (2026-09-13, kullanıcı talebi;
+    // code review'da bu fonksiyonun unutulduğu, iki sayfada farklı adet gösterdiği tespit edildi).
+    // revenueUsd/profitUsd'ye DOKUNULMUYOR — item.price ve profitUsd zaten paketin tamamı için.
+    existing.unitsSold += item.quantity * (product?.unitsInPack ?? 1);
     existing.revenueUsd += Number(item.price) * item.quantity;
     existing.profitUsd += profit;
     buckets.set(key, existing);

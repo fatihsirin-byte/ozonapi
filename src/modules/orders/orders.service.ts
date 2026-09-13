@@ -513,7 +513,14 @@ export interface TopSellingProduct {
   name: string;
   image: string | null;
   revenueUsd: number;
+  // Gerçek fiziksel adet (packQuantity × unitsInPack) — bkz. aşağıdaki gerekçe.
   orderedUnits: number;
+  // Kaç kez sipariş edildiği (paket/SKU bazında, Ozon'un kendi sipariş satırı adedi) — paket
+  // ürünlerde (unitsInPack > 1) ön yüzde "3×6 = 18" gibi göstermek için ayrıca tutuluyor, aksi
+  // halde "18" tek başına sanki bu SKU 18 kez sipariş edilmiş gibi yanlış anlaşılabiliyordu
+  // (2026-09-14, kullanıcı talebi: "bu sefer varyantı 18 satmış gibi oluyor").
+  packQuantity: number;
+  unitsInPack: number;
 }
 
 // "En Çok Satan Ürünler" — BİLEREK Ozon'un /v1/analytics/data uç noktası (ANALİTİK sayfasının
@@ -566,11 +573,13 @@ export async function getTopSellingProducts(params: {
     // gitmiştir (bkz. Product.unitsInPack, restore-bulk-pack-variants.ts). Ciro'ya DOKUNULMUYOR
     // (item.price zaten paketin tüm fiyatı), sadece "kaç adet sattık" burada gerçek adede
     // çevriliyor (2026-09-13, kullanıcı talebi: "sipariş ürün adedine bu sayıyı yazdırmak").
-    const orderedUnits = item.quantity * (item.product?.unitsInPack ?? 1);
+    const unitsInPack = item.product?.unitsInPack ?? 1;
+    const orderedUnits = item.quantity * unitsInPack;
     const existing = byOfferId.get(item.offerId);
     if (existing) {
       existing.revenueUsd += revenue;
       existing.orderedUnits += orderedUnits;
+      existing.packQuantity += item.quantity;
     } else {
       const images = item.product?.images;
       byOfferId.set(item.offerId, {
@@ -579,6 +588,8 @@ export async function getTopSellingProducts(params: {
         image: Array.isArray(images) ? ((images as string[])[0] ?? null) : null,
         revenueUsd: revenue,
         orderedUnits,
+        packQuantity: item.quantity,
+        unitsInPack,
       });
     }
   }

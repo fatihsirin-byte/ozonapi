@@ -54,6 +54,8 @@ interface TopProduct {
   image: string | null;
   revenueUsd: number;
   orderedUnits: number;
+  packQuantity: number;
+  unitsInPack: number;
   href: string;
 }
 
@@ -537,7 +539,18 @@ export function AnalyticsView() {
                   </div>
                 </td>
                 <td>{fmtUsd(p.revenueUsd)}</td>
-                <td>{fmtNum(p.orderedUnits)}</td>
+                <td>
+                  {/* Paket ürünlerde (unitsInPack > 1) sadece "18" yazmak, sanki bu SKU 18 kez
+                      sipariş edilmiş gibi yanılgı yaratıyordu — "3×6 = 18" ile hem kaç kez
+                      sipariş edildiği hem gerçek adet netleşiyor (2026-09-14, kullanıcı talebi). */}
+                  {p.unitsInPack > 1 ? (
+                    <span title={`${p.packQuantity} kez sipariş edildi, paket başına ${p.unitsInPack} adet`}>
+                      {fmtNum(p.packQuantity)}×{p.unitsInPack} = {fmtNum(p.orderedUnits)}
+                    </span>
+                  ) : (
+                    fmtNum(p.orderedUnits)
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

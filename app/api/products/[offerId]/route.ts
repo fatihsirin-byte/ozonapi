@@ -7,6 +7,7 @@ import {
   updateProductHeavyPackaging,
   updateProductWeight,
   updateGtipOverride,
+  updateUnitsInPack,
   type ProductAttributeInput,
 } from "@/modules/products/products.service";
 import { OzonApiError } from "@/ozon/client";
@@ -47,11 +48,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     heightCm?: number | null;
     depthCm?: number | null;
     gtipOverride?: string | null;
+    unitsInPack?: number | null;
   };
 
   try {
     if (body.gtipOverride !== undefined) {
       await updateGtipOverride(offerId, body.gtipOverride);
+    }
+    if (body.unitsInPack !== undefined) {
+      await updateUnitsInPack(offerId, body.unitsInPack);
     }
     if (body.heavyPackaging !== undefined) {
       await updateProductHeavyPackaging(offerId, body.heavyPackaging);

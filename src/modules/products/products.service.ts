@@ -600,6 +600,22 @@ export async function updateGtipOverride(offerId: string, gtipOverride: string |
   return prisma.product.update({ where: { offerId }, data: { gtipOverride } });
 }
 
+// Paket içi satılabilir adet — sipariş/Analitik sayfalarındaki "Adet" gösterimlerinde gerçek
+// fiziksel adedi hesaplamak için kullanılıyor (bkz. orders.service.ts getDailySalesStats vb.,
+// 2026-09-13, kullanıcı bulgusu: "kakao6" gibi ürünlerde bu alan hiç doldurulmamıştı — elle
+// düzeltilebilsin diye ürün sayfasına eklendi, bkz. src/scripts/backfill-units-in-pack.ts).
+export async function updateUnitsInPack(offerId: string, unitsInPack: number | null) {
+  // 0 ya da negatif bir değer sessizce kabul edilirse, bunu okuyan her yerdeki `?? 1` düşüşü
+  // (0 falsy değil ama "unset" de değil) devreye girmez — "quantity * 0" ile o üründeki tüm adet
+  // sayıları sessizce sıfırlanırdı, tam da bu özelliğin düzeltmeye çalıştığı hata sınıfı
+  // (2026-09-13 code review'da tespit edildi). <input type="number" min={1}> sadece bir ön yüz
+  // ipucu, sunucu tarafında da doğrulanması gerekiyor.
+  if (unitsInPack != null && (!Number.isInteger(unitsInPack) || unitsInPack < 1)) {
+    throw new Error("Paket içi adet 1 veya daha büyük bir tam sayı olmalı");
+  }
+  return prisma.product.update({ where: { offerId }, data: { unitsInPack } });
+}
+
 // priceOverride verilirse (Fiyat Hesaplayıcı modalında elle girilen satış fiyatı) formülü
 // yeniden hesaplamadan doğrudan o fiyat Ozon'a gönderilir — aksi halde costPrice'tan
 // formülle hesaplanan önerilen fiyat kullanılır (mevcut davranış).

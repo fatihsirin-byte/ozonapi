@@ -25,6 +25,7 @@ interface ProductData {
   depthCm: number | null;
   heavyPackaging: boolean;
   gtipOverride: string | null;
+  unitsInPack: number | null;
 }
 
 interface CloneAttribute {
@@ -74,6 +75,8 @@ export function ProductEditForm({ product }: { product: ProductData }) {
   const [savingWeight, setSavingWeight] = useState(false);
   const [gtipOverride, setGtipOverride] = useState(product.gtipOverride ?? "");
   const [savingGtip, setSavingGtip] = useState(false);
+  const [unitsInPack, setUnitsInPack] = useState(product.unitsInPack != null ? String(product.unitsInPack) : "");
+  const [savingUnitsInPack, setSavingUnitsInPack] = useState(false);
 
   // Net ağırlık YA DA ağır ambalaj işareti değiştirildiğinde kargo ağırlığını otomatik yeniden
   // hesaplar (paketleme payı + gerekirse hacimsel ağırlık) — kullanıcı isterse kaydetmeden önce
@@ -133,6 +136,30 @@ export function ProductEditForm({ product }: { product: ProductData }) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Bilinmeyen hata" });
     } finally {
       setSavingGtip(false);
+    }
+  }
+  // Sipariş/Analitik sayfalarındaki "Adet" gösterimlerinde gerçek fiziksel adedi hesaplamak için
+  // (2026-09-13, kullanıcı bulgusu: bazı paket ürünlerde — ör. "kakao6" — bu alan hiç doldurulmamıştı).
+  async function saveUnitsInPack() {
+    setSavingUnitsInPack(true);
+    setMessage(null);
+    try {
+      const parsed = unitsInPack.trim() ? Number(unitsInPack) : null;
+      const res = await fetch(productApiPath(product.offerId), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unitsInPack: parsed }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error ?? "Güncelleme başarısız" });
+        return;
+      }
+      setMessage({ type: "success", text: "Paket içi adet kaydedildi." });
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Bilinmeyen hata" });
+    } finally {
+      setSavingUnitsInPack(false);
     }
   }
   const [showCalculator, setShowCalculator] = useState(false);
@@ -371,6 +398,25 @@ export function ProductEditForm({ product }: { product: ProductData }) {
           {!alreadyCreated && (
             <div className="hint">Kategori/özellik bilgilerini "Kategori & Özellikler" sekmesinden düzenleyebilirsiniz.</div>
           )}
+          <div className="field" style={{ marginTop: 16 }}>
+            <label>Paket İçi Adet</label>
+            <input
+              type="number"
+              min={1}
+              value={unitsInPack}
+              onChange={(e) => setUnitsInPack(e.target.value)}
+              placeholder="Boş bırakılırsa 1 (tek adet) kabul edilir"
+            />
+            <div className="hint">
+              Bu SKU tek seferde birden fazla satılabilir ürün içeriyorsa (ör. 6'lı paket) buraya 6 yazın — Sipariş/Analitik
+              sayfalarındaki "Adet" gösterimleri buna göre çarpılır. Fiyat/kâr hesaplarını etkilemez.
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <button className="btn-primary" disabled={savingUnitsInPack} onClick={saveUnitsInPack}>
+                {savingUnitsInPack ? "Kaydediliyor..." : "Paket İçi Adedi Kaydet"}
+              </button>
+            </div>
+          </div>
           <div className="field" style={{ marginTop: 16 }}>
             <label>GTİP (HS Kodu) Override — ASE gümrük entegrasyonu için</label>
             <input

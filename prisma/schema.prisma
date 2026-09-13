@@ -154,6 +154,12 @@ model Order {
   aseShipmentSentAt     DateTime?
   aseShipmentSuccess    Boolean?
   aseShipmentMessage    String?
+  // ASE'nin döndüğü ham hata kodu (ör. "34" = geçersiz Gtip/HS kodu) — sadece aseShipmentMessage'a
+  // bakıp "bu HS kod hatası mı?" diye metin eşlemesi yapmak yerine, güvenilir şekilde ayırt etmek
+  // için (2026-09-13, kullanıcı talebi: HS kod hatasında kullanıcıya düzelt-ve-tekrar-dene popup'ı
+  // gösterme). Yerel doğrulama hataları (ör. hiç HS kodu bulunamadıysa ASE'ye hiç istek atılmadan)
+  // için de aynı "34" kodu kullanılıyor — kullanıcı için ikisi de aynı eylemi gerektiriyor.
+  aseShipmentErrorCode  String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

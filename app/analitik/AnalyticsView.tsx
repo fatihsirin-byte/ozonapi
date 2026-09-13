@@ -40,6 +40,12 @@ interface Totals {
   cancellations: number;
   profitUsd: number;
   costUsd: number;
+  // Yerel sipariş verimizden (bkz. getDailySalesStats) — "Sipariş Adedi" kartı ESKİDEN Ozon'un
+  // "ordered_units" metriğini kullanıyordu, o aslında sipariş SAYISI değil satılan BİRİM sayısı
+  // (2026-09-13, kullanıcı talebi: "toplam adet ekle" sırasında fark edilen yanlış etiketleme
+  // düzeltildi). orderCount = gerçek sipariş sayısı, unitsSold = yeni "Toplam Adet" kartı.
+  orderCount: number;
+  unitsSold: number;
 }
 
 interface TopProduct {
@@ -401,7 +407,11 @@ export function AnalyticsView() {
               </div>
               <div>
                 <div className="hint">Sipariş Adedi</div>
-                <div className="value">{fmtNum(effectiveTotals.ordered_units)}</div>
+                <div className="value">{fmtNum(effectiveTotals.orderCount)}</div>
+              </div>
+              <div>
+                <div className="hint" style={{ whiteSpace: "nowrap" }}>Toplam Adet</div>
+                <div className="value">{fmtNum(effectiveTotals.unitsSold)}</div>
               </div>
               <div>
                 <div className="hint">Görüntülenme</div>

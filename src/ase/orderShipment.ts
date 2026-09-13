@@ -2,6 +2,7 @@ import { prisma } from "../db/prisma";
 import { getOrderDetail, suggestHsCodesForOrder } from "../modules/orders/orders.service";
 import { readCachedInvoicePdf } from "../parasut/pdfCache";
 import { sendShipment, ASE_SHIPMENT_TYPE, describeAseCode, type AseShipmentProduct, type SendShipmentPayload } from "./client";
+import { HSCODE_ERROR_CODE } from "./constants";
 
 // Menşe ülke kodu — kullanıcı kararı (2026-09-12): sabit "TR", ekstra alan/DB değişikliği yok.
 const PRODUCT_ORIGIN_COUNTRY_CODE = "TR";
@@ -27,15 +28,40 @@ function toAseInvoiceDateString(date: Date): string {
 // güncellenmemiş/eski satırı okutuyordu, kullanıcıya "tıklama hiçbir şey yapmadı" izlenimi verirdi.
 const inFlight = new Map<string, Promise<void>>();
 
-async function recordResult(postingNumber: string, success: boolean, message: string) {
+async function recordResult(postingNumber: string, success: boolean, message: string, errorCode: string | null = null) {
   try {
     await prisma.order.update({
       where: { postingNumber },
-      data: { aseShipmentSentAt: new Date(), aseShipmentSuccess: success, aseShipmentMessage: message },
+      data: {
+        aseShipmentSentAt: new Date(),
+        aseShipmentSuccess: success,
+        aseShipmentMessage: message,
+        aseShipmentErrorCode: success ? null : errorCode,
+      },
     });
   } catch (err) {
     console.error(`[ase] Sonuç Order'a kaydedilemedi (posting ${postingNumber}):`, err);
   }
+}
+
+export interface OrderHsCodeInfo {
+  offerId: string;
+  productName: string;
+  hsCode: string | null;
+}
+
+// "ASE'ye Gönder" butonundaki düzelt-ve-tekrar-dene popup'ının (bkz. AseShipmentButton.tsx)
+// alanlarını doldurmak için — doSendOrderToAse'in kendi içindeki hsCode çözümlemesiyle (öncelik:
+// Product.gtipOverride, yoksa Ozon kategori önerisi) AYNI mantığı kullanır, tek yerden (2026-09-13).
+export async function resolveOrderHsCodes(postingNumber: string): Promise<OrderHsCodeInfo[]> {
+  const order = await getOrderDetail(postingNumber);
+  if (!order) return [];
+  const suggestedHsCodes = await suggestHsCodesForOrder(postingNumber);
+  return order.items.map((item) => ({
+    offerId: item.offerId,
+    productName: item.product?.name ?? item.offerId,
+    hsCode: item.product?.gtipOverride || suggestedHsCodes[item.offerId] || null,
+  }));
 }
 
 // Bir Ozon siparişini ASE'ye (gümrük/ETGB) bildirir. SADECE ELLE, kullanıcı sipariş sayfasındaki
@@ -120,7 +146,7 @@ async function doSendOrderToAse(postingNumber: string): Promise<void> {
     for (const item of order.items) {
       const hsCode = item.product?.gtipOverride || suggestedHsCodes[item.offerId];
       if (!hsCode) {
-        await recordResult(postingNumber, false, `GTİP kodu bulunamadı: ${item.offerId}`);
+        await recordResult(postingNumber, false, `GTİP (HS) kodu bulunamadı: ${item.product?.name ?? item.offerId}`, HSCODE_ERROR_CODE);
         return;
       }
 
@@ -158,7 +184,7 @@ async function doSendOrderToAse(postingNumber: string): Promise<void> {
 
     const result = await sendShipment(payload);
     const message = result.message || describeAseCode(result.code);
-    await recordResult(postingNumber, result.isSuccess, message);
+    await recordResult(postingNumber, result.isSuccess, message, result.isSuccess ? null : result.code);
     if (!result.isSuccess) {
       console.error(`[ase] Gönderim başarısız (posting ${postingNumber}, code ${result.code}): ${message}`);
     }

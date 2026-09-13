@@ -172,9 +172,9 @@ export function ProductSalesChart({ offerId }: { offerId: string }) {
 
   return (
     <div className="card" style={{ marginTop: 16 }}>
-      <div className="topbar">
+      <div className="topbar" style={{ flexWrap: "wrap", gap: 8 }}>
         <h3 style={{ margin: 0 }}>Satış Geçmişi</h3>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {RANGE_OPTIONS.map((opt) => (
             <button
               key={opt.days}
@@ -185,20 +185,26 @@ export function ProductSalesChart({ offerId }: { offerId: string }) {
               {opt.label}
             </button>
           ))}
-          <button
-            type="button"
-            className={`btn-secondary${granularity === "day" ? " active" : ""}`}
-            onClick={() => setGranularity("day")}
-          >
-            Günlük
-          </button>
-          <button
-            type="button"
-            className={`btn-secondary${granularity === "week" ? " active" : ""}`}
-            onClick={() => setGranularity("week")}
-          >
-            Haftalık
-          </button>
+          {/* Günlük/Haftalık artık iki ayrı, birbirinden bağımsız buton değil — tek bir toggle
+              (2026-09-13, kullanıcı talebi: "2 buton gibi değil toggle gibi yönet, aynı sırada
+              olmadığı için kafa karıştırıyor"). Tek bir kutu içinde bitişik durduklarından satır
+              sarınca (flex-wrap) da bir bütün olarak kalıp yer değiştirmiyorlar. */}
+          <div className="segmented-toggle" role="group" aria-label="Zaman aralığı türü">
+            <button
+              type="button"
+              className={granularity === "day" ? "active" : ""}
+              onClick={() => setGranularity("day")}
+            >
+              Günlük
+            </button>
+            <button
+              type="button"
+              className={granularity === "week" ? "active" : ""}
+              onClick={() => setGranularity("week")}
+            >
+              Haftalık
+            </button>
+          </div>
         </div>
       </div>
 

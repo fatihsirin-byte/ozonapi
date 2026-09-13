@@ -309,7 +309,7 @@ export function ProductEditForm({ product }: { product: ProductData }) {
         {lastError && <div className="hint" style={{ color: "var(--danger)" }}>{lastError}</div>}
       </div>
 
-      <div style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--border)", marginBottom: 20 }}>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid var(--border)", marginBottom: 20 }}>
         {TABS.map((t) => (
           <button
             key={t}

@@ -138,6 +138,8 @@ a {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 24px;
 }
 
@@ -306,6 +308,38 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* İki seçenekli (ör. Günlük/Haftalık) tek parça geçiş anahtarı — ayrı ayrı .btn-secondary yerine
+   (2026-09-13, kullanıcı talebi: "2 buton gibi değil toggle gibi yönet"). */
+.segmented-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.segmented-toggle button {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.segmented-toggle button:not(:first-child) {
+  border-left: 1px solid var(--border);
+}
+
+.segmented-toggle button.active {
+  background: var(--accent);
+  color: white;
+}
+
+.segmented-toggle button:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
 }
 
 .search-results {

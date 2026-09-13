@@ -67,10 +67,23 @@ export async function GET(request: NextRequest) {
 
     const totalProfitUsd = Object.values(profitByDate).reduce((sum, v) => sum + v.profitUsd, 0);
     const totalCostUsd = Object.values(profitByDate).reduce((sum, v) => sum + v.costUsd, 0);
+    // DÜZELTME (2026-09-13, kullanıcı talebi: "toplam adet ekle"): Ozon'un "ordered_units" metriği
+    // sipariş SAYISI değil satılan BİRİM sayısı (bkz. getDailySalesStats açıklaması) — "Sipariş
+    // Adedi" kartı bunu kullandığından aslında yanlış etiketle sipariş sayısı yerine adet
+    // gösteriyordu. Burada ikisini de yerel veriden (aynı kaynak, days[].orderCount/unitsSold)
+    // doğru ayrı ayrı hesaplayıp totals'a ekliyoruz.
+    const totalOrderCount = dailySales.reduce((sum, d) => sum + d.orderCount, 0);
+    const totalUnitsSold = dailySales.reduce((sum, d) => sum + d.unitsSold, 0);
 
     return NextResponse.json({
       days,
-      totals: { ...toMetricObject(result.totals), profitUsd: totalProfitUsd, costUsd: totalCostUsd },
+      totals: {
+        ...toMetricObject(result.totals),
+        profitUsd: totalProfitUsd,
+        costUsd: totalCostUsd,
+        orderCount: totalOrderCount,
+        unitsSold: totalUnitsSold,
+      },
       revenueCurrency: usdToRubRate ? "USD" : "RUB",
     });
   } catch (error) {

@@ -13,7 +13,14 @@ const BATCH_SIZE = 30; // Ozon hız sınırı (bkz. sync-orders-cron.ts'teki 429
 const DELAY_MS = 500;
 
 function extractUnitsFromName(name: string): number | null {
-  const match = name.match(/(\d+)\s*шт\b/i);
+  // DİKKAT: JavaScript regex'inde \b (kelime sınırı) SADECE ASCII [A-Za-z0-9_] karakterlerini
+  // "kelime karakteri" sayar — Kiril harfleri \W (kelime DIŞI) kabul edilir. Bu yüzden "шт\b" gibi
+  // bir desen, "шт" noktalama/boşlukla bitiyorsa (ör. "3 шт., по 150 г" — nokta niet-word, "т" da
+  // niet-word, aralarında sınır YOK) SESSİZCE eşleşmiyordu (2026-09-13'te canlıda tespit edildi,
+  // "kakao6" düzelirken 483 üründen sadece Ozon API'den bulunanlar düzeldi, isimden hiçbiri
+  // yakalanamadı). Burada \b yerine "штук" (tam kelime) ya da "шт" + noktalama/boşluk/sonlanma
+  // için negatif lookahead (bir sonraki Kiril küçük harfe İZİN VERME) kullanılıyor.
+  const match = name.match(/(\d+)\s*шт(?:ук)?(?![а-яё])/i);
   if (!match) return null;
   const n = Number(match[1]);
   return n > 1 ? n : null;

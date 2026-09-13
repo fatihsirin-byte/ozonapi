@@ -195,7 +195,8 @@ function RevenueBarChart({
 }
 
 export function AnalyticsView() {
-  const [rangeDays, setRangeDays] = useState(14);
+  // Varsayılan "Bugün" (2026-09-13, kullanıcı talebi: "analitik girince bugün otomatik gelsin").
+  const [rangeDays, setRangeDays] = useState(1);
   // Elle seçilen tek tarih ya da tarih aralığı — doluysa rangeDays'in yerini alır (2026-09-13,
   // kullanıcı talebi: "gün filtresi ekle tek tarih ya da tarih aralığı"). Tek tarih, from===to
   // olan bir aralık olarak modelleniyor — ayrı bir "tek gün modu" eklemeye gerek yok, kullanıcı
@@ -247,10 +248,15 @@ export function AnalyticsView() {
   // Ürünler" (artık local veriden, Ozon'a hiç gitmiyor) bundan ETKİLENMESİN diye (2026-09-11,
   // kullanıcı talebi: önceden ikisi TEK bir hata durumunu paylaşıyordu, biri başarısız olunca
   // diğeri başarılı olsa bile hiç gösterilmiyordu).
+  // AbortController: filtre hızlı değiştirilince (ör. "Son 14 gün"e basıp hemen "Bugün"e geçmek)
+  // önceki isteğin yanıtı SONRA gelirse yeni seçimin üzerine yazıp eski aralığı gösterebiliyordu
+  // (2026-09-13, kullanıcı bulgusu: "14 gün yükleniyor derken Bugün'e tıkladım, 14 günü gösterdi").
+  // İptal edilen isteğin .then'i hiç çalışmayacağı için artık sadece EN SON isteğin sonucu işleniyor.
   useEffect(() => {
     setOverviewLoading(true);
     setOverviewError(null);
-    fetch(`/api/analytics/overview?from=${from}&to=${to}`)
+    const controller = new AbortController();
+    fetch(`/api/analytics/overview?from=${from}&to=${to}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((overview) => {
         if (overview.error) {
@@ -261,15 +267,22 @@ export function AnalyticsView() {
         setTotals(overview.totals ?? null);
         setRevenueCurrency(overview.revenueCurrency === "RUB" ? "RUB" : "USD");
       })
-      .catch((err) => setOverviewError(err instanceof Error ? err.message : "Bilinmeyen hata"))
-      .finally(() => setOverviewLoading(false));
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setOverviewError(err instanceof Error ? err.message : "Bilinmeyen hata");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setOverviewLoading(false);
+      });
+    return () => controller.abort();
   }, [from, to]);
 
   useEffect(() => {
     setProductsLoading(true);
     setProductsError(null);
+    const controller = new AbortController();
     const q = productQuery ? `&q=${encodeURIComponent(productQuery)}` : "";
-    fetch(`/api/analytics/products?from=${productsFrom}&to=${productsTo}&limit=15${q}`)
+    fetch(`/api/analytics/products?from=${productsFrom}&to=${productsTo}&limit=15${q}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
         if (data.error) {
@@ -278,8 +291,14 @@ export function AnalyticsView() {
         }
         setProducts(data.items ?? []);
       })
-      .catch((err) => setProductsError(err instanceof Error ? err.message : "Bilinmeyen hata"))
-      .finally(() => setProductsLoading(false));
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setProductsError(err instanceof Error ? err.message : "Bilinmeyen hata");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setProductsLoading(false);
+      });
+    return () => controller.abort();
   }, [productsFrom, productsTo, productQuery]);
 
   return (
@@ -370,6 +389,17 @@ export function AnalyticsView() {
                 <div className="value">{fmtUsd(effectiveTotals.costUsd)}</div>
               </div>
               <div>
+                {/* Alış fiyatına göre kâr oranı — kârı maliyete bölüyoruz, cироya değil, çünkü
+                    "alıştan %kaç kâr ettik" sorusu bu (2026-09-13, kullanıcı talebi). Maliyet 0/yok
+                    ise (ör. hiç alış fiyatı girilmemiş ürünler) oranın bir anlamı yok, "-" gösteriyoruz. */}
+                <div className="hint" style={{ whiteSpace: "nowrap" }}>%Kâr</div>
+                <div className="value" style={{ color: effectiveTotals.profitUsd < 0 ? "var(--danger)" : undefined }}>
+                  {effectiveTotals.costUsd > 0
+                    ? `%${((effectiveTotals.profitUsd / effectiveTotals.costUsd) * 100).toLocaleString("tr-TR", { maximumFractionDigits: 1 })}`
+                    : "-"}
+                </div>
+              </div>
+              <div>
                 <div className="hint">Sipariş Adedi</div>
                 <div className="value">{fmtNum(effectiveTotals.ordered_units)}</div>
               </div>
@@ -385,13 +415,13 @@ export function AnalyticsView() {
                 <div className="hint" style={{ whiteSpace: "nowrap" }}>Sepete Ekleme %</div>
                 <div className="value">%{effectiveTotals.conv_tocart.toLocaleString("tr-TR", { maximumFractionDigits: 2 })}</div>
               </div>
-              <div>
+              <div className="stat-narrow">
                 <div className="hint">İade</div>
                 <div className="value" style={{ color: effectiveTotals.returns > 0 ? "var(--danger)" : undefined }}>
                   {fmtNum(effectiveTotals.returns)}
                 </div>
               </div>
-              <div>
+              <div className="stat-narrow">
                 <div className="hint">İptal</div>
                 <div className="value" style={{ color: effectiveTotals.cancellations > 0 ? "var(--danger)" : undefined }}>
                   {fmtNum(effectiveTotals.cancellations)}

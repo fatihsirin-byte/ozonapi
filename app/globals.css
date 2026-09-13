@@ -503,6 +503,51 @@ th {
   font-size: 17px;
 }
 
+/* İade/İptal kartları küçük bir sayı gösteriyor, diğer kartlar kadar geniş olmasına gerek yok
+   (2026-09-13, kullanıcı talebi: "iptal iade kartlarını daralt"). */
+.analytics-summary-grid > .stat-narrow {
+  min-width: 64px;
+  flex: 0 0 auto;
+}
+
+/* Mobil (2026-09-13, kullanıcı talebi: "mobil çok kötü acil responsive yap") — genel site
+   üzerinde daha önce HİÇ media query yoktu, bu ilk responsive geçiş; kapsam ekran görüntülerinde
+   gösterilen iki somut sorunla sınırlı: üst menü (nav) ve Analitik özet kartları. Diğer sayfalar
+   (tablolar vb.) ayrı bir iş olarak ele alınmalı. */
+@media (max-width: 700px) {
+  .global-nav-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px 16px;
+  }
+
+  .global-nav-links {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    width: 100%;
+    gap: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .global-nav-link {
+    white-space: nowrap;
+  }
+
+  /* Dar ekranda 10 kartı tek satırda tutmak okunaksız olurdu — yatay kaydırma yerine 2 sütunlu
+     bir ızgaraya geçiyoruz, hepsi aynı anda görünsün diye. */
+  .analytics-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    overflow-x: visible;
+  }
+
+  .analytics-summary-grid > div,
+  .analytics-summary-grid > .stat-narrow {
+    min-width: 0;
+  }
+}
+
 .toast-stack {
   position: fixed;
   top: 76px;

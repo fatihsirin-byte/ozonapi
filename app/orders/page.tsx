@@ -20,6 +20,7 @@ import { OrdersToolbar } from "./OrdersToolbar";
 import { OrdersSearchBar } from "./OrdersSearchBar";
 import { PageLinkPagination } from "./PageLinkPagination";
 import { ParasutInvoiceButton } from "./ParasutInvoiceButton";
+import { AseShipmentButton } from "./AseShipmentButton";
 import { InvoicedTodayZipButton } from "./InvoicedTodayZipButton";
 import { translateOrderStatus } from "@/utils/orderStatus";
 import { BulkShipProvider } from "./BulkShipContext";
@@ -411,6 +412,20 @@ export default async function OrdersPage({
                         initialConfirmed={o.parasutInvoiceNoConfirmed}
                         initialPdfCached={o.parasutInvoicePdfCached}
                       />
+                      {/* Fatura kesilmeden ASE'ye bildirim yapmanın anlamı yok — sipariş detay
+                          sayfasıyla AYNI kural (bkz. o.parasutInvoiceId kontrolü, 2026-09-15,
+                          kullanıcı talebi: "buton sadece siparişin içinde var, listede de olmalı"). */}
+                      {o.parasutInvoiceId && (
+                        <div style={{ marginTop: 6 }}>
+                          <AseShipmentButton
+                            postingNumber={o.postingNumber}
+                            invoiceConfirmed={o.parasutInvoiceNoConfirmed}
+                            initialSentAt={o.aseShipmentSentAt ? o.aseShipmentSentAt.toISOString() : null}
+                            initialSuccess={o.aseShipmentSuccess}
+                            initialMessage={o.aseShipmentMessage}
+                          />
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );

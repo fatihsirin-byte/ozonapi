@@ -33,6 +33,9 @@ interface AseShipmentResponse {
 // önceki sürüm hem fatura PDF durumu her kontrol edildiğinde hem 15 dakikalık senkronizasyon
 // cron'unda kendiliğinden "fatura numarası kesinleşmiş ama gönderilmemiş" siparişleri bulup
 // gönderiyordu — kullanıcı bunu öngörülemez buldu, "fatura kestikten sonra buton gelsin" istedi).
+// Hem Siparişler listesinde hem sipariş detay sayfasında kullanılıyor (2026-09-15, kullanıcı
+// talebi: "buton sadece siparişin içinde var, listede de olması gerekiyor") — bu yüzden
+// ParasutInvoiceButton ile aynı paylaşılan konumda (app/orders/) duruyor.
 //
 // HS KOD HATASI AKIŞI (2026-09-13, kullanıcı talebi: "hs kod hata veriyorsa retry yapmayı,
 // başarılı olanı ürüne sonsuza kadar kaydetmeyi sağla"): gönderim özellikle HS kodu yüzünden

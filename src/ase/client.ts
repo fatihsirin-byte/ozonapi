@@ -188,12 +188,12 @@ function normalizeSendShipmentResponse(data: unknown): SendShipmentResponse {
   };
 }
 
-// TODO (dokümanla çelişki, ÇÖZÜLMEDİ — bkz. görev talimatı): element tablosu ve hata kod 35
-// shipmentType için sadece "Courier" veya "Micro" kabul edildiğini söylüyor, ama dokümandaki
-// request örneğinde "shipmentType":"Etgb" kullanılmış. Gerçek ilk canlı testte hangisinin doğru
-// olduğu ayrıca doğrulanacak — bu değeri TEK bir yerden değiştirebilmek için sabit olarak dışa
-// açıyoruz, sendShipment içindeki mantığı DEĞİŞTİRMEDEN sadece bu değeri güncellemek yeterli.
-export const ASE_SHIPMENT_TYPE = "Etgb";
+// ÇÖZÜLDÜ (2026-09-15): dokümandaki "Etgb" örneği yanlışmış — gerçek ilk canlı testte
+// (0221854527-0281-1 siparişi) ASE tam olarak "shipmentType can only take Courier or Micro
+// values" hatasını döndürdü. Courier kullanmak için müşteri temsilcisinden bilgi alınması
+// gerektiği dokümanda belirtiliyor (bkz. Gönderi İşlemleri bölümü) — biz için henüz öyle bir
+// anlaşma yok, o yüzden "Micro" (küçük paket/mikro ihracat) varsayılan.
+export const ASE_SHIPMENT_TYPE = "Micro";
 
 export async function sendShipment(payload: SendShipmentPayload): Promise<SendShipmentResponse> {
   const data = await aseRequest<unknown>("/Shipment/SendShipment", payload);

@@ -20,7 +20,7 @@ import { ShipOrderButton } from "./ShipOrderButton";
 import { RealWeightInput } from "./RealWeightInput";
 import { ParasutInvoiceButton } from "../ParasutInvoiceButton";
 import { EtgbInfo } from "./EtgbInfo";
-import { AseShipmentButton } from "./AseShipmentButton";
+import { AseShipmentButton } from "../AseShipmentButton";
 import {
   estimateShippingForWeight,
   effectiveCargoWeightGrams,

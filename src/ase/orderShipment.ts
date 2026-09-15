@@ -169,10 +169,7 @@ async function doSendOrderToAse(postingNumber: string): Promise<void> {
 
     const payload: SendShipmentPayload = {
       code: postingNumber,
-      // TODO (doküman kendi içinde çelişkili, ÇÖZÜLMEDİ — bkz. src/ase/client.ts ASE_SHIPMENT_TYPE
-      // yorumu): element tablosu/hata kod 35 sadece "Courier"/"Micro" diyor, örnek istekte "Etgb"
-      // kullanılmış. Gerçek ilk canlı testte doğrulanacak, tek yerden (ASE_SHIPMENT_TYPE) değişebilir.
-      shipmentType: ASE_SHIPMENT_TYPE,
+      shipmentType: ASE_SHIPMENT_TYPE, // ÇÖZÜLDÜ (2026-09-15) — bkz. src/ase/client.ts yorumu.
       invoiceDate: toAseInvoiceDateString(order.parasutInvoicedAt),
       invoiceNo: order.parasutInvoiceNo,
       invoiceCurrencyCode: INVOICE_CURRENCY_CODE,

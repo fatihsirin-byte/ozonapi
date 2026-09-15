@@ -158,24 +158,24 @@ async function doSendOrderToAse(postingNumber: string): Promise<void> {
       // doğrulanmadı.
       const articleCode = item.ozonSku != null ? item.ozonSku.toString() : item.offerId;
       // unitPrice HER ZAMAN TEK ADEDİN fiyatı olmalı (item.price zaten birim fiyat — bkz.
-      // computeOrderAmount'ta price × quantity ile toplam hesaplanması, yani price birim demek) —
-      // ASE'nin kendi ekibi (2026-09-15, Devrim Eriş/ASE ile yapılan görüşme) "ilk API bağlayanlar
-      // çoklu üründe yanlışlıkla TOPLAMI yolluyor" diye özellikle uyardı, bizde bu doğru.
+      // computeOrderAmount'ta price × quantity ile toplam hesaplanması, yani price birim demek).
+      // DOĞRULANDI (2026-09-15, ASE'nin kendi ekibiyle — Devrim Eriş — yapılan gerçek görüşme):
+      // "ilk API bağlayanlar çoklu üründe yanlışlıkla TOPLAMI yolluyor" diye uyardılar, bizde bu
+      // doğru. Aynı görüşmede AYRICA doğrulandı: aynı üründen birden fazla adet olsa bile
+      // (item.quantity > 1) TEK bir satır yeterli — "2 adet diye de gelebiliyor, tek tek gelmez
+      // genelde aynı ürün olunca" (ASE'nin kendi sözü) — adet bilgisini zaten Ozon'dan ayrıca
+      // alıyorlar ("Bize de 1 satır gelir, Ozon'dan geliyor veri"), bizim tekrar tekrar aynı
+      // satırı göndermemize gerek yok; asıl kritik olan unitPrice'ın yine de BİRİM fiyat olması.
+      // (Önceki bir denemede bu net değildi, item.quantity kadar TEKRARLANAN satır gönderiliyordu
+      // — ASE'nin doğrudan onayıyla bu GERİ ALINDI, tek satıra dönüldü.)
       const unitPrice = Number((Number(item.price) * fxRate).toFixed(2));
 
-      // DÜZELTME (2026-09-15, aynı görüşmede "çoklu olduğunda bakalım" uyarısıyla fark edildi):
-      // doküman shipmentProductList şemasında "quantity" alanı YOK — birden fazla adet, AYNI
-      // articleCode/hsCode/unitPrice ile TEKRARLANAN ayrı elemanlar olarak temsil ediliyor (doküman:
-      // "ürün sayısı ... sistemdeki kodlarla eşleşmeli"). Eskiden item.quantity ne olursa olsun
-      // TEK bir eleman gönderiliyordu — 2 adetlik bir kalem ASE'ye 1 adet gibi görünürdü.
-      for (let i = 0; i < item.quantity; i++) {
-        shipmentProductList.push({
-          articleCode,
-          hsCode,
-          unitPrice,
-          productOriginCountryCode: PRODUCT_ORIGIN_COUNTRY_CODE,
-        });
-      }
+      shipmentProductList.push({
+        articleCode,
+        hsCode,
+        unitPrice,
+        productOriginCountryCode: PRODUCT_ORIGIN_COUNTRY_CODE,
+      });
     }
 
     const payload: SendShipmentPayload = {

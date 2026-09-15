@@ -157,14 +157,25 @@ async function doSendOrderToAse(postingNumber: string): Promise<void> {
       // kalemlerde) — o durumda offerId'ye düşülüyor, ama ASE'nin bunu kabul edip etmeyeceği
       // doğrulanmadı.
       const articleCode = item.ozonSku != null ? item.ozonSku.toString() : item.offerId;
+      // unitPrice HER ZAMAN TEK ADEDİN fiyatı olmalı (item.price zaten birim fiyat — bkz.
+      // computeOrderAmount'ta price × quantity ile toplam hesaplanması, yani price birim demek) —
+      // ASE'nin kendi ekibi (2026-09-15, Devrim Eriş/ASE ile yapılan görüşme) "ilk API bağlayanlar
+      // çoklu üründe yanlışlıkla TOPLAMI yolluyor" diye özellikle uyardı, bizde bu doğru.
       const unitPrice = Number((Number(item.price) * fxRate).toFixed(2));
 
-      shipmentProductList.push({
-        articleCode,
-        hsCode,
-        unitPrice,
-        productOriginCountryCode: PRODUCT_ORIGIN_COUNTRY_CODE,
-      });
+      // DÜZELTME (2026-09-15, aynı görüşmede "çoklu olduğunda bakalım" uyarısıyla fark edildi):
+      // doküman shipmentProductList şemasında "quantity" alanı YOK — birden fazla adet, AYNI
+      // articleCode/hsCode/unitPrice ile TEKRARLANAN ayrı elemanlar olarak temsil ediliyor (doküman:
+      // "ürün sayısı ... sistemdeki kodlarla eşleşmeli"). Eskiden item.quantity ne olursa olsun
+      // TEK bir eleman gönderiliyordu — 2 adetlik bir kalem ASE'ye 1 adet gibi görünürdü.
+      for (let i = 0; i < item.quantity; i++) {
+        shipmentProductList.push({
+          articleCode,
+          hsCode,
+          unitPrice,
+          productOriginCountryCode: PRODUCT_ORIGIN_COUNTRY_CODE,
+        });
+      }
     }
 
     const payload: SendShipmentPayload = {

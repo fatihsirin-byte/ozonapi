@@ -104,11 +104,24 @@ export default async function OrderDetailPage({
         <h1>{order.postingNumber}</h1>
         <div style={{ display: "flex", gap: 8 }}>
           {order.status === "awaiting_packaging" && (
+            // key={order.postingNumber}: bir siparişten diğerine client-side geçişte React aynı
+            // bileşen örneğini KORUYABİLİR — bu durumda içerideki sürükle-bırak "groups" state'i
+            // (lazy useState ile SADECE ilk mount'ta kuruluyor) önceki siparişin kalemlerini
+            // taşımaya devam ederdi (2026-09-15 code review'da tespit edildi; sunucu tarafındaki
+            // gerçek adet doğrulaması muhtemelen bunu bir hataya çevirirdi ama en baştan
+            // ÖNLENMESİ daha sağlam).
             <ShipOrderButton
+              key={order.postingNumber}
               postingNumber={order.postingNumber}
               totalQuantity={orderTotalQuantity(order.items)}
               locked={order.shipClaimedAt != null}
               weightWarning={weightWarning}
+              items={order.items.map((item) => ({
+                offerId: item.offerId,
+                quantity: item.quantity,
+                name: item.product?.name ?? item.offerId,
+                image: Array.isArray(item.product?.images) ? ((item.product.images as string[])[0] ?? null) : null,
+              }))}
             />
           )}
           <LabelDownloadButton postingNumber={order.postingNumber} />

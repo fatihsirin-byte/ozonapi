@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { HSCODE_ERROR_CODE } from "@/ase/constants";
+import { isHsCodeError } from "@/ase/constants";
 
 interface Props {
   postingNumber: string;
@@ -39,8 +39,9 @@ interface AseShipmentResponse {
 //
 // HS KOD HATASI AKIŞI (2026-09-13, kullanıcı talebi: "hs kod hata veriyorsa retry yapmayı,
 // başarılı olanı ürüne sonsuza kadar kaydetmeyi sağla"): gönderim özellikle HS kodu yüzünden
-// (errorCode "34" — hem ASE'nin kendi hata kodu hem de HS kodu yerelde hiç bulunamadığında
-// kullanılıyor) başarısız olursa, her kalem için düzenlenebilir bir HS kod alanı içeren bir
+// başarısız olursa (bkz. src/ase/constants.ts isHsCodeError — SADECE errorCode "34"e değil, hata
+// METNİNE de bakıyor; ASE aynı sorunu "31" gibi başka kodlarla da döndürebiliyor, 2026-09-15'te
+// canlıda tespit edildi), her kalem için düzenlenebilir bir HS kod alanı içeren bir
 // popup açılır. "Kaydet ve Tekrar Dene"ye basınca önce her kalemin HS kodu Product.gtipOverride
 // olarak KALICI kaydedilir (bkz. PATCH /api/products/[offerId]) — bu, sonraki tüm siparişlerde de
 // otomatik kullanılacağı için "başarılı olanı ürüne sonsuza kadar kaydet" isteğini karşılıyor,
@@ -89,7 +90,7 @@ export function AseShipmentButton({ postingNumber, invoiceConfirmed, initialSent
       router.refresh();
       if (data.success) {
         setHsPopupOpen(false);
-      } else if (data.errorCode === HSCODE_ERROR_CODE) {
+      } else if (isHsCodeError(data.errorCode, data.message)) {
         const inputs: Record<string, string> = {};
         const names: Record<string, string> = {};
         for (const item of data.items) {
@@ -134,7 +135,7 @@ export function AseShipmentButton({ postingNumber, invoiceConfirmed, initialSent
       router.refresh();
       if (data.success) {
         setHsPopupOpen(false);
-      } else if (data.errorCode === HSCODE_ERROR_CODE) {
+      } else if (isHsCodeError(data.errorCode, data.message)) {
         // Hâlâ hatalı — popup açık kalır, kullanıcının az önce girdiği değerler korunur (üzerine
         // yazılmaz), sadece yeni hata mesajı gösterilir.
         setHsPopupError(data.message);

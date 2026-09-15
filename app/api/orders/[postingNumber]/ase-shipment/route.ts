@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/db/prisma";
 import { sendOrderToAse, resolveOrderHsCodes } from "@/ase/orderShipment";
-import { HSCODE_ERROR_CODE } from "@/ase/constants";
+import { isHsCodeError } from "@/ase/constants";
 
 // Kullanıcının sipariş sayfasındaki "ASE'ye Gönder" butonuna basmasıyla tetiklenir — ASE'ye
 // (gümrük/ETGB) bildirim artık SADECE elle yapılıyor, otomatik bir tetikleyici yok (2026-09-13,
@@ -27,8 +27,17 @@ export async function POST(_request: Request, { params }: { params: Promise<{ po
 
   // Sadece HS kod hatasında gerekli (bkz. AseShipmentButton.tsx popup) — başarılı ya da başka bir
   // nedenle başarısız her gönderimde gereksiz yere Ozon'a kategori öznitelik isteği atmamak için
-  // (2026-09-13 code review'da tespit edildi) sadece bu durumda hesaplanıyor.
-  const items = order.aseShipmentErrorCode === HSCODE_ERROR_CODE ? await resolveOrderHsCodes(decoded) : [];
+  // (2026-09-13 code review'da tespit edildi) sadece bu durumda hesaplanıyor. isHsCodeError SADECE
+  // kod "34"e değil, hata METNİNE de bakıyor — ASE gerçek bir HS kodu sorununu "31" (normalde
+  // "alan boş" için kullanılan genel kod) ile de döndürebiliyor (2026-09-15'te canlıda tespit edildi).
+  // order.aseShipmentSuccess === false kontrolü BİLEREK ayrıca yapılıyor — isHsCodeError metne de
+  // bakıyor, başarılı bir gönderimin mesajı tesadüfen "HS"/"Gtip" geçiyorsa (recordResult'ta
+  // message = result.message || describeAseCode(result.code), ikisi de bizim kontrolümüzde değil)
+  // gereksiz yere Ozon'a istek atılmasın diye (2026-09-15 code review'da tespit edildi).
+  const items =
+    order.aseShipmentSuccess === false && isHsCodeError(order.aseShipmentErrorCode, order.aseShipmentMessage)
+      ? await resolveOrderHsCodes(decoded)
+      : [];
 
   return NextResponse.json({
     sentAt: order.aseShipmentSentAt,

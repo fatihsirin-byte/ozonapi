@@ -965,8 +965,35 @@ function distributeIntoPackages(
 // Ozon panelindeki "Topla" ile aynı adım — siparişi awaiting_packaging'den bir sonraki duruma
 // geçirir ve kargo etiketinin oluşmasını tetikler (bkz. BEKLEYEN-GELISTIRMELER.md #3, kullanıcı
 // notu: etiket ANCAK bu adımdan sonra oluşuyor).
-export async function shipOrder(postingNumber: string, multiBoxQty?: number) {
-  if (multiBoxQty != null && (!Number.isInteger(multiBoxQty) || multiBoxQty < 1)) {
+export interface CustomShipGroup {
+  offerId: string;
+  quantity: number;
+}
+
+export async function shipOrder(
+  postingNumber: string,
+  options?: {
+    multiBoxQty?: number;
+    // Ozon panelindeki gibi ürün bazlı, sürükle-bırak ile oluşturulmuş manuel gruplama — her
+    // eleman bir "yeni gönderi" (kutu), içinde hangi üründen kaç adet olacağı (bkz.
+    // ShipOrderButton.tsx sürükle-bırak editörü, 2026-09-15, kullanıcı talebi: "Ozon'da ürün
+    // bazlı bölme de var, bizde bu yapılabiliyor mu"). Verilirse multiBoxQty YOK SAYILIR.
+    customGroups?: CustomShipGroup[][];
+  },
+) {
+  const multiBoxQty = options?.multiBoxQty;
+  const customGroups = options?.customGroups;
+  // customGroups verilmişse multiBoxQty tamamen YOK SAYILIR (yorum/sözleşme buydu) — bu yüzden
+  // onun format doğrulaması da SADECE customGroups YOKSA çalışmalı, aksi halde customGroups'la
+  // birlikte anlamsız/geçersiz bir multiBoxQty gönderilmesi (ör. 0), customGroups hiç
+  // değerlendirilmeden gereksiz bir hataya yol açardı (2026-09-15 code review'da tespit edildi).
+  // DİKKAT: `!customGroups` TEK BAŞINA yetmiyor — client bilerek ya da yanlışlıkla BOŞ bir dizi
+  // (`customGroups: []`) gönderirse bu de "truthy" olduğundan hem bu doğrulama HEM de aşağıdaki
+  // "customGroups && customGroups.length > 0" dalı atlanır, geçersiz bir multiBoxQty (ör. 0)
+  // hiç yakalanmadan en sondaki "tek paket" yoluna düşüp Ozon'a GERÇEK bir istek giderdi
+  // (2026-09-15 code review'da tespit edildi).
+  const hasCustomGroups = Boolean(customGroups && customGroups.length > 0);
+  if (!hasCustomGroups && multiBoxQty != null && (!Number.isInteger(multiBoxQty) || multiBoxQty < 1)) {
     throw new Error("Geçersiz kutu sayısı — 1 ya da daha büyük bir tam sayı olmalı.");
   }
 
@@ -1030,11 +1057,83 @@ export async function shipOrder(postingNumber: string, multiBoxQty?: number) {
 
   const productItems = freshItems.map((item) => ({ product_id: Number(item.ozonSku), quantity: item.quantity }));
   const totalUnits = productItems.reduce((sum, item) => sum + item.quantity, 0);
-  if (multiBoxQty != null && multiBoxQty > totalUnits) {
+  // Eskiden bu kontrol multiBoxQty verilmişse HER DEĞER için (1 dahil) çalışıyordu; customGroups
+  // dalı eklenince yanlışlıkla sadece "multiBoxQty > 1" durumuna daraldı — totalUnits 0 olan
+  // (bozuk senkron verisi gibi bir uç durum) bir sipariş artık hiç yakalanmadan Ozon'a
+  // product_id + quantity:0 içeren GERÇEK bir istek giderdi (2026-09-15 code review'da tespit
+  // edildi). Tüm yollar için tek, baştan bir güvenlik kontrolü.
+  if (totalUnits === 0) {
     await releaseShipClaim(postingNumber);
-    throw new Error(`Bu siparişte toplam ${totalUnits} adet var — ${multiBoxQty} kutuya bölünemez.`);
+    throw new Error("Bu siparişte toplam adet 0 — paketlenemez, önce siparişi yeniden senkronize edin.");
   }
-  const packages = multiBoxQty != null && multiBoxQty > 1 ? distributeIntoPackages(productItems, multiBoxQty) : [{ products: productItems }];
+
+  let packages: Array<{ products: Array<{ product_id: number; quantity: number }> }>;
+  if (hasCustomGroups && customGroups) {
+    // Client sadece offerId + quantity gönderiyor, GERÇEK product_id (ozonSku) HER ZAMAN
+    // sunucudaki freshItems'tan çözülüyor — client'a asla güvenilmiyor. Gruplardaki toplam
+    // adetlerin siparişteki gerçek adetlerle BİREBİR eşleştiği doğrulanıyor, aksi halde Ozon'a
+    // eksik/fazla ürünle bir ship isteği gitmiş olabilirdi.
+    //
+    // TÜMÜ bir try/catch içinde: customGroups client'tan geliyor ve TypeScript tip iddiası
+    // (`as`) çalışma zamanında hiçbir şey garanti etmiyor — beklenmedik bir şekil (ör. dizi
+    // içinde dizi olmayan bir eleman) burada bir TypeError fırlatırdı, bu da aşağıdaki tüm
+    // `throw new Error(...)` satırlarının aksine releaseShipClaim ÇAĞIRMADAN fonksiyonu terk
+    // edip siparişi KALICI olarak kilitli bırakırdı (2026-09-15 code review'da tespit edildi).
+    try {
+      // Boş bir kutu (içinde hiç ürün olmayan bir grup) Ozon'a `products: []` olan bir paket
+      // olarak gidip GERÇEK, geri alınamaz bir isteği anlamsız bir kutuyla kirletebilirdi —
+      // ShipOrderButton.tsx zaten göndermeden önce boşları filtreliyor ama sunucu client'a
+      // güvenmemeli (2026-09-15 code review'da tespit edildi, doğrudan API çağrısı senaryosu).
+      const nonEmptyGroups = customGroups.filter((group) => Array.isArray(group) && group.length > 0);
+      if (nonEmptyGroups.length === 0) {
+        throw new Error("En az bir kutuda ürün olmalı.");
+      }
+      const wantedByOfferId = new Map<string, number>();
+      for (const group of nonEmptyGroups) {
+        for (const g of group) {
+          if (!g || typeof g.offerId !== "string" || !Number.isInteger(g.quantity) || g.quantity <= 0) {
+            throw new Error(`Geçersiz adet: "${g?.offerId}" için ${g?.quantity}`);
+          }
+          wantedByOfferId.set(g.offerId, (wantedByOfferId.get(g.offerId) ?? 0) + g.quantity);
+        }
+      }
+      const byOfferId = new Map(freshItems.map((item) => [item.offerId, item]));
+      for (const item of freshItems) {
+        const wanted = wantedByOfferId.get(item.offerId) ?? 0;
+        if (wanted !== item.quantity) {
+          throw new Error(
+            `Gruplardaki "${item.offerId}" adedi (${wanted}) siparişteki gerçek adetle (${item.quantity}) uyuşmuyor.`,
+          );
+        }
+      }
+      if (wantedByOfferId.size !== freshItems.length) {
+        throw new Error("Gruplarda siparişte olmayan bir ürün var.");
+      }
+      // Her grup İÇİNDE aynı offerId birden fazla kez geçebilir (ör. sürükle-bırak editöründe aynı
+      // ürün aynı kutuya iki ayrı sürüklemeyle eklenmiş olabilir) — distributeIntoPackages'ın
+      // yaptığı gibi burada da product_id bazında TEKİLLEŞTİRİLİYOR, aksi halde Ozon'a aynı kutu
+      // içinde aynı ürün için iki ayrı satır giderdi (2026-09-15 code review'da tespit edildi).
+      packages = nonEmptyGroups.map((group) => {
+        const byProductId = new Map<number, number>();
+        for (const g of group) {
+          const productId = Number(byOfferId.get(g.offerId)!.ozonSku);
+          byProductId.set(productId, (byProductId.get(productId) ?? 0) + g.quantity);
+        }
+        return { products: [...byProductId.entries()].map(([product_id, quantity]) => ({ product_id, quantity })) };
+      });
+    } catch (err) {
+      await releaseShipClaim(postingNumber);
+      throw err;
+    }
+  } else if (multiBoxQty != null && multiBoxQty > 1) {
+    if (multiBoxQty > totalUnits) {
+      await releaseShipClaim(postingNumber);
+      throw new Error(`Bu siparişte toplam ${totalUnits} adet var — ${multiBoxQty} kutuya bölünemez.`);
+    }
+    packages = distributeIntoPackages(productItems, multiBoxQty);
+  } else {
+    packages = [{ products: productItems }];
+  }
 
   let shipResult: unknown;
   try {

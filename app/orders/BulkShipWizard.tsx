@@ -14,7 +14,7 @@ interface ShipResult {
 }
 
 async function shipOne(postingNumber: string, multiBoxQty?: number): Promise<ShipResult> {
-  const res = await shipPosting(postingNumber, multiBoxQty);
+  const res = await shipPosting(postingNumber, { multiBoxQty });
   if (!res.ok) {
     return { postingNumber, outcome: "error", message: res.error };
   }

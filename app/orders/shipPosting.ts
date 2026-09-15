@@ -4,18 +4,29 @@
 // bir yerden paylaşılıyor (2026-09-11'de code review'da tespit edildi: bu mantık iki dosyada ayrı
 // ayrı kopyalanmıştı, biri düzelip diğeri unutulabilirdi — WEIGHT_WARNING_TEXT'te de aynı sorun
 // yaşanmıştı).
+// CustomShipGroup burada YENİDEN TANIMLANMIYOR — orders.service.ts'teki tek kaynaktan `import
+// type` ile alınıyor (2026-09-15 code review'da tespit edildi: iki dosyada ayrı ayrı aynı şekil
+// tanımlıydı, biri değişip diğeri unutulabilirdi). `import type` derleme sırasında tamamen
+// silindiği için bu dosyanın (client bileşenlerinden kullanılan) sunucuya özel kod
+// (orders.service.ts'nin prisma importu gibi) taşımasına yol açmaz.
+import type { CustomShipGroup } from "@/modules/orders/orders.service";
+export type { CustomShipGroup };
+
 export interface ShipPostingResult {
   ok: boolean;
   syncedPostings?: string[];
   error?: string;
 }
 
-export async function shipPosting(postingNumber: string, multiBoxQty?: number): Promise<ShipPostingResult> {
+export async function shipPosting(
+  postingNumber: string,
+  options?: { multiBoxQty?: number; customGroups?: CustomShipGroup[][] },
+): Promise<ShipPostingResult> {
   try {
     const res = await fetch(`/api/orders/${encodeURIComponent(postingNumber)}/ship`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ multiBoxQty }),
+      body: JSON.stringify({ multiBoxQty: options?.multiBoxQty, customGroups: options?.customGroups }),
     });
     const data = await res.json();
     if (!res.ok) {

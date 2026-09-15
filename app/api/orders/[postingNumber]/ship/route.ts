@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { shipOrder, SafeShipFailureError } from "@/modules/orders/orders.service";
+import { shipOrder, SafeShipFailureError, type CustomShipGroup } from "@/modules/orders/orders.service";
 import { OzonApiError } from "@/ozon/client";
 
 // Ozon panelindeki "Topla" — siparişi paketleyip kargoya hazır hale getirir. GERÇEK bir sevkiyat
@@ -7,10 +7,13 @@ import { OzonApiError } from "@/ozon/client";
 export async function POST(request: NextRequest, { params }: { params: Promise<{ postingNumber: string }> }) {
   const { postingNumber } = await params;
   const decoded = decodeURIComponent(postingNumber);
-  const body = (await request.json().catch(() => ({}))) as { multiBoxQty?: number };
+  const body = (await request.json().catch(() => ({}))) as {
+    multiBoxQty?: number;
+    customGroups?: CustomShipGroup[][];
+  };
 
   try {
-    const result = await shipOrder(decoded, body.multiBoxQty);
+    const result = await shipOrder(decoded, { multiBoxQty: body.multiBoxQty, customGroups: body.customGroups });
     return NextResponse.json(result);
   } catch (error) {
     // SafeShipFailureError: Ozon'a GERÇEK bir ship isteği gitti ve Ozon bunu KESİN/senkron olarak

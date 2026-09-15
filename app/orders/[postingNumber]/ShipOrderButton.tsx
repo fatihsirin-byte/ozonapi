@@ -1,19 +1,213 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { LabelDownloadButton } from "./LabelDownloadButton";
 import { WEIGHT_WARNING_TEXT } from "../weightWarningText";
-import { shipPosting } from "../shipPosting";
+import { shipPosting, type CustomShipGroup } from "../shipPosting";
+
+interface ShipItem {
+  offerId: string;
+  quantity: number;
+  name: string;
+  image: string | null;
+}
 
 // Ozon panelinde "Topla" dendiğinde kutuya bölme seçeneği SADECE paketteki toplam ürün adedi
 // 1'den fazlaysa çıkıyor (kullanıcı notu, bkz. BEKLEYEN-GELISTIRMELER.md #3) — burada da aynı
 // davranış taklit ediliyor.
+//
+// ÜRÜN BAZLI (sürükle-bırak) BÖLME (2026-09-15, kullanıcı talebi: "Ozon'da gönderi bölme ürün
+// bazlı da yapılabiliyor, bizde de olsun"): "Basit" mod eskisi gibi eşit dağıtım yapan
+// multiBoxQty'yi kullanır; "Ürün Bazlı" modda kullanıcı her ürünü (isterse adedinin bir kısmını)
+// istediği kutuya sürükleyip bırakır — tam Ozon'un kendi panelindeki gibi. Backend zaten buna
+// hazırdı (bkz. orders.service.ts shipOrder — Ozon'un packages dizisi her zaman keyfi
+// gruplamayı destekliyordu, sadece UI eşit dağıtımla sınırlıydı).
+// Gruplar DİZİ İNDEKSİYLE değil KARARLI bir id ile tutuluyor (2026-09-15 code review'da tespit
+// edildi): boş bir kutu "Kaldır" ile silinince sonraki kutuların indeksi kayardı, bu da hem
+// "Kutu 1 (orijinal)" etiketinin başka bir kutuya geçmesine hem de aşağıdaki dragAmounts'ın
+// (indekse göre anahtarlanmışsa) yanlış satırla eşleşmesine yol açardı.
+interface ShipGroup {
+  id: number;
+  items: ShipItem[];
+}
+
+function keyOf(groupId: number, offerId: string) {
+  return `${groupId}:${offerId}`;
+}
+
+function ShipmentGroupEditor({
+  items,
+  groups,
+  setGroups,
+}: {
+  items: ShipItem[];
+  groups: ShipGroup[];
+  setGroups: React.Dispatch<React.SetStateAction<ShipGroup[]>>;
+}) {
+  const [dragAmounts, setDragAmounts] = useState<Record<string, number>>({});
+  const dragRef = useRef<{ fromGroupId: number; offerId: string; qty: number } | null>(null);
+
+  // Yeni kutunun id'si mevcut en büyük id + 1 — ayrı bir sayaç (ref) tutmaya gerek yok, State zaten
+  // tek doğruluk kaynağı.
+  function nextGroupId(current: ShipGroup[]): number {
+    return current.reduce((max, g) => Math.max(max, g.id), -1) + 1;
+  }
+
+  function moveUnits(fromGroupId: number, offerId: string, qty: number, toGroupId: number | "new") {
+    if (qty <= 0) return;
+    setGroups((prev) => {
+      let next = prev.map((g) => ({ id: g.id, items: g.items.map((it) => ({ ...it })) }));
+      const targetId = toGroupId === "new" ? nextGroupId(next) : toGroupId;
+      if (toGroupId === "new") next = [...next, { id: targetId, items: [] }];
+      if (targetId === fromGroupId) return prev;
+      const sourceGroup = next.find((g) => g.id === fromGroupId);
+      const destGroup = next.find((g) => g.id === targetId);
+      if (!sourceGroup || !destGroup) return prev;
+      const srcIdx = sourceGroup.items.findIndex((it) => it.offerId === offerId);
+      if (srcIdx === -1) return prev;
+      const src = sourceGroup.items[srcIdx];
+      const moveQty = Math.min(qty, src.quantity);
+      const snapshot = { offerId: src.offerId, name: src.name, image: src.image };
+      src.quantity -= moveQty;
+      if (src.quantity <= 0) sourceGroup.items.splice(srcIdx, 1);
+
+      const destIdx = destGroup.items.findIndex((it) => it.offerId === offerId);
+      if (destIdx >= 0) destGroup.items[destIdx].quantity += moveQty;
+      else destGroup.items.push({ ...snapshot, quantity: moveQty });
+
+      return next;
+    });
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {groups.map((group, gi) => (
+        <div
+          key={group.id}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            const drag = dragRef.current;
+            dragRef.current = null;
+            if (drag) moveUnits(drag.fromGroupId, drag.offerId, drag.qty, group.id);
+          }}
+          style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 8 }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            {/* "orijinal" etiketi id 0'a (İLK oluşturulan kutuya) bağlı, DİZİ İNDEKSİNE (gi) değil
+                — aksi halde id 0'lı kutu boşalıp kaldırılınca yerine geçen kutu yanlışlıkla
+                "orijinal" görünürdü (2026-09-15 code review'da tespit edildi, tam olarak stabil
+                id'lere geçişin önlemeye çalıştığı sorun). Sıra numarası (gi+1) yine de dizideki
+                GÖRÜNÜR konumdan geliyor, sadece etiket metni id'ye bağlı. */}
+            <strong style={{ fontSize: 12 }}>{group.id === 0 ? `Kutu ${gi + 1} (orijinal)` : `Kutu ${gi + 1}`}</strong>
+            {group.items.length === 0 && groups.length > 1 && (
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ fontSize: 11, padding: "2px 6px" }}
+                onClick={() => setGroups((prev) => prev.filter((g) => g.id !== group.id))}
+              >
+                Kaldır
+              </button>
+            )}
+          </div>
+          {group.items.length === 0 ? (
+            <div className="hint" style={{ fontSize: 12 }}>Boş — buraya ürün sürükleyin ya da aşağıdan taşıyın</div>
+          ) : (
+            group.items.map((it) => {
+              const k = keyOf(group.id, it.offerId);
+              const dragAmount = Math.max(1, Math.min(dragAmounts[k] ?? it.quantity, it.quantity));
+              // Hedef kutu seçimi — HTML5 sürükle-bırak dokunmatik ekranlarda (tablet/telefon) HİÇ
+              // tetiklenmiyor (2026-09-15 code review'da tespit edildi: kullanıcı bölmeye çalışsa
+              // bile hiçbir şey olmuyor, sessizce bölünmemiş tek kutu gönderiliyordu) — bu açılır
+              // menü her cihazda çalışan bir alternatif sağlıyor, sürükleme sadece fare için hızlı bir kısayol.
+              const otherGroups = groups.filter((g) => g.id !== group.id);
+              return (
+                <div
+                  key={it.offerId}
+                  draggable
+                  onDragStart={() => (dragRef.current = { fromGroupId: group.id, offerId: it.offerId, qty: dragAmount })}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0", cursor: "grab", flexWrap: "wrap" }}
+                >
+                  {it.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={it.image} alt="" width={32} height={32} style={{ objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
+                  ) : (
+                    <div style={{ width: 32, height: 32, background: "var(--border)", borderRadius: 4, flexShrink: 0 }} />
+                  )}
+                  <span style={{ fontSize: 12, flex: 1, minWidth: 100 }}>{it.name}</span>
+                  {it.quantity > 1 && (
+                    <input
+                      type="number"
+                      min={1}
+                      max={it.quantity}
+                      value={dragAmount}
+                      onChange={(e) =>
+                        setDragAmounts((prev) => ({
+                          ...prev,
+                          [k]: Math.max(1, Math.min(it.quantity, Number(e.target.value) || 1)),
+                        }))
+                      }
+                      title="Kaç adet taşınacak"
+                      style={{ width: 44, fontSize: 12 }}
+                    />
+                  )}
+                  <span className="hint" style={{ fontSize: 11 }}>/{it.quantity}</span>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (!value) return;
+                      moveUnits(group.id, it.offerId, dragAmount, value === "new" ? "new" : Number(value));
+                      e.target.value = "";
+                    }}
+                    style={{ fontSize: 11, maxWidth: 120 }}
+                  >
+                    <option value="">Taşı...</option>
+                    {otherGroups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {groups.findIndex((x) => x.id === g.id) === 0 ? "Kutu 1" : `Kutu ${groups.findIndex((x) => x.id === g.id) + 1}`}
+                      </option>
+                    ))}
+                    <option value="new">+ Yeni kutu</option>
+                  </select>
+                </div>
+              );
+            })
+          )}
+        </div>
+      ))}
+      <div
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          const drag = dragRef.current;
+          dragRef.current = null;
+          if (drag) moveUnits(drag.fromGroupId, drag.offerId, drag.qty, "new");
+        }}
+        className="hint"
+        style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 10, textAlign: "center", fontSize: 12 }}
+      >
+        + Yeni kutu oluşturmak için ürünü buraya sürükleyin (ya da bir üründeki "Taşı..." menüsünden "+ Yeni kutu" seçin)
+      </div>
+      {items.length > 0 && (
+        <div className="hint" style={{ fontSize: 11 }}>
+          Adet birden fazlaysa, taşımadan önce yanındaki sayıyı değiştirip kaç tanesinin taşınacağını seçebilirsiniz.
+          Fare ile sürükleyebilir ya da "Taşı..." menüsünü kullanabilirsiniz (dokunmatik ekranlarda sürükleme
+          çalışmaz, menüyü kullanın).
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ShipOrderButton({
   postingNumber,
   totalQuantity,
   locked,
   weightWarning,
+  items,
 }: {
   postingNumber: string;
   totalQuantity: number;
@@ -26,22 +220,27 @@ export function ShipOrderButton({
   // 2+ adedi de, farklı ürünlerin toplamı da dahil) — tek kutuda paketlenirse toplam ağırlık
   // 500g'ı geçip teslimat sorununa yol açabilir (bkz. orders.service.ts getWeightSplitWarning).
   weightWarning?: boolean;
+  // Ürün bazlı (sürükle-bırak) bölme editörü için — sipariş kalemlerinin görsel/ad bilgisi.
+  items: ShipItem[];
 }) {
   const router = useRouter();
   const canSplit = totalQuantity > 1;
   const [step, setStep] = useState<"idle" | "confirm">("idle");
+  const [mode, setMode] = useState<"simple" | "custom">("simple");
   const [multiBoxQty, setMultiBoxQty] = useState("1");
+  const [groups, setGroups] = useState<ShipGroup[]>(() => [{ id: 0, items: items.map((it) => ({ ...it })) }]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string[] | null>(null);
 
   async function ship() {
     setError(null);
-    // Sayı olmayan/geçersiz bir kutu sayısı GİRİLDİYSE sessizce bölmesiz devam etmek yerine
-    // durduruyoruz — aksi halde kullanıcı bölme istediğini sanırken sipariş tek kutu olarak
-    // paketlenebilirdi (2026-09-10'da code review'da tespit edildi).
     let qty: number | undefined;
-    if (canSplit) {
+    let customGroups: CustomShipGroup[][] | undefined;
+    if (canSplit && mode === "simple") {
+      // Sayı olmayan/geçersiz bir kutu sayısı GİRİLDİYSE sessizce bölmesiz devam etmek yerine
+      // durduruyoruz — aksi halde kullanıcı bölme istediğini sanırken sipariş tek kutu olarak
+      // paketlenebilirdi (2026-09-10'da code review'da tespit edildi).
       const parsed = Number(multiBoxQty);
       if (!Number.isInteger(parsed) || parsed < 1) {
         setError("Geçerli bir kutu sayısı girin (1 ya da daha büyük bir tam sayı).");
@@ -55,9 +254,16 @@ export function ShipOrderButton({
         return;
       }
       qty = parsed;
+    } else if (canSplit && mode === "custom") {
+      const nonEmpty = groups.filter((g) => g.items.length > 0);
+      if (nonEmpty.length === 0) {
+        setError("En az bir kutuda ürün olmalı.");
+        return;
+      }
+      customGroups = nonEmpty.map((g) => g.items.map(({ offerId, quantity }) => ({ offerId, quantity })));
     }
     setLoading(true);
-    const res = await shipPosting(postingNumber, qty);
+    const res = await shipPosting(postingNumber, { multiBoxQty: qty, customGroups });
     setLoading(false);
     if (!res.ok) {
       setError(res.error ?? "Paketlenemedi");
@@ -116,24 +322,38 @@ export function ShipOrderButton({
   }
 
   return (
-    <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: 260 }}>
+    <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: 260, maxWidth: 420 }}>
       <div style={{ fontWeight: 500 }}>Bu siparişi paketle ve Ozon'a bildir</div>
       <div className="hint">Bu işlem Ozon'a GERÇEK bir sevkiyat onayı gönderir, geri alınamaz.</div>
       {weightWarning && (
         <div style={{ color: "var(--danger)", fontSize: 13, fontWeight: 500 }}>{WEIGHT_WARNING_TEXT}</div>
       )}
       {canSplit && (
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
-          Kaç kutuya bölünsün? (1 = bölme, tek kutu, en fazla {totalQuantity})
-          <input
-            type="number"
-            min="1"
-            max={totalQuantity}
-            value={multiBoxQty}
-            onChange={(e) => setMultiBoxQty(e.target.value)}
-            style={{ width: 80 }}
-          />
-        </label>
+        <>
+          <div className="segmented-toggle" role="group" aria-label="Bölme yöntemi" style={{ alignSelf: "flex-start" }}>
+            <button type="button" className={mode === "simple" ? "active" : ""} onClick={() => setMode("simple")}>
+              Basit
+            </button>
+            <button type="button" className={mode === "custom" ? "active" : ""} onClick={() => setMode("custom")}>
+              Ürün Bazlı
+            </button>
+          </div>
+          {mode === "simple" ? (
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+              Kaç kutuya bölünsün? (1 = bölme, tek kutu, en fazla {totalQuantity})
+              <input
+                type="number"
+                min="1"
+                max={totalQuantity}
+                value={multiBoxQty}
+                onChange={(e) => setMultiBoxQty(e.target.value)}
+                style={{ width: 80 }}
+              />
+            </label>
+          ) : (
+            <ShipmentGroupEditor items={items} groups={groups} setGroups={setGroups} />
+          )}
+        </>
       )}
       <div style={{ display: "flex", gap: 8 }}>
         <button type="button" className="btn-primary" disabled={loading} onClick={ship}>

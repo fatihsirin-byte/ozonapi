@@ -19,9 +19,8 @@ import { transliterateRussian } from "@/utils/transliterate";
 import { LabelDownloadButton } from "./LabelDownloadButton";
 import { ShipOrderButton } from "../ShipOrderButton";
 import { RealWeightInput } from "./RealWeightInput";
-import { ParasutInvoiceButton } from "../ParasutInvoiceButton";
+import { InvoiceAndAseButton } from "../InvoiceAndAseButton";
 import { EtgbInfo } from "./EtgbInfo";
-import { AseShipmentButton } from "../AseShipmentButton";
 import {
   estimateShippingForWeight,
   effectiveCargoWeightGrams,
@@ -126,22 +125,17 @@ export default async function OrderDetailPage({
             />
           )}
           <LabelDownloadButton postingNumber={order.postingNumber} />
-          <ParasutInvoiceButton
+          <InvoiceAndAseButton
+            key={order.postingNumber}
             postingNumber={order.postingNumber}
             initialInvoiceNo={order.parasutInvoiceNo}
             initialPrintUrl={order.parasutPrintUrl}
-            initialConfirmed={order.parasutInvoiceNoConfirmed}
+            initialInvoiceConfirmed={order.parasutInvoiceNoConfirmed}
             initialPdfCached={order.parasutInvoicePdfCached}
+            initialAseSentAt={order.aseShipmentSentAt ? order.aseShipmentSentAt.toISOString() : null}
+            initialAseSuccess={order.aseShipmentSuccess}
+            initialAseMessage={order.aseShipmentMessage}
           />
-          {order.parasutInvoiceId && (
-            <AseShipmentButton
-              postingNumber={order.postingNumber}
-              invoiceConfirmed={order.parasutInvoiceNoConfirmed}
-              initialSentAt={order.aseShipmentSentAt ? order.aseShipmentSentAt.toISOString() : null}
-              initialSuccess={order.aseShipmentSuccess}
-              initialMessage={order.aseShipmentMessage}
-            />
-          )}
           <Link href="/orders">
             <button className="btn-secondary">← Siparişler</button>
           </Link>

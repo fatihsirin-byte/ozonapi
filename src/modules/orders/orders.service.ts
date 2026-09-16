@@ -332,6 +332,14 @@ export const SHIPPED_OR_DONE_STATUSES = new Set([
   "client_arbitration",
 ]);
 
+// Kargoya verilmiş/teslim edilmiş sayılan VE gerçekte ASE'den (gümrük) geçmiş olması beklenen
+// durumlar — SHIPPED_OR_DONE_STATUSES'ten "cancelled" ÇIKARILMIŞ hali. Kullanıcı doğrudan
+// doğruladı (2026-09-16, ASE temsilcisiyle WhatsApp görüşmesi sonrası): "her şey her sipariş
+// aseyle gitti" — yani kargoya GERÇEKTEN verilen her sipariş ASE'nin gümrük sürecinden geçiyor.
+// "cancelled" hariç tutuluyor çünkü Ozon'da bu durumdaki bir sipariş kargoya hiç verilmemiş
+// sayılır (bkz. src/ase/statusPolling.ts, app/ase-durumu/page.tsx).
+export const ASE_ELIGIBLE_STATUSES = new Set([...SHIPPED_OR_DONE_STATUSES].filter((status) => status !== "cancelled"));
+
 export interface ShipmentDelayInfo {
   isDelayed: boolean;
   daysLate: number;
@@ -347,6 +355,57 @@ export function getShipmentDelayInfo(order: { status: string; rawPayload: unknow
   const diffMs = Date.now() - shipmentDeadline.getTime();
   if (diffMs <= 0) return { isDelayed: false, daysLate: 0, shipmentDeadline };
   return { isDelayed: true, daysLate: Math.floor(diffMs / (24 * 60 * 60 * 1000)), shipmentDeadline };
+}
+
+export interface AseDeclarationBacklogItem {
+  postingNumber: string;
+  status: string;
+  // "Kaç gün geçti" hesabı için referans tarih — rawPayload.shipment_date (Ozon'un kargoya verme
+  // SÜRESİ, gerçek kargoya veriliş tarihine en yakın bildiğimiz alan) varsa o, yoksa orderDate.
+  // Bu proje ne "gerçekte ne zaman kargoya verildi" ne de "gerçekte ne zaman teslim edildi"
+  // bilgisini AYRI bir alanda tutuyor (Ozon bunu bize bu şekliyle vermiyor) — o yüzden bu tarih
+  // KESİN değil, sıralama/önceliklendirme için yeterince yakın bir tahmin (2026-09-16, kullanıcı
+  // talebi: "beyanname durumunu takip etmeliyiz kaç gün geçti beyannamesi yok gibi çoktan aza").
+  referenceDate: Date | null;
+  daysElapsed: number | null;
+  aseShipmentSuccess: boolean | null;
+  aseShipmentMessage: string | null;
+}
+
+// ASE'nin beyanname/iptal durumunu henüz vermediği, kargoya verilmiş/teslim edilmiş TÜM siparişler
+// — bkz. ASE_ELIGIBLE_STATUSES yorumu (bizim panelimizin "ASE'ye Gönder" butonuyla gönderdiğini
+// bildiği siparişlerle SINIRLI değil, geçmişte bu buton hiç kullanılmamış siparişler de dahil).
+// En uzun süredir bekleyen en üstte (kullanıcı talebi: "çoktan aza") — bkz. app/ase-durumu/page.tsx.
+export async function getAseDeclarationBacklog(): Promise<AseDeclarationBacklogItem[]> {
+  const orders = await prisma.order.findMany({
+    where: { status: { in: [...ASE_ELIGIBLE_STATUSES] }, aseCancelledAt: null, aseCustomDeclarationCode: null },
+    select: {
+      postingNumber: true,
+      status: true,
+      orderDate: true,
+      rawPayload: true,
+      aseShipmentSuccess: true,
+      aseShipmentMessage: true,
+    },
+  });
+
+  const items: AseDeclarationBacklogItem[] = orders.map((o) => {
+    const shipmentDateRaw = (o.rawPayload as { shipment_date?: string } | null)?.shipment_date;
+    const candidate = shipmentDateRaw ? new Date(shipmentDateRaw) : o.orderDate;
+    const referenceDate = candidate && !Number.isNaN(candidate.getTime()) ? candidate : null;
+    const daysElapsed = referenceDate ? Math.floor((Date.now() - referenceDate.getTime()) / (24 * 60 * 60 * 1000)) : null;
+    return {
+      postingNumber: o.postingNumber,
+      status: o.status,
+      referenceDate,
+      daysElapsed,
+      aseShipmentSuccess: o.aseShipmentSuccess,
+      aseShipmentMessage: o.aseShipmentMessage,
+    };
+  });
+
+  items.sort((a, b) => (b.daysElapsed ?? -1) - (a.daysElapsed ?? -1));
+  return items;
 }
 
 // Ozon, stok bildirirken ağırlığa göre İKİ ayrı depoya yönlendiriyor (bkz. src/ozon/warehouses.ts,

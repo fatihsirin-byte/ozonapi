@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/analitik", label: "Analitik" },
   { href: "/kampanyalar", label: "Kampanyalar" },
   { href: "/pnl", label: "Kâr/Zarar" },
+  { href: "/ase-durumu", label: "ASE Beyanname" },
 ];
 
 export function Nav() {

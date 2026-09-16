@@ -1,6 +1,7 @@
 import { prisma } from "../db/prisma";
 import { getCustomDeclarationDetailsByCodeList, getCancelledShipmentsByDateRange, getMeasurementsByCodeList } from "./client";
 import { toIstanbulDateString } from "../utils/istanbulTime";
+import { ASE_ELIGIBLE_STATUSES } from "../modules/orders/orders.service";
 
 // ASE gümrük beyanı / iptal / ölçüm durumunu periyodik olarak kontrol eder (bkz.
 // sync-orders-cron.ts). 2026-09-16'da kullanıcının ASE'deki temsilcisi Devrim Eriş ile yaptığı
@@ -75,10 +76,14 @@ export async function pollAseShipmentStatuses(): Promise<void> {
 }
 
 async function doPollAseShipmentStatuses(): Promise<void> {
-  // Sadece daha önce ASE'ye BAŞARIYLA gönderilmiş ve henüz "kesin" bir sonuca (iptal ya da beyanname)
-  // ulaşmamış siparişler sorgulanır.
+  // Kargoya verilmiş/teslim edilmiş VE henüz "kesin" bir sonuca (iptal ya da beyanname) ulaşmamış
+  // TÜM siparişler sorgulanır — bizim panelimizin "ASE'ye Gönder" butonuyla BAŞARIYLA gönderdiğini
+  // bildiği (aseShipmentSuccess=true) siparişlerle SINIRLI DEĞİL (2026-09-16, kullanıcı talebi:
+  // "her şey her sipariş aseyle gitti hepsini sorabilirsin ... geçmişteki aseyle gönder
+  // demediklerimizi de sorgula") — geçmişte bu özellik yokken ya da buton hiç kullanılmadan
+  // kargoya verilmiş siparişler de dahil.
   const pending = await prisma.order.findMany({
-    where: { aseShipmentSuccess: true, aseCancelledAt: null, aseCustomDeclarationCode: null },
+    where: { status: { in: [...ASE_ELIGIBLE_STATUSES] }, aseCancelledAt: null, aseCustomDeclarationCode: null },
     select: { postingNumber: true },
   });
   if (pending.length === 0) return;

@@ -104,6 +104,20 @@ model Order {
   orderDate     DateTime?
   rawPayload    Json?
   purchaseInvoiceNumber String? // Bizim kendi takibimiz için — tedarikçiden aldığımız alış faturasının numarası (Ozon'a gönderilmez)
+  // Aladdin→Fatih Gezgin günlük iç fatura sürecinin (bkz. src/parasut/aladdinInvoice.ts) kendi
+  // kilidi — BİLEREK purchaseInvoiceNumber'ın KENDİSİ kullanılmıyor: o alan kullanıcının elle
+  // düzenleyebildiği, bu süreçten habersiz AYRI bir alan (bkz. PurchaseInvoiceField.tsx) — aynı
+  // alanı kilit olarak kullanan ilk sürüm, kullanıcı o sırada alanı elle değiştirirse ya da iki
+  // eşzamanlı istek varsa GERÇEK bir çift fatura kesilmesine yol açabilirdi (2026-09-16 code
+  // review'da tespit edildi). Her çağrı kendi RASTGELE değerini yazar, sadece KENDİ değerini
+  // görürse siler/tamamlar — başka bir çağrının claim'ini asla etkilemez.
+  aladdinInvoiceClaimId String?
+  // Claim NE ZAMAN alındı — süreç bu claim'i temizlemeden çökerse/yeniden başlarsa (ör. pm2
+  // restart), sipariş sonsuza dek "claim'li" takılı kalıp bir daha asla faturalanamazdı (2026-09-16
+  // code review round 3'te tespit edildi). Belirli bir süreden (bkz. aladdinInvoice.ts
+  // CLAIM_STALE_MS) eski bir claim, hâlâ "aladdinInvoiceClaimId" dolu olsa bile artık geçersiz
+  // sayılıp yeniden claim edilebiliyor.
+  aladdinInvoiceClaimedAt DateTime?
   // Paraşüt'te bu sipariş için kesilmiş satış faturası — dolu ise buton tekrar fatura kesmez,
   // var olanı gösterir (2026-09-09, kullanıcı talebi: sipariş başına manuel, tek tek fatura).
   parasutInvoiceId String?

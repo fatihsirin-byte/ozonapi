@@ -24,6 +24,17 @@ export const env = {
   parasutCompanyId: process.env.PARASUT_COMPANY_ID,
   parasutBaseUrl: process.env.PARASUT_BASE_URL ?? "https://api.parasut.com",
 
+  // Aladdin'in AYRI (ikinci) Paraşüt hesabı — Fatih Gezgin'e günlük iç fatura kesmek için
+  // (2026-09-16, kullanıcı talebi). Aynı base URL/redirect URI'yi paylaşıyor, sadece kimlik
+  // bilgileri ve şirket id'si farklı.
+  parasut2ClientId: process.env.PARASUT2_CLIENT_ID,
+  parasut2ClientSecret: process.env.PARASUT2_CLIENT_SECRET,
+  parasut2RedirectUri: process.env.PARASUT2_REDIRECT_URI ?? "urn:ietf:wg:oauth:2.0:oob",
+  parasut2Username: process.env.PARASUT2_USERNAME,
+  parasut2Password: process.env.PARASUT2_PASSWORD,
+  parasut2CompanyId: process.env.PARASUT2_COMPANY_ID,
+  parasut2BaseUrl: process.env.PARASUT2_BASE_URL ?? process.env.PARASUT_BASE_URL ?? "https://api.parasut.com",
+
   // ASE (xlive.ase.com.tr) gümrük/ETGB entegrasyonu — Paraşüt gibi required() ile zorunlu
   // tutulmuyor, eksikse gerçekten kullanılacağı yerde (src/ase/client.ts) anlamlı hata verilir.
   aseBaseUrl: process.env.ASE_BASE_URL ?? "https://xlive.ase.com.tr/api",

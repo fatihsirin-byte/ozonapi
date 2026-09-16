@@ -12,6 +12,7 @@ const LINKS = [
   { href: "/kampanyalar", label: "Kampanyalar" },
   { href: "/pnl", label: "Kâr/Zarar" },
   { href: "/ase-durumu", label: "ASE Beyanname" },
+  { href: "/aladdin-fatura", label: "Aladdin Fatura" },
 ];
 
 export function Nav() {

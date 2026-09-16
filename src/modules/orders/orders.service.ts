@@ -347,9 +347,8 @@ export interface ShipmentDelayInfo {
 }
 
 export function getShipmentDelayInfo(order: { status: string; rawPayload: unknown }): ShipmentDelayInfo {
-  const shipmentDateRaw = (order.rawPayload as { shipment_date?: string } | null)?.shipment_date;
-  const shipmentDeadline = shipmentDateRaw ? new Date(shipmentDateRaw) : null;
-  if (!shipmentDeadline || Number.isNaN(shipmentDeadline.getTime()) || SHIPPED_OR_DONE_STATUSES.has(order.status)) {
+  const shipmentDeadline = extractShipmentDeadline(order.rawPayload);
+  if (!shipmentDeadline || SHIPPED_OR_DONE_STATUSES.has(order.status)) {
     return { isDelayed: false, daysLate: 0, shipmentDeadline };
   }
   const diffMs = Date.now() - shipmentDeadline.getTime();
@@ -357,54 +356,81 @@ export function getShipmentDelayInfo(order: { status: string; rawPayload: unknow
   return { isDelayed: true, daysLate: Math.floor(diffMs / (24 * 60 * 60 * 1000)), shipmentDeadline };
 }
 
+// Ozon'un kargoya verme SÜRESİ (deadline) — gerçek kargoya veriliş tarihi DEĞİL, ama bu proje o
+// bilgiyi ayrıca tutmuyor (Ozon bize bu şekliyle vermiyor), o yüzden elimizdeki en yakın tahmin bu
+// (bkz. getShipmentDelayInfo, getAseDeclarationBacklog — aynı çıkarım burada tek yerden, 2026-09-16
+// code review'da "3 ayrı yerde tekrarlanıyor" bulgusuna karşılık).
+function extractShipmentDeadline(rawPayload: unknown): Date | null {
+  const raw = (rawPayload as { shipment_date?: string } | null)?.shipment_date;
+  if (!raw) return null;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+// statusPolling.ts (periyodik kontrol) ve getAseDeclarationBacklog (bu görünüm) AYNI "hangi
+// siparişler hâlâ bekliyor" tanımını kullanmalı — ayrı ayrı yazılsaydı biri değişip diğeri
+// unutulabilirdi (2026-09-16 code review'da tespit edildi).
+export function aseDeclarationPendingWhere() {
+  return { status: { in: [...ASE_ELIGIBLE_STATUSES] }, aseCancelledAt: null, aseCustomDeclarationCode: null } as const;
+}
+
 export interface AseDeclarationBacklogItem {
   postingNumber: string;
   status: string;
-  // "Kaç gün geçti" hesabı için referans tarih — rawPayload.shipment_date (Ozon'un kargoya verme
-  // SÜRESİ, gerçek kargoya veriliş tarihine en yakın bildiğimiz alan) varsa o, yoksa orderDate.
-  // Bu proje ne "gerçekte ne zaman kargoya verildi" ne de "gerçekte ne zaman teslim edildi"
-  // bilgisini AYRI bir alanda tutuyor (Ozon bunu bize bu şekliyle vermiyor) — o yüzden bu tarih
-  // KESİN değil, sıralama/önceliklendirme için yeterince yakın bir tahmin (2026-09-16, kullanıcı
-  // talebi: "beyanname durumunu takip etmeliyiz kaç gün geçti beyannamesi yok gibi çoktan aza").
+  // "Kaç gün geçti" hesabı için referans tarih — bkz. extractShipmentDeadline. Bilerek orderDate'e
+  // (sipariş oluşturulma anı, kargoya verilişten HER ZAMAN önce) DÜŞMÜYORUZ — bu, gerçek kargo
+  // tarihi olan siparişlerle karşılaştırıldığında yapay olarak "daha uzun süredir bekliyormuş" gibi
+  // görünüp sıralamayı BOZARDI (2026-09-16 code review'da tespit edildi); tarih bilinmiyorsa null,
+  // sıralamada en sona atılıyor.
   referenceDate: Date | null;
   daysElapsed: number | null;
-  aseShipmentSuccess: boolean | null;
-  aseShipmentMessage: string | null;
+  customDeclarationCode: string | null;
+  customDeclarationDate: Date | null;
 }
 
-// ASE'nin beyanname/iptal durumunu henüz vermediği, kargoya verilmiş/teslim edilmiş TÜM siparişler
-// — bkz. ASE_ELIGIBLE_STATUSES yorumu (bizim panelimizin "ASE'ye Gönder" butonuyla gönderdiğini
-// bildiği siparişlerle SINIRLI değil, geçmişte bu buton hiç kullanılmamış siparişler de dahil).
-// En uzun süredir bekleyen en üstte (kullanıcı talebi: "çoktan aza") — bkz. app/ase-durumu/page.tsx.
-export async function getAseDeclarationBacklog(): Promise<AseDeclarationBacklogItem[]> {
+export type AseDeclarationBacklogMode = "pending" | "declared";
+
+// "pending": ASE'nin beyanname/iptal durumunu henüz vermediği, kargoya verilmiş/teslim edilmiş TÜM
+// siparişler (bizim panelimizin "ASE'ye Gönder" butonuyla gönderdiğini bildiği siparişlerle SINIRLI
+// değil, geçmişte bu buton hiç kullanılmamış siparişler de dahil) — en uzun süredir bekleyen en
+// üstte. "declared": ASE'den gerçek bir beyanname numarası gelmiş siparişler — en yeni beyanname en
+// üstte. Bkz. app/ase-durumu/page.tsx (kullanıcı talebi, 2026-09-16: "sadece toggle ekle beyanname
+// olanler beyanname bekleyenler diye").
+export async function getAseDeclarationBacklog(mode: AseDeclarationBacklogMode): Promise<AseDeclarationBacklogItem[]> {
   const orders = await prisma.order.findMany({
-    where: { status: { in: [...ASE_ELIGIBLE_STATUSES] }, aseCancelledAt: null, aseCustomDeclarationCode: null },
+    where: mode === "pending" ? aseDeclarationPendingWhere() : { aseCustomDeclarationCode: { not: null } },
     select: {
       postingNumber: true,
       status: true,
-      orderDate: true,
       rawPayload: true,
-      aseShipmentSuccess: true,
-      aseShipmentMessage: true,
+      aseCustomDeclarationCode: true,
+      aseCustomDeclarationDate: true,
     },
   });
 
   const items: AseDeclarationBacklogItem[] = orders.map((o) => {
-    const shipmentDateRaw = (o.rawPayload as { shipment_date?: string } | null)?.shipment_date;
-    const candidate = shipmentDateRaw ? new Date(shipmentDateRaw) : o.orderDate;
-    const referenceDate = candidate && !Number.isNaN(candidate.getTime()) ? candidate : null;
-    const daysElapsed = referenceDate ? Math.floor((Date.now() - referenceDate.getTime()) / (24 * 60 * 60 * 1000)) : null;
+    const referenceDate = extractShipmentDeadline(o.rawPayload);
+    // Deadline henüz geçmemişse (ör. satıcı süresinden önce kargoya verdi) negatif çıkabilir —
+    // kullanıcıya "-3 gün" gibi anlamsız bir sayı göstermemek için 0'da sabitleniyor (2026-09-16
+    // code review'da tespit edildi).
+    const daysElapsed = referenceDate ? Math.max(0, Math.floor((Date.now() - referenceDate.getTime()) / (24 * 60 * 60 * 1000))) : null;
     return {
       postingNumber: o.postingNumber,
       status: o.status,
       referenceDate,
       daysElapsed,
-      aseShipmentSuccess: o.aseShipmentSuccess,
-      aseShipmentMessage: o.aseShipmentMessage,
+      customDeclarationCode: o.aseCustomDeclarationCode,
+      customDeclarationDate: o.aseCustomDeclarationDate,
     };
   });
 
-  items.sort((a, b) => (b.daysElapsed ?? -1) - (a.daysElapsed ?? -1));
+  if (mode === "pending") {
+    // En uzun süredir bekleyen en üstte; tarihi bilinmeyenler (referenceDate null) en sona.
+    items.sort((a, b) => (b.daysElapsed ?? -1) - (a.daysElapsed ?? -1));
+  } else {
+    // En yeni beyanname en üstte.
+    items.sort((a, b) => (b.customDeclarationDate?.getTime() ?? 0) - (a.customDeclarationDate?.getTime() ?? 0));
+  }
   return items;
 }
 

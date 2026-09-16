@@ -1,7 +1,7 @@
 import { prisma } from "../db/prisma";
 import { getCustomDeclarationDetailsByCodeList, getCancelledShipmentsByDateRange, getMeasurementsByCodeList } from "./client";
 import { toIstanbulDateString } from "../utils/istanbulTime";
-import { ASE_ELIGIBLE_STATUSES } from "../modules/orders/orders.service";
+import { aseDeclarationPendingWhere } from "../modules/orders/orders.service";
 
 // ASE gümrük beyanı / iptal / ölçüm durumunu periyodik olarak kontrol eder (bkz.
 // sync-orders-cron.ts). 2026-09-16'da kullanıcının ASE'deki temsilcisi Devrim Eriş ile yaptığı
@@ -83,7 +83,7 @@ async function doPollAseShipmentStatuses(): Promise<void> {
   // demediklerimizi de sorgula") — geçmişte bu özellik yokken ya da buton hiç kullanılmadan
   // kargoya verilmiş siparişler de dahil.
   const pending = await prisma.order.findMany({
-    where: { status: { in: [...ASE_ELIGIBLE_STATUSES] }, aseCancelledAt: null, aseCustomDeclarationCode: null },
+    where: aseDeclarationPendingWhere(),
     select: { postingNumber: true },
   });
   if (pending.length === 0) return;

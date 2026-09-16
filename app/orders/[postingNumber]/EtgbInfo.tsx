@@ -19,6 +19,13 @@ interface AseShipmentData {
   cancelledAt: string | null;
   cancelReason: string | null;
   measuredWeightKg: number | null;
+  // Sipariş kargoya verilmiş/teslim edilmiş sayılan durumlardan biri mi (bkz.
+  // ASE_ELIGIBLE_STATUSES) — periyodik ASE kontrolü artık "success" bayrağından (sadece panelin
+  // kendi butonuyla gönderdiği siparişlerde dolu) BAĞIMSIZ, TÜM bu tür siparişleri kontrol ediyor
+  // (2026-09-16, kullanıcı talebi: "geçmişteki aseyle gönder demediklerimizi de sorgula"). Bu alan
+  // olmadan, panelin butonuyla hiç gönderilmemiş ama hâlâ bekleyen bir sipariş için "henüz beyan
+  // çıkmadı" mesajı hiç görünmezdi (2026-09-16 code review'da tespit edildi).
+  isAseTracked: boolean;
 }
 
 // ASE durumu artık sunucu bileşeninden (page.tsx) PROP olarak geliyor, kendi fetch'iyle DEĞİL
@@ -66,7 +73,7 @@ export function EtgbInfo({ postingNumber, aseShipment }: { postingNumber: string
         ? ` — ${new Date(aseShipment.customDeclarationDate).toLocaleDateString("tr-TR")}`
         : ""}
     </div>
-  ) : aseShipment?.success ? (
+  ) : aseShipment?.isAseTracked ? (
     <div className="hint">ASE beyanname durumu: henüz beyan çıkmadı</div>
   ) : null;
   const aseWeightInfo =

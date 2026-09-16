@@ -10,6 +10,7 @@ import {
   getShipmentDelayInfo,
   getWeightSplitWarning,
   orderTotalQuantity,
+  ASE_ELIGIBLE_STATUSES,
 } from "@/modules/orders/orders.service";
 import { productPath } from "@/utils/decodeOfferId";
 import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
@@ -242,6 +243,7 @@ export default async function OrderDetailPage({
               cancelledAt: order.aseCancelledAt ? order.aseCancelledAt.toISOString() : null,
               cancelReason: order.aseCancelReason,
               measuredWeightKg: order.aseMeasuredWeightKg,
+              isAseTracked: ASE_ELIGIBLE_STATUSES.has(order.status),
             }}
           />
         </div>

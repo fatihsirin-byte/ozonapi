@@ -86,6 +86,17 @@ function ShipmentPackageEditor({
   onManualMove: () => void;
 }) {
   const dragRef = useRef<{ cardId: string; from: Location } | null>(null);
+  // Sürükleme sırasında görsel geri bildirim için — hangi kart taşınıyor (yarı saydam gösterilir)
+  // ve fare hangi kutunun üzerinde (o kutu vurgulanır). Sadece stil amaçlı, taşıma mantığını
+  // etkilemiyor (2026-09-16, kullanıcı talebi: "sürükleyip bırakırken animasyon koy").
+  const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
+  const [dragOverLocation, setDragOverLocation] = useState<Location | null>(null);
+
+  function endDrag() {
+    dragRef.current = null;
+    setDraggingCardId(null);
+    setDragOverLocation(null);
+  }
 
   function moveCard(cardId: string, from: Location, to: Location) {
     if (from === to) return;
@@ -125,17 +136,23 @@ function ShipmentPackageEditor({
       <div
         key={card.cardId}
         draggable
-        onDragStart={() => (dragRef.current = { cardId: card.cardId, from })}
-        style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", cursor: "grab", flexWrap: "wrap" }}
+        onDragStart={() => {
+          dragRef.current = { cardId: card.cardId, from };
+          setDraggingCardId(card.cardId);
+        }}
+        onDragEnd={endDrag}
+        className={`ship-card${draggingCardId === card.cardId ? " dragging" : ""}`}
+        title={card.name}
       >
         {card.image ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={card.image} alt="" width={28} height={28} style={{ objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
+          <img src={card.image} alt="" />
         ) : (
-          <div style={{ width: 28, height: 28, background: "var(--border)", borderRadius: 4, flexShrink: 0 }} />
+          <div className="ship-card-placeholder" />
         )}
-        <span style={{ fontSize: 12, flex: 1, minWidth: 90 }}>{card.name}</span>
+        <span className="ship-card-name">{card.name}</span>
         <select
+          className="select-move"
           value=""
           onChange={(e) => {
             const value = e.target.value;
@@ -143,7 +160,6 @@ function ShipmentPackageEditor({
             moveCard(card.cardId, from, value === "unassigned" ? "unassigned" : Number(value));
             e.target.value = "";
           }}
-          style={{ fontSize: 11, maxWidth: 140 }}
         >
           <option value="">Taşı...</option>
           {destinations.map((d) => (
@@ -156,47 +172,52 @@ function ShipmentPackageEditor({
     );
   }
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+  function renderZone(location: Location, title: string, cards: UnitCard[], emptyHint: string) {
+    return (
       <div
-        onDragOver={(e) => e.preventDefault()}
+        key={String(location)}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOverLocation(location);
+        }}
+        onDragLeave={(e) => {
+          // Sadece kutunun DIŞINA çıkıldığında vurguyu kaldırıyoruz — içindeki bir alt elemana
+          // (görsel, yazı, "Taşı..." menüsü) geçerken de dragLeave tetiklenir, `relatedTarget`
+          // hâlâ bu kutunun içindeyse yok sayıyoruz (aksi halde vurgu titrer). `relatedTarget`
+          // null gelirse (ör. tarayıcı penceresinin dışına çıkıldığında, bazı tarayıcılarda
+          // pencere içi geçişlerde de olabiliyor) güvenli tarafta kalıp vurguyu temizliyoruz —
+          // olası sonuç en kötü ihtimalle vurgunun erken kaybolması, takılı kalması değil
+          // (2026-09-16, code review'da "vurgu takılı kalabiliyor" bulgusuna karşılık; yalnızca
+          // kozmetik, gönderilecek veriyi etkilemiyor).
+          if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget as Node)) return;
+          setDragOverLocation((cur) => (cur === location ? null : cur));
+        }}
         onDrop={(e) => {
           e.preventDefault();
           const drag = dragRef.current;
-          dragRef.current = null;
-          if (drag) moveCard(drag.cardId, drag.from, "unassigned");
+          endDrag();
+          if (drag) moveCard(drag.cardId, drag.from, location);
         }}
-        style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 8 }}
+        className={`ship-zone${dragOverLocation === location ? " drag-over" : ""}`}
       >
-        <strong style={{ fontSize: 12 }}>Paketlenmeyenler</strong>
-        {state.unassigned.length === 0 ? (
-          <div className="hint" style={{ fontSize: 12, marginTop: 4 }}>Hepsi paketlere atandı.</div>
+        <span className="ship-zone-title">{title}</span>
+        {cards.length === 0 ? (
+          <div className="hint">{emptyHint}</div>
         ) : (
-          <div style={{ marginTop: 4 }}>{state.unassigned.map((c) => renderCard(c, "unassigned"))}</div>
+          <div className="ship-cards">{cards.map((c) => renderCard(c, location))}</div>
         )}
       </div>
-      {state.packages.map((pkg) => (
-        <div
-          key={pkg.id}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            const drag = dragRef.current;
-            dragRef.current = null;
-            if (drag) moveCard(drag.cardId, drag.from, pkg.id);
-          }}
-          style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 8 }}
-        >
-          <strong style={{ fontSize: 12 }}>Paket {pkg.id + 1}</strong>
-          {pkg.cards.length === 0 ? (
-            <div className="hint" style={{ fontSize: 12, marginTop: 4 }}>Boş — buraya ürün sürükleyin</div>
-          ) : (
-            <div style={{ marginTop: 4 }}>{pkg.cards.map((c) => renderCard(c, pkg.id))}</div>
-          )}
-        </div>
-      ))}
-      <div className="hint" style={{ fontSize: 11 }}>
-        Fare ile sürükleyebilir ya da her ürünün yanındaki "Taşı..." menüsünü kullanabilirsiniz (dokunmatik
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {renderZone("unassigned", "Paketlenmeyenler", state.unassigned, "Hepsi paketlere atandı.")}
+      {state.packages.map((pkg) =>
+        renderZone(pkg.id, `Paket ${pkg.id + 1}`, pkg.cards, "Boş — buraya ürün sürükleyin"),
+      )}
+      <div className="hint">
+        Fare ile sürükleyebilir ya da her ürünün altındaki "Taşı..." menüsünü kullanabilirsiniz (dokunmatik
         ekranlarda sürükleme çalışmaz, menüyü kullanın).
       </div>
     </div>
@@ -329,27 +350,15 @@ export function ShipOrderButton({
     // o ekrana çeksek"). Kullanıcı "Tamam" deyince (aşağıda) elle yeniliyoruz.
   }
 
+  // "result" (başarılı gönderim sonucu) kontrolü "locked" kontrolünden ÖNCE gelmeli: shipOrder()
+  // başarılı bir gönderimde bile kilidi (shipClaimedAt) bilerek geri açmıyor (artık gerek yok,
+  // sipariş zaten gönderildi) — bu sırada başka bir bileşenin (ör. ParasutInvoiceButton'ın
+  // periyodik kontrolü) tetiklediği bir sayfa yenilemesi bu bileşene locked=true olarak ulaşırsa,
+  // kontrol sırası ters olsaydı GERÇEKTEN başarılı olmuş bir gönderimin barkod/etiket ekranı
+  // "önceki denemesi belirsiz kaldı" uyarısının arkasında saklanırdı (2026-09-16 code review'da
+  // tespit edildi).
   if (result) {
-    return (
-      <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: 260 }}>
-        <div style={{ color: "var(--success)", fontWeight: 500 }}>
-          Paketlendi{result.length > 1 ? ` — ${result.length} kutuya bölündü` : ""}
-        </div>
-        {/* Yeni posting'ler (bölünmüşse HER BİRİ) hemen senkronize edildi (bkz. shipOrder) — kargo
-            etiketini indirmek/yazdırmak için sayfayı değiştirmeye gerek yok, buradan yapılabilir. */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {result.map((pn) => (
-            <div key={pn} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span className="hint" style={{ minWidth: 140 }}>{pn}</span>
-              <LabelDownloadButton postingNumber={pn} />
-            </div>
-          ))}
-        </div>
-        <button type="button" className="btn-secondary" onClick={() => router.refresh()}>
-          Tamam, sayfayı yenile
-        </button>
-      </div>
-    );
+    return renderModal();
   }
 
   if (locked) {
@@ -365,7 +374,7 @@ export function ShipOrderButton({
   if (step === "idle") {
     return (
       <div>
-        <button type="button" className="btn-secondary" onClick={() => setStep("confirm")}>
+        <button type="button" className="btn-ship" onClick={() => setStep("confirm")}>
           Topla
         </button>
         {error && <div className="hint" style={{ color: "var(--danger)", marginTop: 6 }}>{error}</div>}
@@ -373,65 +382,119 @@ export function ShipOrderButton({
     );
   }
 
-  return (
-    <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: 280, maxWidth: 440 }}>
-      <div style={{ fontWeight: 500 }}>Bu siparişi paketle ve Ozon'a bildir</div>
-      <div className="hint">Bu işlem Ozon'a GERÇEK bir sevkiyat onayı gönderir, geri alınamaz.</div>
-      {weightWarning && (
-        <div style={{ color: "var(--danger)", fontSize: 13, fontWeight: 500 }}>{WEIGHT_WARNING_TEXT}</div>
-      )}
-      {canSplit && (
-        <>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <label style={{ fontSize: 13 }}>Kaç pakete bölünsün? (en fazla {totalQuantity})</label>
-            <input
-              type="number"
-              min={1}
-              max={totalQuantity}
-              value={packageCountInput}
-              onChange={(e) => setPackageCountInput(e.target.value)}
-              style={{ width: 56 }}
-            />
-            <button type="button" className="btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={applyPackageCount}>
-              Uygula
-            </button>
-          </div>
-          <ShipmentPackageEditor
-            state={editorState}
-            setState={setEditorState}
-            onManualMove={() => {
-              hasCustomizedRef.current = true;
-            }}
-          />
-        </>
-      )}
-      <div style={{ display: "flex", gap: 8 }}>
-        <button
-          type="button"
-          className="btn-primary"
-          disabled={
-            loading ||
-            (canSplit &&
-              (editorState.unassigned.length > 0 ||
-                packageCountInput.trim() !== String(editorState.packages.length)))
+  // Editör artık sayfanın içinde sağa doğru genişleyen dar bir panel değil, ortalanmış geniş bir
+  // modal olarak açılıyor (2026-09-16, kullanıcı bulgusu: "sağa açman hoşuma gitmedi ortaya büyük
+  // rahat anlaşılık bi modal olarak aç"). Sonuç ekranı (result) da AYNI modalın içinde kalmaya
+  // devam ediyor ki "Evet, Paketle"ye basıldığı anda modal aniden kaybolup yerine sayfanın içinde
+  // küçük bir kutu çıkmasın.
+  function renderModal() {
+    return (
+      <div
+        className="modal-overlay"
+        onClick={() => {
+          if (result) {
+            // Onay ekranından farklı olarak burada tek çıkış yolu "Tamam, sayfayı yenile" —
+            // arka plana tıklamak "hiçbir şey olmuyormuş" gibi görünmesin diye AYNI işlemi
+            // yapıyoruz (2026-09-16 code review'da "arka plana tıklamak sonuç ekranında ölü bir
+            // tıklama" bulgusuna karşılık).
+            router.refresh();
+            return;
           }
-          onClick={ship}
-        >
-          {loading ? "Paketleniyor..." : "Evet, Paketle"}
-        </button>
-        <button
-          type="button"
-          className="btn-secondary"
-          disabled={loading}
-          onClick={() => {
+          // Gönderim sürerken (loading) arka plana tıklayıp kazara kapatmayı engelliyoruz.
+          if (!loading) {
             setStep("idle");
             setError(null);
-          }}
-        >
-          Vazgeç
-        </button>
+          }
+        }}
+      >
+        <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
+          {result ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ color: "var(--success)", fontWeight: 500, fontSize: 16 }}>
+              Paketlendi{result.length > 1 ? ` — ${result.length} kutuya bölündü` : ""}
+            </div>
+            {/* Yeni posting'ler (bölünmüşse HER BİRİ) hemen senkronize edildi (bkz. shipOrder) —
+                kargo etiketini indirmek/yazdırmak için sayfayı değiştirmeye gerek yok, buradan
+                yapılabilir. */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {result.map((pn) => (
+                <div key={pn} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="hint" style={{ minWidth: 140 }}>{pn}</span>
+                  <LabelDownloadButton postingNumber={pn} />
+                </div>
+              ))}
+            </div>
+            <button type="button" className="btn-primary" onClick={() => router.refresh()}>
+              Tamam, sayfayı yenile
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontWeight: 500, fontSize: 16 }}>Bu siparişi paketle ve Ozon'a bildir</div>
+            <div className="hint">Bu işlem Ozon'a GERÇEK bir sevkiyat onayı gönderir, geri alınamaz.</div>
+            {weightWarning && (
+              <div style={{ color: "var(--danger)", fontSize: 13, fontWeight: 500 }}>{WEIGHT_WARNING_TEXT}</div>
+            )}
+            {canSplit && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <label style={{ fontSize: 13, marginBottom: 0 }}>
+                    Kaç pakete bölünsün? (en fazla {totalQuantity})
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalQuantity}
+                    value={packageCountInput}
+                    onChange={(e) => setPackageCountInput(e.target.value)}
+                    style={{ width: 64 }}
+                  />
+                  <button type="button" className="btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={applyPackageCount}>
+                    Uygula
+                  </button>
+                </div>
+                <ShipmentPackageEditor
+                  state={editorState}
+                  setState={setEditorState}
+                  onManualMove={() => {
+                    hasCustomizedRef.current = true;
+                  }}
+                />
+              </>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={
+                  loading ||
+                  (canSplit &&
+                    (editorState.unassigned.length > 0 ||
+                      packageCountInput.trim() !== String(editorState.packages.length)))
+                }
+                onClick={ship}
+              >
+                {loading ? "Paketleniyor..." : "Evet, Paketle"}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={loading}
+                onClick={() => {
+                  setStep("idle");
+                  setError(null);
+                }}
+              >
+                Vazgeç
+              </button>
+            </div>
+            {error && <div className="hint" style={{ color: "var(--danger)" }}>{error}</div>}
+          </div>
+        )}
       </div>
-      {error && <div className="hint" style={{ color: "var(--danger)" }}>{error}</div>}
-    </div>
-  );
+      </div>
+    );
+  }
+
+  return renderModal();
 }

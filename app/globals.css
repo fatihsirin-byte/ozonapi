@@ -310,6 +310,119 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* "Topla" (paketle) butonu — diğer ikincil (çerçeveli, şeffaf) butonlarla karışıp seçilmiyordu,
+   kendi rengiyle ayırt edilsin diye (2026-09-16, kullanıcı bulgusu: "topla butonu rengini
+   değiştir anlaşılmıyor"). */
+.btn-ship {
+  background: #d98a1f;
+  border-color: #d98a1f;
+  color: #1a1206;
+}
+.btn-ship:hover {
+  background: #eb9c2c;
+  border-color: #eb9c2c;
+}
+
+/* Sevkiyat paket editörü modalı — sayfanın sağına dar bir panel olarak açılmak yerine ortalanmış,
+   geniş, rahat okunur bir pencere (2026-09-16, kullanıcı bulgusu: "sağa açman hoşuma gitmedi
+   ortaya büyük rahat anlaşılık bi modal olarak aç"). .modal-overlay/.modal-card zaten var, sadece
+   daha geniş bir varyant ekleniyor. */
+.modal-card-wide {
+  max-width: 680px;
+}
+
+/* Paketlenmeyenler / Paket N kutuları. */
+.ship-zone {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.ship-zone.drag-over {
+  border-color: var(--accent);
+  border-style: solid;
+  background: rgba(79, 140, 255, 0.08);
+}
+.ship-zone-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ship-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Her fiziksel ürün adedi ayrı bir "kart" olarak gösteriliyor (2026-09-16, kullanıcı talebi:
+   "bunu 2 ayrı ürün gibi göstersin") — sürüklerken yarı saydamlaşıp küçülerek görsel geri bildirim
+   veriyor (kullanıcı bulgusu: "taşıma esnasında sürükleyip bırakırken animasyon koy"). */
+.ship-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 108px;
+  background: #0f1216;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  cursor: grab;
+  text-align: center;
+  transition: opacity 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+}
+.ship-card:active {
+  cursor: grabbing;
+}
+.ship-card.dragging {
+  opacity: 0.35;
+  transform: scale(0.94);
+}
+.ship-card img,
+.ship-card-placeholder {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.ship-card-placeholder {
+  background: var(--border);
+}
+/* Bilerek KISALTILMIYOR — sadece sonu/varyantı farklı iki ürün adı aynı göründüğünde (ör. aynı
+   ürünün farklı gramajları) dokunmatik ekranda "title" ipucu çalışmadığından yanlış pakete atama
+   riski olurdu (2026-09-16 code review'da tespit edildi); kart bunun yerine tam ada göre uzuyor. */
+.ship-card-name {
+  font-size: 11px;
+  line-height: 1.3;
+  max-width: 100%;
+  /* Ad boşluksuz/kısa çizgisiz uzun bir kod ise (ör. ürün adı yoksa offerId'ye düşülüyor) kartın
+     sabit genişliğini (108px) zorla aşıp komşu karta taşmasın diye kelimenin ortasından da
+     bölünebiliyor — kısaltma (line-clamp) YOK, tam ad hep okunabilir kalıyor (2026-09-16 code
+     review'da tespit edildi). */
+  overflow-wrap: anywhere;
+}
+
+/* Dokunmatik ekranlarda sürükleme çalışmadığı için her kartın altındaki "Taşı..." menüsü —
+   önceden tarayıcı varsayılan (çirkin, temaya uymayan) stiliyle görünüyordu (2026-09-16, kullanıcı
+   bulgusu: "dropdown var ya taşı falan ona bi stil var css yok şuan"). */
+.select-move {
+  background: #0b0d10;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 3px 4px;
+  font-size: 11px;
+  width: 100%;
+  cursor: pointer;
+}
+.select-move:hover,
+.select-move:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
 /* İki seçenekli (ör. Günlük/Haftalık) tek parça geçiş anahtarı — ayrı ayrı .btn-secondary yerine
    (2026-09-13, kullanıcı talebi: "2 buton gibi değil toggle gibi yönet"). */
 .segmented-toggle {

@@ -32,10 +32,15 @@ async function runSync() {
   } catch (error) {
     console.error(`[sync-orders-cron] ${new Date().toISOString()} — stok backfill hatası:`, error);
   }
+}
 
-  // ASE gümrük beyanı/iptal/ölçüm durumu — SADECE OKUMA yapan bir sorgu, ASE'ye hiçbir gerçek
-  // bildirim göndermez (bkz. statusPolling.ts), o yüzden sendOrderToAse'in aksine (bkz. o
-  // dosyadaki "SADECE ELLE" notu) burada otomatik/periyodik çalışması güvenlidir.
+// ASE gümrük beyanı/iptal/ölçüm durumu — SADECE OKUMA yapan bir sorgu, ASE'ye hiçbir gerçek
+// bildirim göndermez (bkz. statusPolling.ts), o yüzden sendOrderToAse'in aksine (bkz. o
+// dosyadaki "SADECE ELLE" notu) burada otomatik/periyodik çalışması güvenlidir. BİLEREK yukarıdaki
+// 15 dakikalık runSync'in İÇİNDE değil, AYRI bir 3 saatlik zamanlamada — kullanıcı talebi
+// (2026-09-16): "3 saatte 1 çalıştırabilirsin" (beyanname/iptal durumu Ozon sipariş senkronu kadar
+// sık değişmiyor, 15 dakikada bir sorgulamaya gerek yok).
+async function runAsePoll() {
   try {
     await pollAseShipmentStatuses();
   } catch (error) {
@@ -44,5 +49,7 @@ async function runSync() {
 }
 
 cron.schedule("*/15 * * * *", runSync);
-console.log("[sync-orders-cron] başlatıldı, her 15 dakikada bir çalışacak");
+cron.schedule("0 */3 * * *", runAsePoll);
+console.log("[sync-orders-cron] başlatıldı — sipariş/finans senkronu 15 dakikada bir, ASE durum kontrolü 3 saatte bir çalışacak");
 runSync();
+runAsePoll();

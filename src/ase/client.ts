@@ -210,3 +210,130 @@ export function checkShipmentsHasMissingDataByCodeList(codes: string[]): Promise
     CodeList: codes.map((code) => ({ code })),
   });
 }
+
+// Aşağıdaki 3 metot — 2026-09-16'da ASE'nin kendi ekibiyle (Devrim Eriş) yapılan görüşme sonrası
+// eklendi: "ase api.pdf" (proje kök dizininde, kullanıcının kendi indirdiği güncel API dökümanı)
+// dosyasındaki "Gümrük Beyanı" ve "İptal ve Ölçüm" bölümlerinden BİREBİR alınan alan adları
+// kullanılıyor.
+//
+// normalizeSendShipmentResponse'taki AYNI riske karşı (doküman GetToken'da PascalCase
+// (IsSuccess/Message), SendShipment örneğinde camelCase (isSuccess/message) gösteriyor — gerçek
+// API hangisini kullanırsa kullansın) burada da ortak bir "zarf" (envelope) normalizasyonu
+// kullanılıyor. Normalizasyon OLMADAN yazılan ilk sürüm, gerçek yanıt PascalCase gelirse
+// isSuccess'i hep undefined okuyup TÜM sorguları sessizce "başarısız" sayardı — özellik hiç
+// çalışmadan sessizce hiçbir şey güncellemezdi (2026-09-16 code review'da tespit edildi).
+//
+// AYNI risk "list" içindeki her bir kaydın alan adları için de geçerli — sadece dış zarfı
+// normalize edip liste öğelerini OLDUĞU GİBİ bırakan ilk sürüm, API liste öğelerinde de
+// PascalCase dönerse (ör. "Code" yerine "code") o kaydı sessizce "eşleşmeyen"/"henüz hazır değil"
+// gibi gösterirdi — en tehlikelisi iptal tespitinde: `item.code` undefined okunursa o sipariş HİÇ
+// iptal olarak işaretlenmezdi (2026-09-16, ikinci code review turunda tespit edildi). Bu yüzden
+// her kayıt da `itemKeys` listesindeki alanlar için camelCase/PascalCase ikisi de denenerek
+// normalize ediliyor.
+function normalizeItemFields<T extends Record<string, unknown>>(item: unknown, itemKeys: (keyof T & string)[]): T {
+  const raw = (item ?? {}) as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of itemKeys) {
+    const pascalKey = key.length > 0 ? key[0]!.toUpperCase() + key.slice(1) : key;
+    out[key] = raw[key] ?? raw[pascalKey];
+  }
+  return out as T;
+}
+
+function normalizeAseListEnvelope<T extends Record<string, unknown>>(
+  data: unknown,
+  itemKeys: (keyof T & string)[],
+): { isSuccess: boolean; message: string | null; code: string; list: T[] } {
+  const raw = (data ?? {}) as Record<string, unknown>;
+  const isSuccess = raw.isSuccess ?? raw.IsSuccess;
+  const message = raw.message ?? raw.Message;
+  const code = raw.code ?? raw.Code ?? raw.StatusCode;
+  const list = raw.list ?? raw.List;
+  return {
+    isSuccess: Boolean(isSuccess),
+    message: typeof message === "string" ? message : null,
+    code: code == null ? "" : String(code),
+    list: Array.isArray(list) ? list.map((item) => normalizeItemFields<T>(item, itemKeys)) : [],
+  };
+}
+
+// aseRequest → normalizeAseListEnvelope → başarısızsa fırlat zinciri 3 metotta birebir
+// tekrarlanıyordu — bir düzeltmenin (ör. describeAseCode kullanımı) üçünden sadece ikisine
+// uygulanıp birinin unutulması riskini taşıyordu (2026-09-16, üçüncü code review turunda tespit
+// edildi), o yüzden tek yerden.
+async function callAseListEndpoint<T extends Record<string, unknown>>(
+  path: string,
+  body: unknown,
+  itemKeys: (keyof T & string)[],
+): Promise<T[]> {
+  const raw = await aseRequest<unknown>(path, body);
+  const data = normalizeAseListEnvelope<T>(raw, itemKeys);
+  if (!data.isSuccess) {
+    throw new AseApiError(data.message || describeAseCode(data.code), undefined, raw);
+  }
+  return data.list;
+}
+
+export interface CustomDeclarationDetail {
+  code: string;
+  // Doküman: "Sorgulanan kodun ASE sisteminde var olup olmadığını gösterir." false ise bu kod
+  // ASE'de hiç bulunamamış demektir — customDeclarationCode'un null olması bununla KARIŞTIRILMAMALI
+  // (biri "henüz beyan yok", diğeri "ASE bu siparişi hiç tanımıyor").
+  isAvailableCode: boolean;
+  isShipmentTypeEtgb: boolean;
+  // Doküman: "Beyan işlemi tamamlandı ise burada numarası olacaktır, null ise henüz beyan işlemi
+  // tamamlanmamıştır."
+  customDeclarationCode: string | null;
+  customDeclarationDate: string | null;
+}
+
+// Bir kerede en fazla 50 kod sorgulanabilir (doküman) — çağıran taraf (statusPolling.ts) bunu
+// böler.
+export function getCustomDeclarationDetailsByCodeList(codes: string[]): Promise<CustomDeclarationDetail[]> {
+  return callAseListEndpoint<CustomDeclarationDetail>(
+    "/Shipment/GetCustomDeclarationDetailsByCodeList",
+    { CodeList: codes.map((code) => ({ code })) },
+    ["code", "isAvailableCode", "isShipmentTypeEtgb", "customDeclarationCode", "customDeclarationDate"],
+  );
+}
+
+export interface CancelledShipment {
+  code: string;
+  detail: string | null;
+  // Format: "YYYY-MM-DD HH:mm:ss" — ASE'nin iptal bilgisini KENDİ sisteminde ne zaman kaydettiği,
+  // Ozon'da gerçekte ne zaman iptal edildiği DEĞİL.
+  aseCancelRecordedAt: string;
+}
+
+// Doküman: "BeginDate ve EndDate arasındaki fark en fazla 1 (bir) ay olabilir." Tarihler
+// "YYYY-MM-DD" formatında string olarak veriliyor (Date değil) — çağıran taraf hazırlıyor.
+export function getCancelledShipmentsByDateRange(beginDate: string, endDate: string): Promise<CancelledShipment[]> {
+  return callAseListEndpoint<CancelledShipment>(
+    "/Shipment/GetCancelledShipmentsByDateRange",
+    { BeginDate: beginDate, EndDate: endDate },
+    ["code", "detail", "aseCancelRecordedAt"],
+  );
+}
+
+export interface ShipmentMeasurement {
+  code: string;
+  isAvailableCode: boolean;
+  isCancelled: boolean | null;
+  isMeasurementCompleted: boolean | null;
+  weightKg: number | null;
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+}
+
+// Bir kerede en fazla 50 kod sorgulanabilir (doküman) — çağıran taraf (statusPolling.ts) bunu
+// böler. Doküman ayrıca ölçüm sonuçlarının "kontrol ve onay sürecinden" geçtiğini, bu yüzden
+// görünmesinde kısa gecikmeler olabileceğini belirtiyor — yani weightKg uzun süre null kalması
+// normal, hata değil.
+export function getMeasurementsByCodeList(codes: string[]): Promise<ShipmentMeasurement[]> {
+  return callAseListEndpoint<ShipmentMeasurement>(
+    "/Shipment/GetMeasurementsByCodeList",
+    { CodeList: codes.map((code) => ({ code })) },
+    ["code", "isAvailableCode", "isCancelled", "isMeasurementCompleted", "weightKg", "lengthCm", "widthCm", "heightCm"],
+  );
+}

@@ -557,6 +557,13 @@ th {
   color: var(--danger);
 }
 
+/* Siparişler listesinde ASE'de iptal edilmiş bir sipariş fark edilsin diye satır kırmızıya
+   çalıyor (2026-09-16, kullanıcı talebi — Devrim Eriş/ASE ile görüşme sonrası: "siparişler
+   sayfasında ase iptal diye durum belirtelim ve satırı kırmızı yapalım listede gözüksün"). */
+tr.row-ase-cancelled td {
+  background: rgba(229, 72, 77, 0.08);
+}
+
 .empty-state {
   text-align: center;
   color: var(--muted);

@@ -160,6 +160,23 @@ model Order {
   // gösterme). Yerel doğrulama hataları (ör. hiç HS kodu bulunamadıysa ASE'ye hiç istek atılmadan)
   // için de aynı "34" kodu kullanılıyor — kullanıcı için ikisi de aynı eylemi gerektiriyor.
   aseShipmentErrorCode  String?
+  // ASE'nin gümrük beyanı/iptal/ölçüm durumu — periyodik olarak (bkz. src/ase/statusPolling.ts,
+  // sync-orders-cron içinde çağrılıyor) SADECE aseShipmentSuccess=true olan ve henüz "kesin"
+  // (iptal ya da beyanname çıkmış) bir sonuca ulaşmamış siparişler için sorgulanır. Kullanıcı
+  // talebi (2026-09-16, Devrim Eriş/ASE ile görüşme sonrası): "bir kere iptal olursa ya da bi kere
+  // beyanname çıkarsa bi daha sorgulamaya gerek yok" — bu yüzden aseCancelledAt veya
+  // aseCustomDeclarationCode doluysa artık bir daha sorgulanmıyor (statusPolling.ts'teki sorgu bu
+  // ikisini de null olan siparişlerle sınırlı).
+  aseCustomDeclarationCode String?
+  aseCustomDeclarationDate DateTime?
+  // ASE'nin GetCancelledShipmentsByDateRange'den döndürdüğü "aseCancelRecordedAt" (iptal bilgisinin
+  // ASE'ye ulaştığı zaman) — Ozon'da GERÇEKTEN ne zaman iptal edildiği değil, ASE'nin bunu ne zaman
+  // öğrendiği.
+  aseCancelledAt           DateTime?
+  aseCancelReason          String?
+  // ASE'nin GetMeasurementsByCodeList'ten döndürdüğü gerçek tartılmış ağırlık (kg) — kullanıcı
+  // talebi: "bizim ölçü kg bilgisi ... bunları da ekleyelim".
+  aseMeasuredWeightKg      Float?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

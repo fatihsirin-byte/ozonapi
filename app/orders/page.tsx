@@ -279,7 +279,7 @@ export default async function OrdersPage({
                 const weightWarning = getWeightSplitWarning(o);
                 const totalQuantity = orderTotalQuantity(o.items);
                 return (
-                  <tr key={o.id}>
+                  <tr key={o.id} className={o.aseCancelledAt ? "row-ase-cancelled" : undefined}>
                     <td>
                       {canBulkShip && (
                         <BulkCheckbox postingNumber={o.postingNumber} totalQuantity={totalQuantity} weightWarning={weightWarning} />
@@ -296,6 +296,11 @@ export default async function OrdersPage({
                     </td>
                     <td>
                       <span className="badge pending">{translateOrderStatus(o.status)}</span>
+                      {o.aseCancelledAt && (
+                        <div style={{ marginTop: 4 }}>
+                          <span className="badge failed">ASE İptal</span>
+                        </div>
+                      )}
                     </td>
                     <td>{o.orderDate ? new Date(o.orderDate).toLocaleString("tr-TR") : "-"}</td>
                     <td>

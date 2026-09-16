@@ -15,3 +15,16 @@ export function getIstanbulTodayRangeUtc(): { start: Date; end: Date } {
     end: new Date(startIstanbulMidnightUtc + 24 * 60 * 60 * 1000),
   };
 }
+
+// Bir Date'in TSİ'ye göre takvim gününü "YYYY-MM-DD" olarak döner — dış bir API'ye (ör. ASE)
+// "bugünün tarihi" gibi bir gün sınırı göndermek için. UTC ile hesaplansaydı gece yarısından
+// sonraki ~3 saatlik pencerede bir gün geride kalırdı (2026-09-16 code review'da
+// src/ase/statusPolling.ts'te tespit edildi — bu dosyadaki getIstanbulTodayRangeUtc'nin aynı
+// UTC+3 ofset mantığını paylaşıyor).
+export function toIstanbulDateString(date: Date): string {
+  const shifted = new Date(date.getTime() + ISTANBUL_OFFSET_MS);
+  const y = shifted.getUTCFullYear();
+  const m = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(shifted.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}

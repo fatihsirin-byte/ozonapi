@@ -11,6 +11,14 @@ interface AseShipmentData {
   sentAt: string | null;
   success: boolean | null;
   message: string | null;
+  // ASE'nin kendi gümrük beyanı/iptal/ölçüm durumu (bkz. src/ase/statusPolling.ts) — Ozon/ASE&GBS'nin
+  // oluşturduğu resmi ETGB'den (yukarıdaki "etgb" state'i) FARKLI bir kaynak, ASE'nin doğrudan API
+  // üzerinden bize verdiği kendi durum bilgisi (2026-09-16, Devrim Eriş ile görüşme sonrası).
+  customDeclarationCode: string | null;
+  customDeclarationDate: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  measuredWeightKg: number | null;
 }
 
 // ASE durumu artık sunucu bileşeninden (page.tsx) PROP olarak geliyor, kendi fetch'iyle DEĞİL
@@ -44,6 +52,28 @@ export function EtgbInfo({ postingNumber, aseShipment }: { postingNumber: string
       </div>
     );
 
+  // ASE'nin kendi beyanname/iptal/ölçüm durumu — periyodik olarak arka planda sorgulanıyor (bkz.
+  // src/ase/statusPolling.ts), o yüzden gönderim başarılı olsa bile bir süre boşluk gösterebilir.
+  const aseDeclarationStatus = aseShipment?.cancelledAt ? (
+    <div className="hint" style={{ color: "var(--danger)", fontWeight: 500 }}>
+      ASE&apos;de İPTAL — {new Date(aseShipment.cancelledAt).toLocaleString("tr-TR")}
+      {aseShipment.cancelReason ? ` (${aseShipment.cancelReason})` : ""}
+    </div>
+  ) : aseShipment?.customDeclarationCode ? (
+    <div className="hint">
+      ASE beyanname: {aseShipment.customDeclarationCode}
+      {aseShipment.customDeclarationDate
+        ? ` — ${new Date(aseShipment.customDeclarationDate).toLocaleDateString("tr-TR")}`
+        : ""}
+    </div>
+  ) : aseShipment?.success ? (
+    <div className="hint">ASE beyanname durumu: henüz beyan çıkmadı</div>
+  ) : null;
+  const aseWeightInfo =
+    aseShipment?.measuredWeightKg != null ? (
+      <div className="hint">ASE ölçümü: {aseShipment.measuredWeightKg} kg</div>
+    ) : null;
+
   if (loading) return <div className="hint">ETGB kontrol ediliyor...</div>;
   if (!etgb) {
     return (
@@ -52,6 +82,8 @@ export function EtgbInfo({ postingNumber, aseShipment }: { postingNumber: string
           Henüz ETGB oluşmamış — kargo süreci tamamlanınca Ozon/ASE&GBS tarafından otomatik oluşturulur.
         </div>
         {aseStatus}
+        {aseDeclarationStatus}
+        {aseWeightInfo}
       </div>
     );
   }
@@ -62,6 +94,8 @@ export function EtgbInfo({ postingNumber, aseShipment }: { postingNumber: string
         ETGB {etgb.etgb.number} — {new Date(etgb.etgb.date).toLocaleDateString("tr-TR")}
       </a>
       {aseStatus}
+      {aseDeclarationStatus}
+      {aseWeightInfo}
     </div>
   );
 }

@@ -237,6 +237,11 @@ export default async function OrderDetailPage({
               sentAt: order.aseShipmentSentAt ? order.aseShipmentSentAt.toISOString() : null,
               success: order.aseShipmentSuccess,
               message: order.aseShipmentMessage,
+              customDeclarationCode: order.aseCustomDeclarationCode,
+              customDeclarationDate: order.aseCustomDeclarationDate ? order.aseCustomDeclarationDate.toISOString() : null,
+              cancelledAt: order.aseCancelledAt ? order.aseCancelledAt.toISOString() : null,
+              cancelReason: order.aseCancelReason,
+              measuredWeightKg: order.aseMeasuredWeightKg,
             }}
           />
         </div>

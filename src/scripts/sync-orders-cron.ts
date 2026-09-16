@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { syncFbsOrders } from "../modules/orders/orders.service";
 import { syncTransactionsForDateRange } from "../modules/finance/finance.service";
 import { backfillMissingStock } from "../modules/products/products.service";
+import { pollAseShipmentStatuses } from "../ase/statusPolling";
 
 const DEFAULT_STOCK = 100;
 
@@ -30,6 +31,15 @@ async function runSync() {
     }
   } catch (error) {
     console.error(`[sync-orders-cron] ${new Date().toISOString()} — stok backfill hatası:`, error);
+  }
+
+  // ASE gümrük beyanı/iptal/ölçüm durumu — SADECE OKUMA yapan bir sorgu, ASE'ye hiçbir gerçek
+  // bildirim göndermez (bkz. statusPolling.ts), o yüzden sendOrderToAse'in aksine (bkz. o
+  // dosyadaki "SADECE ELLE" notu) burada otomatik/periyodik çalışması güvenlidir.
+  try {
+    await pollAseShipmentStatuses();
+  } catch (error) {
+    console.error(`[sync-orders-cron] ${new Date().toISOString()} — ASE durum sorgusu hatası:`, error);
   }
 }
 

@@ -230,7 +230,7 @@ export function checkShipmentsHasMissingDataByCodeList(codes: string[]): Promise
 // iptal olarak işaretlenmezdi (2026-09-16, ikinci code review turunda tespit edildi). Bu yüzden
 // her kayıt da `itemKeys` listesindeki alanlar için camelCase/PascalCase ikisi de denenerek
 // normalize ediliyor.
-function normalizeItemFields<T extends Record<string, unknown>>(item: unknown, itemKeys: (keyof T & string)[]): T {
+function normalizeItemFields<T>(item: unknown, itemKeys: (keyof T & string)[]): T {
   const raw = (item ?? {}) as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const key of itemKeys) {
@@ -240,7 +240,7 @@ function normalizeItemFields<T extends Record<string, unknown>>(item: unknown, i
   return out as T;
 }
 
-function normalizeAseListEnvelope<T extends Record<string, unknown>>(
+function normalizeAseListEnvelope<T>(
   data: unknown,
   itemKeys: (keyof T & string)[],
 ): { isSuccess: boolean; message: string | null; code: string; list: T[] } {
@@ -261,7 +261,7 @@ function normalizeAseListEnvelope<T extends Record<string, unknown>>(
 // tekrarlanıyordu — bir düzeltmenin (ör. describeAseCode kullanımı) üçünden sadece ikisine
 // uygulanıp birinin unutulması riskini taşıyordu (2026-09-16, üçüncü code review turunda tespit
 // edildi), o yüzden tek yerden.
-async function callAseListEndpoint<T extends Record<string, unknown>>(
+async function callAseListEndpoint<T>(
   path: string,
   body: unknown,
   itemKeys: (keyof T & string)[],

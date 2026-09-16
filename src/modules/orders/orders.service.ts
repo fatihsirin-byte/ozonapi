@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import { listFbsPostings, getFbsPosting, shipFbsPosting, type OzonFbsPosting } from "../../ozon/orders";
 import { getProductAttributes } from "../../ozon/products";
@@ -370,8 +371,8 @@ function extractShipmentDeadline(rawPayload: unknown): Date | null {
 // statusPolling.ts (periyodik kontrol) ve getAseDeclarationBacklog (bu görünüm) AYNI "hangi
 // siparişler hâlâ bekliyor" tanımını kullanmalı — ayrı ayrı yazılsaydı biri değişip diğeri
 // unutulabilirdi (2026-09-16 code review'da tespit edildi).
-export function aseDeclarationPendingWhere() {
-  return { status: { in: [...ASE_ELIGIBLE_STATUSES] }, aseCancelledAt: null, aseCustomDeclarationCode: null } as const;
+export function aseDeclarationPendingWhere(): Prisma.OrderWhereInput {
+  return { status: { in: [...ASE_ELIGIBLE_STATUSES] }, aseCancelledAt: null, aseCustomDeclarationCode: null };
 }
 
 export interface AseDeclarationBacklogItem {

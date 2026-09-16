@@ -414,6 +414,7 @@ export default async function OrdersPage({
                       {o.status === "awaiting_packaging" && (
                         <div style={{ marginBottom: 6 }}>
                           <ShipOrderButton
+                            key={o.postingNumber}
                             postingNumber={o.postingNumber}
                             totalQuantity={totalQuantity}
                             locked={o.shipClaimedAt != null}

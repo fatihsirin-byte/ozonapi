@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LabelDownloadButton } from "./[postingNumber]/LabelDownloadButton";
 import { WEIGHT_WARNING_TEXT } from "./weightWarningText";
@@ -17,194 +17,188 @@ interface ShipItem {
 // 1'den fazlaysa çıkıyor (kullanıcı notu, bkz. BEKLEYEN-GELISTIRMELER.md #3) — burada da aynı
 // davranış taklit ediliyor.
 //
-// ÜRÜN BAZLI (sürükle-bırak) BÖLME (2026-09-15, kullanıcı talebi: "Ozon'da gönderi bölme ürün
-// bazlı da yapılabiliyor, bizde de olsun"): "Basit" mod eskisi gibi eşit dağıtım yapan
-// multiBoxQty'yi kullanır; "Ürün Bazlı" modda kullanıcı her ürünü (isterse adedinin bir kısmını)
-// istediği kutuya sürükleyip bırakır — tam Ozon'un kendi panelindeki gibi. Backend zaten buna
-// hazırdı (bkz. orders.service.ts shipOrder — Ozon'un packages dizisi her zaman keyfi
-// gruplamayı destekliyordu, sadece UI eşit dağıtımla sınırlıydı).
-// Gruplar DİZİ İNDEKSİYLE değil KARARLI bir id ile tutuluyor (2026-09-15 code review'da tespit
-// edildi): boş bir kutu "Kaldır" ile silinince sonraki kutuların indeksi kayardı, bu da hem
-// "Kutu 1 (orijinal)" etiketinin başka bir kutuya geçmesine hem de aşağıdaki dragAmounts'ın
-// (indekse göre anahtarlanmışsa) yanlış satırla eşleşmesine yol açardı.
-interface ShipGroup {
-  id: number;
-  items: ShipItem[];
+// PAKET EDİTÖRÜ (2026-09-16, kullanıcı talebi — önceki "Basit"/"Ürün Bazlı" iki ayrı modun
+// yerine TEK bir akış): önce "kaç pakete bölünsün?" sorulur. Paket sayısı toplam adede eşitse
+// (her pakette 1 adet) ya da 1 ise otomatik dağıtılıp doğrudan onaya sunulur; farklıysa her
+// FİZİKSEL ADET ayrı bir kart olarak "Paketlenmeyenler" havuzunda gösterilir (bir ürünün yanında
+// "2" yazıp kafa karıştırmak yerine — kullanıcı bulgusu: "bunu 2 ayrı ürün gibi göstersin") ve
+// kullanıcı bunları paketlere sürükler/taşır. Backend zaten buna hazırdı (bkz. orders.service.ts
+// shipOrder — Ozon'un packages dizisi keyfi gruplamayı destekliyordu).
+interface UnitCard {
+  cardId: string;
+  offerId: string;
+  name: string;
+  image: string | null;
 }
 
-function keyOf(groupId: number, offerId: string) {
-  return `${groupId}:${offerId}`;
+type Location = "unassigned" | number;
+
+interface EditorState {
+  unassigned: UnitCard[];
+  packages: { id: number; cards: UnitCard[] }[];
 }
 
-function ShipmentGroupEditor({
-  items,
-  groups,
-  setGroups,
+function expandToUnitCards(items: ShipItem[]): UnitCard[] {
+  const cards: UnitCard[] = [];
+  for (const item of items) {
+    for (let i = 0; i < item.quantity; i++) {
+      cards.push({ cardId: `${item.offerId}#${i}`, offerId: item.offerId, name: item.name, image: item.image });
+    }
+  }
+  return cards;
+}
+
+// applyPackageCount (kutuyu uygulama) ve ship (gönderim öncesi son kontrol) AYNI kuralı iki
+// yerde ayrı ayrı uygulasaydı, biri değişip diğeri unutulabilirdi (2026-09-16 code review'da
+// "iki yerde ayrı doğrulama" olarak tespit edildi) — tek bir yerden.
+function parsePackageCount(input: string, max: number): number | null {
+  const parsed = Number(input);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) return null;
+  return parsed;
+}
+
+function buildEditorState(cards: UnitCard[], packageCount: number): EditorState {
+  const packages = Array.from({ length: packageCount }, (_, i) => ({ id: i, cards: [] as UnitCard[] }));
+  // Tek paket varsa zaten tek bir yere gidebilir, seçim yapmaya gerek yok — hepsi otomatik.
+  if (packageCount === 1) {
+    packages[0].cards = [...cards];
+    return { unassigned: [], packages };
+  }
+  // Paket sayısı toplam FİZİKSEL adede birebir eşitse (her pakette tam 1 adet) sırayla otomatik
+  // dağıtılır — kullanıcı isterse yine de sürükleyip düzeltebilir, kilitli değil.
+  if (packageCount === cards.length) {
+    cards.forEach((c, i) => packages[i].cards.push(c));
+    return { unassigned: [], packages };
+  }
+  // Farklıysa hiçbir varsayım yapılmaz — hepsi "Paketlenmeyenler" havuzunda başlar.
+  return { unassigned: [...cards], packages };
+}
+
+function ShipmentPackageEditor({
+  state,
+  setState,
+  onManualMove,
 }: {
-  items: ShipItem[];
-  groups: ShipGroup[];
-  setGroups: React.Dispatch<React.SetStateAction<ShipGroup[]>>;
+  state: EditorState;
+  setState: React.Dispatch<React.SetStateAction<EditorState>>;
+  // Kullanıcı en az bir kartı elle taşıdığında tetiklenir — paket sayısı sonradan değişirse
+  // otomatik yeniden dağıtımın bu elle yapılan işi ezmemesi için kullanılıyor (bkz. applyPackageCount).
+  onManualMove: () => void;
 }) {
-  const [dragAmounts, setDragAmounts] = useState<Record<string, number>>({});
-  const dragRef = useRef<{ fromGroupId: number; offerId: string; qty: number } | null>(null);
+  const dragRef = useRef<{ cardId: string; from: Location } | null>(null);
 
-  // Yeni kutunun id'si mevcut en büyük id + 1 — ayrı bir sayaç (ref) tutmaya gerek yok, State zaten
-  // tek doğruluk kaynağı.
-  function nextGroupId(current: ShipGroup[]): number {
-    return current.reduce((max, g) => Math.max(max, g.id), -1) + 1;
+  function moveCard(cardId: string, from: Location, to: Location) {
+    if (from === to) return;
+    // Kartın gerçekten var olup olmadığını, setState'in updater'ı içinde değil, önce burada (o
+    // anki `state` prop'una göre) kontrol ediyoruz — updater'ın içine bir yan etki (onManualMove
+    // çağrısı) koymak, React'in state güncellemelerini ne zaman işleyeceğine güvenmek anlamına
+    // gelirdi ki bu garanti değil. Bayat bir sürükleme olayı (ör. kart zaten başka bir yere
+    // taşınmışken gecikmeli bir "drop" tetiklenirse) burada sessizce yok sayılır, hasCustomizedRef
+    // kilidini gereksiz yere devreye sokmaz (2026-09-16 code review round 7).
+    const source = from === "unassigned" ? state.unassigned : state.packages.find((p) => p.id === from)?.cards;
+    if (!source?.some((c) => c.cardId === cardId)) return;
+    setState((prev) => {
+      const prevSource = from === "unassigned" ? prev.unassigned : prev.packages.find((p) => p.id === from)?.cards;
+      const card = prevSource?.find((c) => c.cardId === cardId);
+      if (!card) return prev;
+      const unassigned = from === "unassigned" ? prev.unassigned.filter((c) => c.cardId !== cardId) : prev.unassigned;
+      const packages = prev.packages.map((p) => {
+        let cards = p.cards;
+        if (p.id === from) cards = cards.filter((c) => c.cardId !== cardId);
+        if (p.id === to) cards = [...cards, card];
+        return { ...p, cards };
+      });
+      return { unassigned: to === "unassigned" ? [...unassigned, card] : unassigned, packages };
+    });
+    onManualMove();
   }
 
-  function moveUnits(fromGroupId: number, offerId: string, qty: number, toGroupId: number | "new") {
-    if (qty <= 0) return;
-    setGroups((prev) => {
-      let next = prev.map((g) => ({ id: g.id, items: g.items.map((it) => ({ ...it })) }));
-      const targetId = toGroupId === "new" ? nextGroupId(next) : toGroupId;
-      if (toGroupId === "new") next = [...next, { id: targetId, items: [] }];
-      if (targetId === fromGroupId) return prev;
-      const sourceGroup = next.find((g) => g.id === fromGroupId);
-      const destGroup = next.find((g) => g.id === targetId);
-      if (!sourceGroup || !destGroup) return prev;
-      const srcIdx = sourceGroup.items.findIndex((it) => it.offerId === offerId);
-      if (srcIdx === -1) return prev;
-      const src = sourceGroup.items[srcIdx];
-      const moveQty = Math.min(qty, src.quantity);
-      const snapshot = { offerId: src.offerId, name: src.name, image: src.image };
-      src.quantity -= moveQty;
-      if (src.quantity <= 0) sourceGroup.items.splice(srcIdx, 1);
-
-      const destIdx = destGroup.items.findIndex((it) => it.offerId === offerId);
-      if (destIdx >= 0) destGroup.items[destIdx].quantity += moveQty;
-      else destGroup.items.push({ ...snapshot, quantity: moveQty });
-
-      return next;
-    });
+  function renderCard(card: UnitCard, from: Location) {
+    // Hedef kutu seçimi — HTML5 sürükle-bırak dokunmatik ekranlarda (tablet/telefon) HİÇ
+    // tetiklenmiyor (2026-09-15 code review'da tespit edildi) — bu menü her cihazda çalışan bir
+    // alternatif sağlıyor, sürükleme sadece fare için hızlı bir kısayol.
+    const destinations: Array<{ label: string; value: Location }> = [
+      ...(from !== "unassigned" ? [{ label: "Paketlenmeyenler", value: "unassigned" as Location }] : []),
+      ...state.packages.filter((p) => p.id !== from).map((p) => ({ label: `Paket ${p.id + 1}`, value: p.id as Location })),
+    ];
+    return (
+      <div
+        key={card.cardId}
+        draggable
+        onDragStart={() => (dragRef.current = { cardId: card.cardId, from })}
+        style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", cursor: "grab", flexWrap: "wrap" }}
+      >
+        {card.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={card.image} alt="" width={28} height={28} style={{ objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
+        ) : (
+          <div style={{ width: 28, height: 28, background: "var(--border)", borderRadius: 4, flexShrink: 0 }} />
+        )}
+        <span style={{ fontSize: 12, flex: 1, minWidth: 90 }}>{card.name}</span>
+        <select
+          value=""
+          onChange={(e) => {
+            const value = e.target.value;
+            if (!value) return;
+            moveCard(card.cardId, from, value === "unassigned" ? "unassigned" : Number(value));
+            e.target.value = "";
+          }}
+          style={{ fontSize: 11, maxWidth: 140 }}
+        >
+          <option value="">Taşı...</option>
+          {destinations.map((d) => (
+            <option key={String(d.value)} value={d.value}>
+              {d.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {groups.map((group, gi) => (
-        <div
-          key={group.id}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            const drag = dragRef.current;
-            dragRef.current = null;
-            if (drag) moveUnits(drag.fromGroupId, drag.offerId, drag.qty, group.id);
-          }}
-          style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 8 }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            {/* "orijinal" etiketi id 0'a (İLK oluşturulan kutuya) bağlı, DİZİ İNDEKSİNE (gi) değil
-                — aksi halde id 0'lı kutu boşalıp kaldırılınca yerine geçen kutu yanlışlıkla
-                "orijinal" görünürdü (2026-09-15 code review'da tespit edildi, tam olarak stabil
-                id'lere geçişin önlemeye çalıştığı sorun). Sıra numarası (gi+1) yine de dizideki
-                GÖRÜNÜR konumdan geliyor, sadece etiket metni id'ye bağlı. */}
-            <strong style={{ fontSize: 12 }}>{group.id === 0 ? `Kutu ${gi + 1} (orijinal)` : `Kutu ${gi + 1}`}</strong>
-            {group.items.length === 0 && groups.length > 1 && (
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ fontSize: 11, padding: "2px 6px" }}
-                onClick={() => setGroups((prev) => prev.filter((g) => g.id !== group.id))}
-              >
-                Kaldır
-              </button>
-            )}
-          </div>
-          {group.items.length === 0 ? (
-            <div className="hint" style={{ fontSize: 12 }}>Boş — buraya ürün sürükleyin ya da aşağıdan taşıyın</div>
-          ) : (
-            group.items.map((it) => {
-              const k = keyOf(group.id, it.offerId);
-              const dragAmount = Math.max(1, Math.min(dragAmounts[k] ?? it.quantity, it.quantity));
-              // Hedef kutu seçimi — HTML5 sürükle-bırak dokunmatik ekranlarda (tablet/telefon) HİÇ
-              // tetiklenmiyor (2026-09-15 code review'da tespit edildi: kullanıcı bölmeye çalışsa
-              // bile hiçbir şey olmuyor, sessizce bölünmemiş tek kutu gönderiliyordu) — bu açılır
-              // menü her cihazda çalışan bir alternatif sağlıyor, sürükleme sadece fare için hızlı bir kısayol.
-              const otherGroups = groups.filter((g) => g.id !== group.id);
-              return (
-                <div
-                  key={it.offerId}
-                  draggable
-                  onDragStart={() => (dragRef.current = { fromGroupId: group.id, offerId: it.offerId, qty: dragAmount })}
-                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0", cursor: "grab", flexWrap: "wrap" }}
-                >
-                  {it.image ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={it.image} alt="" width={32} height={32} style={{ objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
-                  ) : (
-                    <div style={{ width: 32, height: 32, background: "var(--border)", borderRadius: 4, flexShrink: 0 }} />
-                  )}
-                  <span style={{ fontSize: 12, flex: 1, minWidth: 100 }}>{it.name}</span>
-                  {it.quantity > 1 && (
-                    // Eskiden 44px genişlikti — tarayıcının yerleşik yukarı/aşağı okları dar
-                    // kutuda rakamı görünmez hale getiriyordu (2026-09-16, kullanıcı bulgusu:
-                    // "inputtaki 2 gözükmüyor"). Ayrıca ne anlama geldiği (taşınacak adet) net
-                    // değildi, kısa bir etiket eklendi.
-                    <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
-                      <span className="hint">Taşınacak:</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={it.quantity}
-                        value={dragAmount}
-                        onChange={(e) =>
-                          setDragAmounts((prev) => ({
-                            ...prev,
-                            [k]: Math.max(1, Math.min(it.quantity, Number(e.target.value) || 1)),
-                          }))
-                        }
-                        title="Kaç adet taşınacak"
-                        style={{ width: 64, fontSize: 13, textAlign: "center" }}
-                      />
-                    </span>
-                  )}
-                  <span className="hint" style={{ fontSize: 11 }}>/{it.quantity} adet</span>
-                  <select
-                    value=""
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (!value) return;
-                      moveUnits(group.id, it.offerId, dragAmount, value === "new" ? "new" : Number(value));
-                      e.target.value = "";
-                    }}
-                    style={{ fontSize: 11, maxWidth: 120 }}
-                  >
-                    <option value="">Taşı...</option>
-                    {otherGroups.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {groups.findIndex((x) => x.id === g.id) === 0 ? "Kutu 1" : `Kutu ${groups.findIndex((x) => x.id === g.id) + 1}`}
-                      </option>
-                    ))}
-                    <option value="new">+ Yeni kutu</option>
-                  </select>
-                </div>
-              );
-            })
-          )}
-        </div>
-      ))}
       <div
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
           const drag = dragRef.current;
           dragRef.current = null;
-          if (drag) moveUnits(drag.fromGroupId, drag.offerId, drag.qty, "new");
+          if (drag) moveCard(drag.cardId, drag.from, "unassigned");
         }}
-        className="hint"
-        style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 10, textAlign: "center", fontSize: 12 }}
+        style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 8 }}
       >
-        + Yeni kutu oluşturmak için ürünü buraya sürükleyin (ya da bir üründeki "Taşı..." menüsünden "+ Yeni kutu" seçin)
+        <strong style={{ fontSize: 12 }}>Paketlenmeyenler</strong>
+        {state.unassigned.length === 0 ? (
+          <div className="hint" style={{ fontSize: 12, marginTop: 4 }}>Hepsi paketlere atandı.</div>
+        ) : (
+          <div style={{ marginTop: 4 }}>{state.unassigned.map((c) => renderCard(c, "unassigned"))}</div>
+        )}
       </div>
-      {items.length > 0 && (
-        <div className="hint" style={{ fontSize: 11 }}>
-          Adet birden fazlaysa, taşımadan önce yanındaki sayıyı değiştirip kaç tanesinin taşınacağını seçebilirsiniz.
-          Fare ile sürükleyebilir ya da "Taşı..." menüsünü kullanabilirsiniz (dokunmatik ekranlarda sürükleme
-          çalışmaz, menüyü kullanın).
+      {state.packages.map((pkg) => (
+        <div
+          key={pkg.id}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            const drag = dragRef.current;
+            dragRef.current = null;
+            if (drag) moveCard(drag.cardId, drag.from, pkg.id);
+          }}
+          style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 8 }}
+        >
+          <strong style={{ fontSize: 12 }}>Paket {pkg.id + 1}</strong>
+          {pkg.cards.length === 0 ? (
+            <div className="hint" style={{ fontSize: 12, marginTop: 4 }}>Boş — buraya ürün sürükleyin</div>
+          ) : (
+            <div style={{ marginTop: 4 }}>{pkg.cards.map((c) => renderCard(c, pkg.id))}</div>
+          )}
         </div>
-      )}
+      ))}
+      <div className="hint" style={{ fontSize: 11 }}>
+        Fare ile sürükleyebilir ya da her ürünün yanındaki "Taşı..." menüsünü kullanabilirsiniz (dokunmatik
+        ekranlarda sürükleme çalışmaz, menüyü kullanın).
+      </div>
     </div>
   );
 }
@@ -227,53 +221,101 @@ export function ShipOrderButton({
   // 2+ adedi de, farklı ürünlerin toplamı da dahil) — tek kutuda paketlenirse toplam ağırlık
   // 500g'ı geçip teslimat sorununa yol açabilir (bkz. orders.service.ts getWeightSplitWarning).
   weightWarning?: boolean;
-  // Ürün bazlı (sürükle-bırak) bölme editörü için — sipariş kalemlerinin görsel/ad bilgisi.
+  // Paket editörü için — sipariş kalemlerinin görsel/ad bilgisi.
   items: ShipItem[];
 }) {
   const router = useRouter();
   const canSplit = totalQuantity > 1;
   const [step, setStep] = useState<"idle" | "confirm">("idle");
-  // Varsayılan "Ürün Bazlı" (2026-09-16, kullanıcı talebi) — Ozon panelindeki gibi sürükle-bırak
-  // yeni sistem asıl beklenen davranış, "Basit" (eşit dağıtım) sadece hızlı bir alternatif olarak
-  // kalıyor, ilk açılışta seçili olmasın diye.
-  const [mode, setMode] = useState<"simple" | "custom">("custom");
-  const [multiBoxQty, setMultiBoxQty] = useState("1");
-  const [groups, setGroups] = useState<ShipGroup[]>(() => [{ id: 0, items: items.map((it) => ({ ...it })) }]);
+  const allCards = useMemo(() => expandToUnitCards(items), [items]);
+  const [packageCountInput, setPackageCountInput] = useState("1");
+  const [editorState, setEditorState] = useState<EditorState>(() => buildEditorState(allCards, 1));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string[] | null>(null);
+  // Kullanıcı elle en az bir kartı taşıyana kadar false — bu süre boyunca paket sayısı her
+  // değiştiğinde sıfırdan otomatik dağıtım (buildEditorState) güvenle kullanılabilir. İlk elle
+  // taşımadan SONRA true'ya döner ve bir daha false olmaz — o andan itibaren paket sayısı
+  // değişse bile mevcut elle yerleştirmelere ASLA otomatik olarak dokunulmaz (2026-09-16 code
+  // review round 6'da "otomatik doldurma, kullanıcının bilerek 'Paketlenmeyenler'e bıraktığı bir
+  // kartı da geri paketleyebiliyor" bulgusuna karşılık).
+  const hasCustomizedRef = useRef(false);
+
+  function applyPackageCount() {
+    const parsed = parsePackageCount(packageCountInput, totalQuantity);
+    if (parsed == null) {
+      setError(
+        `Geçerli bir paket sayısı girin (1 ile ${totalQuantity} arasında bir tam sayı — siparişte toplam ${totalQuantity} adet var).`,
+      );
+      return;
+    }
+    setError(null);
+    // Kutudaki metni uygulanan sayının KANONİK haline eşitliyoruz (ör. "03" yazılmışsa "3"
+    // yapıyoruz) — aksi halde gönderim öncesi kontrol (ship() içinde) yazılan metni
+    // editorState.packages.length ile birebir karşılaştırırken, geçerli ve uygulanmış bir girişi
+    // bile "önce Uygula'ya bas" diyerek reddedebilirdi (2026-09-16 code review round 6'da tespit
+    // edildi).
+    setPackageCountInput(String(parsed));
+    setEditorState((prev) => {
+      const currentCount = prev.packages.length;
+      if (parsed === currentCount) return prev;
+      if (!hasCustomizedRef.current) {
+        // Henüz elle hiçbir kart taşınmadı — sıfırdan otomatik dağıtım (1'e bir, ya da tek
+        // pakete toplama) güvenle kullanılabilir.
+        return buildEditorState(allCards, parsed);
+      }
+      // Kullanıcı en az bir kartı elle taşımış — mevcut yerleşimi KORUYORUZ, sadece paket
+      // sayısını büyütüp küçültüyoruz. Büyütürken sona boş paket(ler) ekleniyor; küçültürken
+      // fazla paketlerin içindeki kartlar silinmiyor, "Paketlenmeyenler"e geri dönüyor. Otomatik
+      // doldurma burada YOK — "Paketlenmeyenler"de duran bir kart kullanıcı bilerek orada
+      // bırakmış olabilir, sessizce bir pakete geri atanmıyor.
+      let packages = prev.packages.map((p) => ({ id: p.id, cards: [...p.cards] }));
+      let unassigned = prev.unassigned;
+      if (parsed > currentCount) {
+        for (let i = currentCount; i < parsed; i++) packages.push({ id: i, cards: [] });
+      } else {
+        const removed = packages.slice(parsed);
+        packages = packages.slice(0, parsed);
+        unassigned = [...unassigned, ...removed.flatMap((p) => p.cards)];
+      }
+      return { unassigned, packages };
+    });
+  }
 
   async function ship() {
     setError(null);
-    let qty: number | undefined;
     let customGroups: CustomShipGroup[][] | undefined;
-    if (canSplit && mode === "simple") {
-      // Sayı olmayan/geçersiz bir kutu sayısı GİRİLDİYSE sessizce bölmesiz devam etmek yerine
-      // durduruyoruz — aksi halde kullanıcı bölme istediğini sanırken sipariş tek kutu olarak
-      // paketlenebilirdi (2026-09-10'da code review'da tespit edildi).
-      const parsed = Number(multiBoxQty);
-      if (!Number.isInteger(parsed) || parsed < 1) {
-        setError("Geçerli bir kutu sayısı girin (1 ya da daha büyük bir tam sayı).");
+    if (canSplit) {
+      // Kullanıcı paket sayısı kutusuna yeni bir değer YAZIP (geçerli ya da geçersiz — ör. boş
+      // bıraktı ya da harf yazdı) "Uygula"ya basmadan doğrudan "Evet, Paketle"ye basarsa, editör
+      // hâlâ ESKİ (uygulanmamış) düzeni gösterirdi — GERÇEK, geri alınamaz bir sevkiyat kullanıcının
+      // az önce yazdığı sayıyla değil, eski düzenle giderdi (2026-09-16 code review'da tespit
+      // edildi). Kutudaki METİN, en son uygulanmış paket sayısıyla BİREBİR eşleşmiyorsa (geçersiz
+      // girişler dahil) durduruyoruz — güvenli taraf hep "önce Uygula'ya bas" demek.
+      if (packageCountInput.trim() !== String(editorState.packages.length)) {
+        setError('Paket sayısını değiştirdiniz ama henüz "Uygula"ya basmadınız — önce uygulayın.');
         return;
       }
-      // Toplam adetten fazla kutuya bölünemez — server da aynı kontrolü yapıyor, burada erken
-      // durdurmak gereksiz bir istek atmayı önlüyor (2026-09-11'de gerçek bir denemede, packages
-      // dizisine dağıtım eklenince bu sınır anlamlı hale geldi).
-      if (parsed > totalQuantity) {
-        setError(`Bu siparişte toplam ${totalQuantity} adet var — en fazla ${totalQuantity} kutuya bölünebilir.`);
+      if (editorState.unassigned.length > 0) {
+        setError('Önce tüm ürünleri bir pakete atayın ("Paketlenmeyenler" boş olmalı).');
         return;
       }
-      qty = parsed;
-    } else if (canSplit && mode === "custom") {
-      const nonEmpty = groups.filter((g) => g.items.length > 0);
-      if (nonEmpty.length === 0) {
-        setError("En az bir kutuda ürün olmalı.");
+      const nonEmptyPackages = editorState.packages.filter((p) => p.cards.length > 0);
+      if (nonEmptyPackages.length === 0) {
+        setError("En az bir pakette ürün olmalı.");
         return;
       }
-      customGroups = nonEmpty.map((g) => g.items.map(({ offerId, quantity }) => ({ offerId, quantity })));
+      // Kart bazlı editörden (her fiziksel adet ayrı kart) backend'in beklediği {offerId,
+      // quantity} biçimine dönüştürülüyor — aynı üründen birden fazla kart aynı pakette
+      // birleştiriliyor.
+      customGroups = nonEmptyPackages.map((p) => {
+        const byOfferId = new Map<string, number>();
+        for (const c of p.cards) byOfferId.set(c.offerId, (byOfferId.get(c.offerId) ?? 0) + 1);
+        return [...byOfferId.entries()].map(([offerId, quantity]) => ({ offerId, quantity }));
+      });
     }
     setLoading(true);
-    const res = await shipPosting(postingNumber, { multiBoxQty: qty, customGroups });
+    const res = await shipPosting(postingNumber, { customGroups });
     setLoading(false);
     if (!res.ok) {
       setError(res.error ?? "Paketlenemedi");
@@ -332,7 +374,7 @@ export function ShipOrderButton({
   }
 
   return (
-    <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: 260, maxWidth: 420 }}>
+    <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: 280, maxWidth: 440 }}>
       <div style={{ fontWeight: 500 }}>Bu siparişi paketle ve Ozon'a bildir</div>
       <div className="hint">Bu işlem Ozon'a GERÇEK bir sevkiyat onayı gönderir, geri alınamaz.</div>
       {weightWarning && (
@@ -340,33 +382,41 @@ export function ShipOrderButton({
       )}
       {canSplit && (
         <>
-          <div className="segmented-toggle" role="group" aria-label="Bölme yöntemi" style={{ alignSelf: "flex-start" }}>
-            <button type="button" className={mode === "simple" ? "active" : ""} onClick={() => setMode("simple")}>
-              Basit
-            </button>
-            <button type="button" className={mode === "custom" ? "active" : ""} onClick={() => setMode("custom")}>
-              Ürün Bazlı
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <label style={{ fontSize: 13 }}>Kaç pakete bölünsün? (en fazla {totalQuantity})</label>
+            <input
+              type="number"
+              min={1}
+              max={totalQuantity}
+              value={packageCountInput}
+              onChange={(e) => setPackageCountInput(e.target.value)}
+              style={{ width: 56 }}
+            />
+            <button type="button" className="btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={applyPackageCount}>
+              Uygula
             </button>
           </div>
-          {mode === "simple" ? (
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
-              Kaç kutuya bölünsün? (1 = bölme, tek kutu, en fazla {totalQuantity})
-              <input
-                type="number"
-                min="1"
-                max={totalQuantity}
-                value={multiBoxQty}
-                onChange={(e) => setMultiBoxQty(e.target.value)}
-                style={{ width: 80 }}
-              />
-            </label>
-          ) : (
-            <ShipmentGroupEditor items={items} groups={groups} setGroups={setGroups} />
-          )}
+          <ShipmentPackageEditor
+            state={editorState}
+            setState={setEditorState}
+            onManualMove={() => {
+              hasCustomizedRef.current = true;
+            }}
+          />
         </>
       )}
       <div style={{ display: "flex", gap: 8 }}>
-        <button type="button" className="btn-primary" disabled={loading} onClick={ship}>
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={
+            loading ||
+            (canSplit &&
+              (editorState.unassigned.length > 0 ||
+                packageCountInput.trim() !== String(editorState.packages.length)))
+          }
+          onClick={ship}
+        >
           {loading ? "Paketleniyor..." : "Evet, Paketle"}
         </button>
         <button

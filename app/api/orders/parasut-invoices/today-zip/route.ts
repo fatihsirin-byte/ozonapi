@@ -6,6 +6,13 @@ import { resolveInvoicePdfForOrder } from "@/parasut/eArchives";
 import { fetchAndCacheInvoicePdf, readCachedInvoicePdf } from "@/parasut/pdfCache";
 import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
 
+// KRİTİK (2026-09-16'da aladdin-invoice route'unda AYNI sınıftan bir hata canlıda tespit edilip
+// buraya da bakıldı): bu GET handler'ı hiçbir dinamik Next.js API'si kullanmadığı için,
+// `force-dynamic` OLMADAN Next.js App Router bu route'u STATİK sayıp yanıtı (dolayısıyla "bugünün"
+// ZIP'ini) BUILD ANINDA bir kere üretip SONSUZA KADAR önbelleğe alabilirdi — bir sonraki deploy'a
+// kadar kesilen yeni faturalar bu ZIP'e hiç girmezdi. `force-dynamic` her istekte yeniden çalıştırır.
+export const dynamic = "force-dynamic";
+
 // "Bugün Faturası Kesilenler" listesindeki tüm faturaları TEK bir ZIP'te indirir — her PDF
 // posting numarasıyla adlandırılır (2026-09-09, kullanıcı talebi). Fatura kesilirken artık
 // otomatik olarak e-Arşiv'e dönüştürülüyor (bkz. src/parasut/orderInvoice.ts) — PDF, düz

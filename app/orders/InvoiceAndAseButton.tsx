@@ -82,6 +82,11 @@ export function InvoiceAndAseButton({
   const [hsProductNames, setHsProductNames] = useState<Record<string, string>>({});
   const [hsSaving, setHsSaving] = useState(false);
   const [hsPopupError, setHsPopupError] = useState<string | null>(null);
+  // ASE tik'ine tıklandığında tarih/saat + sonucu gösteren küçük satırı açar/kapatır (2026-09-16,
+  // kullanıcı talebi: "2 statü görecek miyiz ... tıkladığımızda saat tarih ve başarılı gösterir
+  // başarısızsa sebebini"). Native `title` tooltip'i BİLEREK tek başına kullanılmadı — dokunmatik
+  // ekranlarda çalışmıyor (bu projede birden çok yerde tespit edilmiş bilinen bir sınır).
+  const [aseDetailOpen, setAseDetailOpen] = useState(false);
 
   const statusRef = useRef(pdfStatus);
   const attemptsRef = useRef(0);
@@ -268,16 +273,77 @@ export function InvoiceAndAseButton({
     }
   }
 
-  function renderInvoiceLink() {
+  function invoiceHref(): string | null {
     const cachedPdfHref = `/api/orders/${encodeURIComponent(postingNumber)}/parasut-invoice/pdf-file`;
-    const href = pdfCached ? cachedPdfHref : (pdfUrl ?? panelUrl);
-    if (!href) return null;
+    return pdfCached ? cachedPdfHref : (pdfUrl ?? panelUrl);
+  }
+
+  // "Fatura" tik'i — kullanıcı talebi (2026-09-16): "paraşüte tıkladığımızda fatura önizleme
+  // açar pdf görüntüleme olarak". Hazırsa yeşil ✓ ve tıklanınca PDF'i yeni sekmede açar; onay
+  // beklerken gri "…", hata/2 dakikadır hazır değilse kırmızı ✗ ve yanında "Tekrar Dene".
+  function renderInvoiceTick() {
+    const href = invoiceConfirmed ? invoiceHref() : null;
+    if (href) {
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Faturayı görüntüle${invoiceNo ? ` (${invoiceNo})` : ""}`}
+          style={{ color: "var(--success)", fontWeight: 600, textDecoration: "none" }}
+        >
+          ✓ Fatura
+        </a>
+      );
+    }
+    if (pdfStatus === "error" || pdfStatus === "stalled") {
+      return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{ color: "var(--danger)", fontWeight: 600 }}>✗ Fatura</span>
+          <button className="btn-secondary" style={{ fontSize: 11, padding: "2px 6px" }} onClick={manualRetry}>
+            Tekrar Dene
+          </button>
+        </span>
+      );
+    }
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer">
-        <button className="btn-secondary" type="button">
-          Faturayı Aç {invoiceNo ? `(${invoiceNo})` : ""} ↗
+      <span style={{ color: "var(--muted)", fontWeight: 600 }} title="Fatura onaylanıyor...">
+        … Fatura
+      </span>
+    );
+  }
+
+  // "ASE" tik'i — tıklanınca tarih/saat + sonucu (başarısızsa sebebini) gösteren küçük bir satır
+  // açılıp kapanıyor (kullanıcı talebi). Henüz gönderilmediyse gri boş daire, gönderiliyorsa gri
+  // "…", başarılıysa yeşil ✓, başarısızsa kırmızı ✗ + yanında "Tekrar Dene".
+  function renderAseTick() {
+    if (aseSending) {
+      return <span style={{ color: "var(--muted)", fontWeight: 600 }}>… ASE</span>;
+    }
+    if (aseSuccess == null) {
+      return (
+        <span style={{ color: "var(--muted)", fontWeight: 600 }} title="ASE'ye henüz gönderilmedi">
+          ○ ASE
+        </span>
+      );
+    }
+    const color = aseSuccess ? "var(--success)" : "var(--danger)";
+    const symbol = aseSuccess ? "✓" : "✗";
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <button
+          type="button"
+          onClick={() => setAseDetailOpen((v) => !v)}
+          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color, fontWeight: 600, fontSize: "inherit" }}
+        >
+          {symbol} ASE
         </button>
-      </a>
+        {!aseSuccess && (
+          <button className="btn-secondary" style={{ fontSize: 11, padding: "2px 6px" }} onClick={() => runAseStep()}>
+            Tekrar Dene
+          </button>
+        )}
+      </span>
     );
   }
 
@@ -317,19 +383,7 @@ export function InvoiceAndAseButton({
     </div>
   );
 
-  // 1) Tamamlandı — hem fatura hem ASE gönderimi başarılı.
-  if (aseSuccess === true) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
-        {renderInvoiceLink()}
-        <span className="hint" style={{ color: "var(--success)" }}>
-          ASE&apos;ye gönderildi ✓{aseSentAt ? ` (${new Date(aseSentAt).toLocaleString("tr-TR")})` : ""}
-        </span>
-      </div>
-    );
-  }
-
-  // 2) Henüz fatura kesilmemiş.
+  // Henüz fatura kesilmemiş.
   if (!hasInvoice) {
     return (
       <div>
@@ -345,67 +399,26 @@ export function InvoiceAndAseButton({
     );
   }
 
-  // 3) Fatura kesildi ama Paraşüt'ün e-Arşiv/GİB onayı henüz gelmedi.
-  if (!invoiceConfirmed) {
-    return (
-      <div>
-        {pdfStatus === "checking" && (
-          <button className="btn-secondary" disabled>
-            Fatura onaylanıyor...
-          </button>
-        )}
-        {pdfStatus === "processing" && (
-          <button className="btn-secondary" disabled>
-            İşleniyor... (birkaç dakika sürebilir)
-          </button>
-        )}
-        {pdfStatus === "error" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span className="hint" style={{ color: "var(--danger)" }}>
-              Durum kontrol edilemedi
-            </span>
-            <button className="btn-secondary" onClick={manualRetry}>
-              Tekrar Dene
-            </button>
-          </div>
-        )}
-        {pdfStatus === "stalled" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span className="hint" style={{ color: "var(--danger)" }}>
-              2 dakikadır hazır değil — Paraşüt panelinden kontrol edin
-            </span>
-            <button className="btn-secondary" onClick={manualRetry}>
-              Tekrar Dene
-            </button>
-          </div>
-        )}
-        {panelUrl && (
-          <div style={{ marginTop: 4 }}>
-            <a href={panelUrl} target="_blank" rel="noopener noreferrer" className="hint">
-              Paraşüt panelinde görüntüle ↗
-            </a>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // 4) Fatura onaylandı — ASE adımı sürüyor / bekliyor / başarısız oldu.
+  // Fatura kesildikten sonraki TÜM durumlar (onay bekleniyor / ASE bekliyor-sürüyor-başarılı-
+  // başarısız / tamamlandı) artık AYNI "2 tik" görünümünü paylaşıyor (2026-09-16, kullanıcı
+  // talebi: "2 statü görecek miyiz paraşüt kesildi ase kesildi gibi ... 2 tane tik gösterebilirsin").
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
-      {renderInvoiceLink()}
-      {aseSending && <span className="hint">ASE&apos;ye gönderiliyor...</span>}
-      {!aseSending && aseSuccess === false && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span className="hint" style={{ color: "var(--danger)" }}>
-            {aseMessage ?? "ASE gönderimi başarısız"}
-          </span>
-          <button className="btn-secondary" onClick={() => runAseStep()}>
-            Tekrar Dene
-          </button>
+      <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+        {renderInvoiceTick()}
+        {renderAseTick()}
+      </div>
+      {aseDetailOpen && aseSuccess != null && (
+        <div className="hint">
+          {aseSentAt ? new Date(aseSentAt).toLocaleString("tr-TR") : ""}
+          {aseSuccess ? " — Başarılı" : ` — Başarısız: ${aseMessage ?? "bilinmeyen hata"}`}
         </div>
       )}
-      {!aseSending && aseSuccess == null && <span className="hint">ASE&apos;ye gönderim bekleniyor...</span>}
+      {!invoiceConfirmed && panelUrl && (
+        <a href={panelUrl} target="_blank" rel="noopener noreferrer" className="hint">
+          Paraşüt panelinde görüntüle ↗
+        </a>
+      )}
       {hsPopup}
     </div>
   );

@@ -3,6 +3,11 @@ import { listActions } from "@/ozon/actions";
 import { translateActionTitle } from "@/ai/translate";
 import { OzonApiError } from "@/ozon/client";
 
+// Aynı sınıftan bir hatanın (bkz. app/api/aladdin-invoice/route.ts yorumu) tekrarlanmaması için —
+// bu GET de hiçbir dinamik Next.js API'si kullanmıyor, `force-dynamic` olmadan Ozon'daki kampanya
+// listesi build anında donup kalabilirdi.
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const { result } = await listActions();

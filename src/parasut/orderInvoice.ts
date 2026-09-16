@@ -167,7 +167,10 @@ async function doCreateInvoiceForOzonOrder(postingNumber: string) {
   // için PDF'te iki kere görünüyor. Bu yüzden fatura notu alanına SADECE bu sabit metin yazılıyor
   // (2026-09-10, kullanıcı talebi: gerçek ETGB numarası DEĞİL, "ETGB - Sipariş no" formatında
   // düz metin — ETGB numarasını fatura kesilirken ayrıca çekmeye gerek yok).
-  const invoiceNote = `ETGB - ${postingNumber}`;
+  // İkinci satır (2026-09-16, kullanıcı talebi): satılan ürünlerin bu şirket (Fatih Gezgin)
+  // tarafından ÜRETİLMEDİĞİNİ, alım-satım (Aladdin'den alınıp Ozon müşterisine satılan) olduğunu
+  // açıkça belirtiyor.
+  const invoiceNote = `ETGB - ${postingNumber}\nSatılan ürünler üretilmemiştir, alım-satım olarak işlem yapılmıştır.`;
 
   const issueDate = new Date().toISOString().slice(0, 10);
   // ÖNEMLİ (2026-09-10'da canlıda doğrulandı, showSalesInvoice ile birebir sorgulanarak): burada

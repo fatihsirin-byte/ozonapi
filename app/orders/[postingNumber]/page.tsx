@@ -16,7 +16,7 @@ import { PurchaseInvoiceField } from "./PurchaseInvoiceField";
 import { CopyableField } from "./CopyableField";
 import { transliterateRussian } from "@/utils/transliterate";
 import { LabelDownloadButton } from "./LabelDownloadButton";
-import { ShipOrderButton } from "./ShipOrderButton";
+import { ShipOrderButton } from "../ShipOrderButton";
 import { RealWeightInput } from "./RealWeightInput";
 import { ParasutInvoiceButton } from "../ParasutInvoiceButton";
 import { EtgbInfo } from "./EtgbInfo";

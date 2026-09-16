@@ -21,6 +21,7 @@ import { OrdersSearchBar } from "./OrdersSearchBar";
 import { PageLinkPagination } from "./PageLinkPagination";
 import { ParasutInvoiceButton } from "./ParasutInvoiceButton";
 import { AseShipmentButton } from "./AseShipmentButton";
+import { ShipOrderButton } from "./ShipOrderButton";
 import { InvoicedTodayZipButton } from "./InvoicedTodayZipButton";
 import { translateOrderStatus } from "@/utils/orderStatus";
 import { BulkShipProvider } from "./BulkShipContext";
@@ -405,6 +406,27 @@ export default async function OrdersPage({
                       })()}
                     </td>
                     <td>
+                      {/* "Topla" (tüm işlevi — Basit/Ürün Bazlı bölme dahil) artık listede de var,
+                          sipariş detayına girmeye gerek kalmadan (2026-09-16, kullanıcı talebi:
+                          "modala girmeden de toplama bölme yapabilelim"). ShipOrderButton zaten
+                          hem sipariş sayfasında hem burada kullanılabilsin diye app/orders/
+                          altında paylaşılan bir konumda (bkz. AseShipmentButton'daki aynı desen). */}
+                      {o.status === "awaiting_packaging" && (
+                        <div style={{ marginBottom: 6 }}>
+                          <ShipOrderButton
+                            postingNumber={o.postingNumber}
+                            totalQuantity={totalQuantity}
+                            locked={o.shipClaimedAt != null}
+                            weightWarning={weightWarning}
+                            items={o.items.map((item) => ({
+                              offerId: item.offerId,
+                              quantity: item.quantity,
+                              name: item.product?.name ?? item.offerId,
+                              image: Array.isArray(item.product?.images) ? ((item.product.images as string[])[0] ?? null) : null,
+                            }))}
+                          />
+                        </div>
+                      )}
                       <ParasutInvoiceButton
                         postingNumber={o.postingNumber}
                         initialInvoiceNo={o.parasutInvoiceNo}

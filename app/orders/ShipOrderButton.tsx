@@ -2,9 +2,9 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { LabelDownloadButton } from "./LabelDownloadButton";
-import { WEIGHT_WARNING_TEXT } from "../weightWarningText";
-import { shipPosting, type CustomShipGroup } from "../shipPosting";
+import { LabelDownloadButton } from "./[postingNumber]/LabelDownloadButton";
+import { WEIGHT_WARNING_TEXT } from "./weightWarningText";
+import { shipPosting, type CustomShipGroup } from "./shipPosting";
 
 interface ShipItem {
   offerId: string;
@@ -138,22 +138,29 @@ function ShipmentGroupEditor({
                   )}
                   <span style={{ fontSize: 12, flex: 1, minWidth: 100 }}>{it.name}</span>
                   {it.quantity > 1 && (
-                    <input
-                      type="number"
-                      min={1}
-                      max={it.quantity}
-                      value={dragAmount}
-                      onChange={(e) =>
-                        setDragAmounts((prev) => ({
-                          ...prev,
-                          [k]: Math.max(1, Math.min(it.quantity, Number(e.target.value) || 1)),
-                        }))
-                      }
-                      title="Kaç adet taşınacak"
-                      style={{ width: 44, fontSize: 12 }}
-                    />
+                    // Eskiden 44px genişlikti — tarayıcının yerleşik yukarı/aşağı okları dar
+                    // kutuda rakamı görünmez hale getiriyordu (2026-09-16, kullanıcı bulgusu:
+                    // "inputtaki 2 gözükmüyor"). Ayrıca ne anlama geldiği (taşınacak adet) net
+                    // değildi, kısa bir etiket eklendi.
+                    <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+                      <span className="hint">Taşınacak:</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={it.quantity}
+                        value={dragAmount}
+                        onChange={(e) =>
+                          setDragAmounts((prev) => ({
+                            ...prev,
+                            [k]: Math.max(1, Math.min(it.quantity, Number(e.target.value) || 1)),
+                          }))
+                        }
+                        title="Kaç adet taşınacak"
+                        style={{ width: 64, fontSize: 13, textAlign: "center" }}
+                      />
+                    </span>
                   )}
-                  <span className="hint" style={{ fontSize: 11 }}>/{it.quantity}</span>
+                  <span className="hint" style={{ fontSize: 11 }}>/{it.quantity} adet</span>
                   <select
                     value=""
                     onChange={(e) => {
@@ -226,7 +233,10 @@ export function ShipOrderButton({
   const router = useRouter();
   const canSplit = totalQuantity > 1;
   const [step, setStep] = useState<"idle" | "confirm">("idle");
-  const [mode, setMode] = useState<"simple" | "custom">("simple");
+  // Varsayılan "Ürün Bazlı" (2026-09-16, kullanıcı talebi) — Ozon panelindeki gibi sürükle-bırak
+  // yeni sistem asıl beklenen davranış, "Basit" (eşit dağıtım) sadece hızlı bir alternatif olarak
+  // kalıyor, ilk açılışta seçili olmasın diye.
+  const [mode, setMode] = useState<"simple" | "custom">("custom");
   const [multiBoxQty, setMultiBoxQty] = useState("1");
   const [groups, setGroups] = useState<ShipGroup[]>(() => [{ id: 0, items: items.map((it) => ({ ...it })) }]);
   const [loading, setLoading] = useState(false);

@@ -84,6 +84,23 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
         // döndürebiliyor — yoksa DB'ye yazılan doğru numara sayfa yenilenene kadar görünmezdi
         // (2026-09-10'da code review'da tespit edildi).
         if (data.invoiceNo) setInvoiceNo(data.invoiceNo);
+        // Fatura numarası TAM BU ANDA kesinleşmiş olabilir (Order.parasutInvoiceNoConfirmed
+        // sunucuda true oldu) — ama bu bileşen sadece KENDİ yerel state'ini güncelliyor, aynı
+        // satırdaki AseShipmentButton'a sunucudan PROP olarak gelen invoiceConfirmed bundan
+        // haberdar olmuyor. router.refresh() ÇAĞRILMAZSA, ASE butonu fatura onaylanmış olsa bile
+        // sayfa elle yenilenene kadar "pasif" görünmeye devam ederdi (2026-09-16, kullanıcı
+        // bulgusu: "bazı siparişlerde aseye gönder pasif" — veritabanında zaten onaylıydı, sorun
+        // sadece bu bileşenin sayfayı tazelememesiydi). SADECE geçiş anında (statusRef henüz
+        // "ready" değilken) çağrılıyor, her 10 saniyelik pollingde tekrar tekrar değil.
+        //
+        // BİLİNEN İKİ SINIR (2026-09-16 code review'da tespit edildi, BİLEREK düzeltilmedi):
+        // (1) PDF "ready" olduğu AYNI istekte fatura numarası doğrulaması ayrıca başarısız
+        // olursa (nadir — Paraşüt'e geçici bir istek hatası), interval "ready" olduğu için
+        // durur ve bir daha denemez; kullanıcı elle "Tekrar Dene" yapabilir, güvenli tarafta
+        // kalınır (buton yanlışlıkla AKTİF görünmez, sadece pasif kalmaya devam eder).
+        // (2) Toplu fatura kesiminde aynı anda onaylanan çok sayıda sipariş, listede aynı anda
+        // birkaç router.refresh() tetikleyebilir — performans notu, doğruluğu etkilemiyor.
+        if (statusRef.current !== "ready") router.refresh();
         setPdfStatus("ready");
       } else {
         setPdfStatus("processing");
@@ -211,7 +228,7 @@ export function ParasutInvoiceButton({ postingNumber, initialInvoiceNo, initialP
   return (
     <div>
       <button className="btn-primary" disabled={loading} onClick={handleCreate}>
-        {loading ? "Kesiliyor..." : "Paraşüt'te Fatura Kes"}
+        {loading ? "Kesiliyor..." : "Fatura Kes"}
       </button>
       {error && <div className="hint" style={{ color: "var(--danger)", marginTop: 4 }}>{error}</div>}
     </div>

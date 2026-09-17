@@ -42,6 +42,23 @@ function formatDateLabel(dateLabel: string): string {
   return `${d}.${m}.${y}`;
 }
 
+// Kullanıcı talebi (2026-09-17): "yeni sekme yerine aşağıda açamaz mı" — PDF'i ayrı bir sekmede
+// açmak yerine, aynı sayfada büyük bir <iframe> içinde gömülü gösteriyor. `url` null iken hiçbir
+// şey render ETMİYOR (iframe'i her seferinde yeniden oluşturup gereksiz bir istek atmasın diye).
+function PdfViewer({ url, onClose }: { url: string | null; onClose: () => void }) {
+  if (!url) return null;
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <button className="btn-secondary" type="button" onClick={onClose}>
+          Kapat ✕
+        </button>
+      </div>
+      <iframe src={url} title="Fatura PDF" style={{ width: "100%", height: "85vh", border: "1px solid var(--border)", borderRadius: 8 }} />
+    </div>
+  );
+}
+
 // Aladdin'den Fatih Gezgin'e kesilen günlük İÇ fatura — kullanıcı kararı (2026-09-16): "önce
 // elle/manuel buton". Bu yüzden bilerek bir cron YOK, sadece bu sayfadan elle tetiklenir. Önce
 // ÖNİZLEME gösterilir (hiçbir şey oluşturulmadan) — kullanıcı tutarları/ürünleri gözden geçirip
@@ -52,6 +69,10 @@ export function AladdinInvoicePanel() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [result, setResult] = useState<InvoiceResult | null>(null);
+  // Kullanıcı talebi (2026-09-17): "yeni sekme yerine aşağıda açamaz mı" — PDF'i ayrı bir sekmede
+  // AÇMAK yerine, aynı sayfada bir <iframe> içinde GÖMÜLÜ gösteriyoruz. Tek seferde tek fatura
+  // açık olabilir (aynı anda birden fazla PDF görüntüleme kullanım senaryosu yok, sade tutuluyor).
+  const [openPdfUrl, setOpenPdfUrl] = useState<string | null>(null);
 
   async function loadPreview() {
     setLoading(true);
@@ -131,26 +152,19 @@ export function AladdinInvoicePanel() {
             gerekebilir.
           </div>
         )}
-        <div style={{ display: "flex", gap: 8 }}>
-          {/* Kullanıcı bulgusu (2026-09-17): bu link Paraşüt'te Aladdin şirketi seçili DEĞİLSE
-              "ActiveRecord::RecordNotFound" veriyor — kullanıcının tarayıcı oturumuna bağımlı. */}
-          <button
-            className="btn-secondary"
-            type="button"
-            onClick={() => window.open(result.printUrl, "_blank", "noopener,noreferrer")}
-          >
-            Paraşüt&apos;te Görüntüle ↗
-          </button>
-          {/* Kullanıcı talebi: "kendin pdf görüntüleyici göm" — PDF'i BİZİM sunucumuz çekip
-              gösteriyor, kullanıcının Paraşüt'te hangi şirketi seçtiğinden BAĞIMSIZ. */}
-          <button
-            className="btn-primary"
-            type="button"
-            onClick={() => window.open(`/api/aladdin-invoice/pdf?invoiceId=${encodeURIComponent(result.invoiceId)}`, "_blank", "noopener,noreferrer")}
-          >
-            PDF Görüntüle
-          </button>
-        </div>
+        {/* Kullanıcı talebi (2026-09-17): "artık Paraşüt'le görüntüle butonuna gerek yok" — harici
+            link (kullanıcının tarayıcı oturumuna/Paraşüt'te seçili şirkete bağımlı, "ActiveRecord::
+            RecordNotFound" hatasına yol açabiliyordu) kaldırıldı, sadece BİZİM sunucumuzun çektiği
+            PDF gösteriliyor. "yeni sekme yerine aşağıda açamaz mı" — ayrı sekme yerine aynı sayfada
+            <iframe> içinde gömülü açılıyor. */}
+        <button
+          className="btn-primary"
+          type="button"
+          onClick={() => setOpenPdfUrl(`/api/aladdin-invoice/pdf?invoiceId=${encodeURIComponent(result.invoiceId)}`)}
+        >
+          PDF Görüntüle
+        </button>
+        <PdfViewer url={openPdfUrl} onClose={() => setOpenPdfUrl(null)} />
       </div>
     );
   }
@@ -193,32 +207,35 @@ export function AladdinInvoicePanel() {
             kesme isteğinin tek seferlik ekran cevabında vardı, sayfa yenilenince kayboluyordu. */}
         {preview && preview.existingInvoices.length > 0 && (
           <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8, alignItems: "center" }}>
-            {preview.existingInvoices.map((inv) => (
-              <div key={inv.printUrl} style={{ display: "flex", gap: 8 }}>
+            {preview.existingInvoices.map((inv) =>
+              // invoiceId VARSA sadece PDF butonu yeterli (kullanıcı talebi: "artık Paraşüt'le
+              // görüntüle butonuna gerek yok"). invoiceId YOKSA (bu özellikten ÖNCE kesilmiş eski
+              // faturalar) PDF gösterilemez — o durumda harici Paraşüt linki FALLBACK olarak
+              // kalıyor, aksi halde o eski fatura listede hiç görünmez hale gelirdi (2026-09-17
+              // code review'da tespit edildi: "az önce kesilen fatura kaybolmuş gibi görünür").
+              inv.invoiceId ? (
                 <button
+                  key={inv.printUrl}
+                  className="btn-primary"
+                  type="button"
+                  onClick={() => setOpenPdfUrl(`/api/aladdin-invoice/pdf?invoiceId=${encodeURIComponent(inv.invoiceId as string)}`)}
+                >
+                  {inv.invoiceNo ? `${inv.invoiceNo} — PDF Görüntüle` : "PDF Görüntüle"}
+                </button>
+              ) : (
+                <button
+                  key={inv.printUrl}
                   className="btn-secondary"
                   type="button"
                   onClick={() => window.open(inv.printUrl, "_blank", "noopener,noreferrer")}
                 >
                   {inv.invoiceNo ? `${inv.invoiceNo} — Paraşüt'te Görüntüle` : "Paraşüt'te Görüntüle"} ↗
                 </button>
-                {/* Kullanıcı talebi: "kendin pdf görüntüleyici göm" — Paraşüt'te hangi şirket seçili
-                    olursa olsun çalışır, çünkü PDF'i sunucumuz kendi kimlik bilgileriyle çekiyor.
-                    invoiceId NULL olabilir (bu özellikten ÖNCE kesilmiş eski faturalar) — o
-                    durumda PDF butonu YOK, sadece harici Paraşüt linki gösteriliyor. */}
-                {inv.invoiceId && (
-                  <button
-                    className="btn-primary"
-                    type="button"
-                    onClick={() => window.open(`/api/aladdin-invoice/pdf?invoiceId=${encodeURIComponent(inv.invoiceId as string)}`, "_blank", "noopener,noreferrer")}
-                  >
-                    PDF Görüntüle
-                  </button>
-                )}
-              </div>
-            ))}
+              ),
+            )}
           </div>
         )}
+        <PdfViewer url={openPdfUrl} onClose={() => setOpenPdfUrl(null)} />
       </div>
     );
   }

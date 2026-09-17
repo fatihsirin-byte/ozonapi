@@ -133,6 +133,13 @@ model Order {
   // ekranına) başvurmak zorunda kalıyordu. Artık purchaseInvoiceNumber ile AYNI anda kalıcı olarak
   // yazılıyor, panel "işlenecek bir şey kalmadı" derken bu linki de gösterebiliyor.
   aladdinInvoicePrintUrl String?
+  // Kullanıcı bulgusu (2026-09-17): "faturayı görüntüle" linki, tarayıcıda Paraşüt'e Aladdin
+  // ŞİRKETİ değil başka bir şirket (ör. Fatih Gezgin) seçiliyken açılırsa "ActiveRecord::
+  // RecordNotFound" veriyor — kullanıcının tarayıcı oturumuna/aktif şirket seçimine bağımlı bu
+  // zayıf nokta yerine, Paraşüt'ün GERÇEK (raw, sayısal) satış faturası kimliğini burada kalıcı
+  // olarak saklıyoruz ki sunucumuz kendi API kimlik bilgileriyle (kullanıcının tarayıcı oturumundan
+  // TAMAMEN BAĞIMSIZ) PDF'i doğrudan çekip gösterebilsin (bkz. app/api/aladdin-invoice/pdf).
+  aladdinInvoiceId String?
   // Paraşüt'te bu sipariş için kesilmiş satış faturası — dolu ise buton tekrar fatura kesmez,
   // var olanı gösterir (2026-09-09, kullanıcı talebi: sipariş başına manuel, tek tek fatura).
   parasutInvoiceId String?
@@ -220,6 +227,10 @@ model Order {
   // local veriden hesaplanıyor (bkz. orders.service.ts getTopSellingProducts/getProductSalesHistory)
   // — ikisi de orderDate aralığına göre filtreliyor (2026-09-11'de code review'da tespit edildi).
   @@index([orderDate])
+  // PDF görüntüleme uç noktası (app/api/aladdin-invoice/pdf/route.ts) her istekte bu alana göre bir
+  // yetki kontrolü yapıyor — index olmadan tablo büyüdükçe her PDF tıklaması tam tablo taraması
+  // ödüyordu (2026-09-17 code review'da tespit edildi).
+  @@index([aladdinInvoiceId])
 }
 
 model OrderItem {

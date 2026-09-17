@@ -109,7 +109,9 @@ export interface AladdinInvoicePreview {
   // invoiceNo null olabilir — Paraşüt henüz gerçek bir fatura numarası vermediyse (ör. e-Fatura GİB
   // onayı sürüyorsa) "PARASUT_ID:..." iç kimliğini GERÇEK numaraymış gibi göstermek yerine null
   // döndürülüyor; printUrl yine de geçerli ve tıklanabilir kalır.
-  existingInvoices: Array<{ invoiceNo: string | null; printUrl: string }>;
+  // invoiceId, kullanıcının tarayıcı oturumundan BAĞIMSIZ, sunucu tarafında PDF çekebilmek için
+  // (bkz. app/api/aladdin-invoice/pdf/route.ts — kullanıcı talebi: "kendin PDF görüntüleyici göm").
+  existingInvoices: Array<{ invoiceNo: string | null; printUrl: string; invoiceId: string | null }>;
 }
 
 function parseCostUsd(rawCostPrice: string | null | undefined): { costUsd: number; usedFallback: boolean } {
@@ -124,6 +126,7 @@ interface OrderWithItems {
   postingNumber: string;
   purchaseInvoiceNumber: string | null;
   aladdinInvoicePrintUrl: string | null;
+  aladdinInvoiceId: string | null;
   items: Array<{ offerId: string; quantity: number; product: { name: string; costPrice: string | null } | null }>;
 }
 
@@ -215,6 +218,11 @@ export async function buildDailyAladdinInvoicePreview(range?: { start: Date; end
     // ama link YİNE DE geçerli ve kullanışlı (Paraşüt işini bitirince aynı link çalışır hale gelir
     // — bkz. 2026-09-17'de canlıda doğrulandı) — bu yüzden BUTONU gizlemek yerine sadece ekrandaki
     // METNİ genel bir ifadeye düşürüyoruz (kullanıcı talebi: "kesilen faturayı göster").
+    // invoiceId NULL olabilir — bu alan bu düzeltmeden (2026-09-17, "kendin PDF görüntüleyici göm")
+    // ÖNCE kesilmiş faturalarda hiç yazılmamıştı. O eski faturaları listeden TAMAMEN düşürmek
+    // yerine (2026-09-17 code review'da tespit edildi: "kullanıcı az önce kestiği fatura birden
+    // ORTADAN KAYBOLMUŞ gibi görünürdü") sadece PDF butonu gizleniyor, harici Paraşüt linki YİNE DE
+    // gösteriliyor (bkz. AladdinInvoicePanel.tsx).
     existingInvoices: [
       ...new Map(
         allOrdersToday
@@ -224,6 +232,7 @@ export async function buildDailyAladdinInvoicePreview(range?: { start: Date; end
             {
               invoiceNo: o.purchaseInvoiceNumber!.startsWith("PARASUT_ID:") ? null : (o.purchaseInvoiceNumber as string),
               printUrl: o.aladdinInvoicePrintUrl as string,
+              invoiceId: o.aladdinInvoiceId,
             },
           ]),
       ).values(),
@@ -538,7 +547,17 @@ export async function createDailyAladdinInvoice(postingNumbersInput: string[]): 
       // kapatırsa "pending"/"failed" durumu VE faturanın linki tamamen kaybolurdu (2026-09-17
       // kullanıcı talebi: "kesilen faturayı göster" — panel bir daha ekranı açtığında o günün
       // faturasını gösterebilsin diye).
-      data: { purchaseInvoiceNumber: invoiceNo, aladdinEInvoiceStatus: eInvoiceStatus, aladdinEInvoiceError: eInvoiceError, aladdinInvoicePrintUrl: printUrl },
+      data: {
+        purchaseInvoiceNumber: invoiceNo,
+        aladdinEInvoiceStatus: eInvoiceStatus,
+        aladdinEInvoiceError: eInvoiceError,
+        aladdinInvoicePrintUrl: printUrl,
+        // Kullanıcı talebi (2026-09-17): "kendin PDF görüntüleyici göm" — Paraşüt'ün GERÇEK, sayısal
+        // satış faturası kimliği (invoiceId) burada kalıcı olarak saklanıyor ki sunucumuz PDF'i
+        // kullanıcının tarayıcı oturumundan tamamen BAĞIMSIZ, kendi API kimlik bilgileriyle
+        // çekebilsin (bkz. app/api/aladdin-invoice/pdf/route.ts).
+        aladdinInvoiceId: invoiceId,
+      },
     });
     // Hata FIRLATILMASA bile (Prisma updateMany 0 satır eşleşse de başarıyla döner) beklenenden AZ
     // satır güncellenmiş olabilir. En olası sebep bu sipariş(ler)in bu pencerede kullanıcı

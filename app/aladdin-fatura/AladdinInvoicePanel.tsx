@@ -18,7 +18,7 @@ interface Preview {
   fxRate: number;
   dateLabel: string;
   ordersInvoicedTodayCount: number;
-  existingInvoices: Array<{ invoiceNo: string | null; printUrl: string }>;
+  existingInvoices: Array<{ invoiceNo: string | null; printUrl: string; invoiceId: string | null }>;
 }
 
 interface InvoiceResult {
@@ -131,13 +131,26 @@ export function AladdinInvoicePanel() {
             gerekebilir.
           </div>
         )}
-        <button
-          className="btn-secondary"
-          type="button"
-          onClick={() => window.open(result.printUrl, "_blank", "noopener,noreferrer")}
-        >
-          Faturayı Görüntüle ↗
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {/* Kullanıcı bulgusu (2026-09-17): bu link Paraşüt'te Aladdin şirketi seçili DEĞİLSE
+              "ActiveRecord::RecordNotFound" veriyor — kullanıcının tarayıcı oturumuna bağımlı. */}
+          <button
+            className="btn-secondary"
+            type="button"
+            onClick={() => window.open(result.printUrl, "_blank", "noopener,noreferrer")}
+          >
+            Paraşüt&apos;te Görüntüle ↗
+          </button>
+          {/* Kullanıcı talebi: "kendin pdf görüntüleyici göm" — PDF'i BİZİM sunucumuz çekip
+              gösteriyor, kullanıcının Paraşüt'te hangi şirketi seçtiğinden BAĞIMSIZ. */}
+          <button
+            className="btn-primary"
+            type="button"
+            onClick={() => window.open(`/api/aladdin-invoice/pdf?invoiceId=${encodeURIComponent(result.invoiceId)}`, "_blank", "noopener,noreferrer")}
+          >
+            PDF Görüntüle
+          </button>
+        </div>
       </div>
     );
   }
@@ -179,16 +192,30 @@ export function AladdinInvoicePanel() {
         {/* Kullanıcı talebi (2026-09-17): "kesilen faturayı göster" — önceden bu link sadece fatura
             kesme isteğinin tek seferlik ekran cevabında vardı, sayfa yenilenince kayboluyordu. */}
         {preview && preview.existingInvoices.length > 0 && (
-          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8, alignItems: "center" }}>
             {preview.existingInvoices.map((inv) => (
-              <button
-                key={inv.printUrl}
-                className="btn-secondary"
-                type="button"
-                onClick={() => window.open(inv.printUrl, "_blank", "noopener,noreferrer")}
-              >
-                {inv.invoiceNo ? `${inv.invoiceNo} Faturasını Görüntüle` : "Faturayı Görüntüle"} ↗
-              </button>
+              <div key={inv.printUrl} style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="btn-secondary"
+                  type="button"
+                  onClick={() => window.open(inv.printUrl, "_blank", "noopener,noreferrer")}
+                >
+                  {inv.invoiceNo ? `${inv.invoiceNo} — Paraşüt'te Görüntüle` : "Paraşüt'te Görüntüle"} ↗
+                </button>
+                {/* Kullanıcı talebi: "kendin pdf görüntüleyici göm" — Paraşüt'te hangi şirket seçili
+                    olursa olsun çalışır, çünkü PDF'i sunucumuz kendi kimlik bilgileriyle çekiyor.
+                    invoiceId NULL olabilir (bu özellikten ÖNCE kesilmiş eski faturalar) — o
+                    durumda PDF butonu YOK, sadece harici Paraşüt linki gösteriliyor. */}
+                {inv.invoiceId && (
+                  <button
+                    className="btn-primary"
+                    type="button"
+                    onClick={() => window.open(`/api/aladdin-invoice/pdf?invoiceId=${encodeURIComponent(inv.invoiceId as string)}`, "_blank", "noopener,noreferrer")}
+                  >
+                    PDF Görüntüle
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         )}

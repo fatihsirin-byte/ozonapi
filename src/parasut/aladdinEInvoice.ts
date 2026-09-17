@@ -108,6 +108,7 @@ export async function pollEInvoiceJob(jobId: string, { pollIntervalMs = 1500, ti
 }
 
 export interface ActiveEInvoiceInfo {
+  eInvoiceId: string;
   status: "waiting" | "pending" | "approved" | "refused" | string;
   invoiceNumber: string | null;
   printableUrl: string | null;
@@ -135,8 +136,34 @@ export async function findActiveEInvoice(salesInvoiceId: string): Promise<Active
     return null;
   }
   return {
+    eInvoiceId: eDoc.id,
     status: eDoc.attributes?.status ?? "waiting",
     invoiceNumber: eDoc.attributes?.invoice_number || null,
     printableUrl: eDoc.attributes?.printable_url || null,
   };
+}
+
+// Kullanıcı bulgusu (2026-09-17): "Faturayı Görüntüle" linki, tarayıcıda Paraşüt'e Aladdin ŞİRKETİ
+// değil başka bir şirket seçiliyken açılırsa "ActiveRecord::RecordNotFound" veriyor — kullanıcının
+// tarayıcı oturumuna/aktif şirket seçimine TAMAMEN bağımlı bu zayıf halkayı ortadan kaldırmak için,
+// PDF'i kullanıcının tarayıcısı yerine BİZİM SUNUCUMUZ (kendi API kimlik bilgileriyle) çekip
+// gösteriyor (bkz. app/api/aladdin-invoice/pdf/route.ts). Bu, eArchives.ts'teki
+// getEArchivePdfUrl/resolveInvoicePdf ile AYNI desen — PDF'in kendisi değil, S3'teki geçici
+// (presigned) indirme linkini döner; "data" alanı henüz YOKSA (GİB/Paraşüt PDF'i henüz
+// hazırlamadıysa) bu NORMAL bir durumdur, hata değil.
+export async function getEInvoicePdfUrl(eInvoiceId: string): Promise<string | null> {
+  const res = await parasut2Get<{ data?: { attributes?: { url?: string } } }>(`e_invoices/${eInvoiceId}/pdf`);
+  const url = res?.data?.attributes?.url ?? null;
+  // eArchives.ts'teki getEArchivePdfUrl'de AYNI durum için (2026-09-11'de tespit edilen) "hiçbir
+  // yerde loglanmadan sonsuza dek 'İşleniyor' gösterilebilirdi" bulgusuna karşılık — burada da AYNI
+  // izi bırakıyoruz (2026-09-17 code review round 1'de "bu düzeltme sessizce atlanmış" tespitine
+  // karşılık).
+  if (!url) {
+    console.log(
+      `[aladdin-invoice] e_invoice ${eInvoiceId} için henüz PDF url'i yok (data: ${res?.data ? "var" : "yok"}, attributes.url: ${
+        res?.data?.attributes ? "yok/boş" : "attributes de yok"
+      }) — tekrar denenecek.`,
+    );
+  }
+  return url;
 }

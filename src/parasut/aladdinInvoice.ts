@@ -3,7 +3,7 @@ import { env } from "../config/env";
 import { parasut2Get, parasut2Post, parasut2Put } from "./aladdinClient";
 import { buildSalesInvoicePrintUrl } from "./client";
 import { getUsdToTryRate } from "../pricing/fx-rate";
-import { getIstanbulTodayRangeUtc } from "../utils/istanbulTime";
+import { getIstanbulTodayRangeUtc, toIstanbulDateString } from "../utils/istanbulTime";
 import { transliterateRussian } from "../utils/transliterate";
 
 // Aladdin Turkey Dış Ticaret Limited Şirketi'nin (Paraşüt company id 604472) Fatih Gezgin'e
@@ -82,6 +82,10 @@ export interface AladdinInvoicePreview {
   postingNumbers: string[];
   totalTry: number;
   fxRate: number;
+  // Önizlemenin hangi GÜNE ait olduğunu (TSİ, "YYYY-MM-DD") panelin gösterebilmesi için — route.ts
+  // geçici olarak "bugün" dışında bir gün isteyebiliyor (PREVIEW_DAYS_AGO), kullanıcı gerçek,
+  // geri alınamaz bir fatura onaylamadan önce HANGİ günü onayladığını net görsün diye eklendi.
+  dateLabel: string;
 }
 
 function parseCostUsd(rawCostPrice: string | null | undefined): { costUsd: number; usedFallback: boolean } {
@@ -144,11 +148,18 @@ function summarizeOrders(orders: OrderWithItems[], rate: number): { lines: Aladd
 // satırda toplayarak (adet toplanır) özetler — gerçek faturayı kesmeden önce kullanıcıya
 // gösterilecek bir önizleme. Hiçbir şey OLUŞTURMAZ, hiçbir Aladdin/Fatih Gezgin isteği ATMAZ.
 export async function buildDailyAladdinInvoicePreview(range?: { start: Date; end: Date }): Promise<AladdinInvoicePreview> {
-  const orders = await loadOrdersForInvoice({ range: range ?? getIstanbulTodayRangeUtc() });
+  const effectiveRange = range ?? getIstanbulTodayRangeUtc();
+  const orders = await loadOrdersForInvoice({ range: effectiveRange });
   const rate = await getUsdToTryRate();
   if (!rate) throw new AladdinInvoiceError("Güncel USD/TL kuru alınamadı, tekrar deneyin.");
   const { lines, totalTry } = summarizeOrders(orders, rate);
-  return { lines, postingNumbers: orders.map((o) => o.postingNumber), totalTry, fxRate: rate };
+  return {
+    lines,
+    postingNumbers: orders.map((o) => o.postingNumber),
+    totalTry,
+    fxRate: rate,
+    dateLabel: toIstanbulDateString(effectiveRange.start),
+  };
 }
 
 // Paraşüt her fatura satırında bir "Ürün/Hizmet" kaydı istiyor — bkz. orderInvoice.ts

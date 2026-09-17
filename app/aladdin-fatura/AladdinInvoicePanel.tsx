@@ -16,6 +16,7 @@ interface Preview {
   postingNumbers: string[];
   totalTry: number;
   fxRate: number;
+  dateLabel: string;
 }
 
 interface InvoiceResult {
@@ -28,6 +29,14 @@ interface InvoiceResult {
 
 function formatTry(value: number): string {
   return value.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// "YYYY-MM-DD" -> "GG.AA.YYYY" — kullanıcı bu tarihi, GERÇEK bir fatura onaylamadan önce hangi
+// güne ait olduğunu net görebilsin diye her yerde gösteriyoruz (panel geçici olarak "bugün"
+// dışında bir günü gösterebiliyor, bkz. app/api/aladdin-invoice/route.ts PREVIEW_DAYS_AGO).
+function formatDateLabel(dateLabel: string): string {
+  const [y, m, d] = dateLabel.split("-");
+  return `${d}.${m}.${y}`;
 }
 
 // Aladdin'den Fatih Gezgin'e kesilen günlük İÇ fatura — kullanıcı kararı (2026-09-16): "önce
@@ -67,7 +76,7 @@ export function AladdinInvoicePanel() {
     if (!preview) return;
     if (
       !confirm(
-        `Aladdin'den Fatih Gezgin'e ${formatTry(preview.totalTry)} TL tutarında, ${preview.lines.length} kalemlik GERÇEK bir satış faturası kesilecek. Bu işlem geri alınamaz. Onaylıyor musunuz?`,
+        `${formatDateLabel(preview.dateLabel)} tarihli siparişler için Aladdin'den Fatih Gezgin'e ${formatTry(preview.totalTry)} TL tutarında, ${preview.lines.length} kalemlik GERÇEK bir satış faturası kesilecek. Bu işlem geri alınamaz. Onaylıyor musunuz?`,
       )
     ) {
       return;
@@ -118,7 +127,7 @@ export function AladdinInvoicePanel() {
   }
 
   if (loading) {
-    return <div className="hint">Bugünün faturaları taranıyor...</div>;
+    return <div className="hint">Faturalar taranıyor...</div>;
   }
 
   if (error) {
@@ -135,14 +144,16 @@ export function AladdinInvoicePanel() {
   }
 
   if (!preview || preview.lines.length === 0) {
-    return <div className="empty-state">Bugün için henüz faturalanmış (Ozon müşterisine kesilmiş) sipariş yok.</div>;
+    const datePart = preview ? `${formatDateLabel(preview.dateLabel)} tarihinde` : "Bu gün için";
+    return <div className="empty-state">{datePart} henüz faturalanmış (Ozon müşterisine kesilmiş) sipariş yok.</div>;
   }
 
   return (
     <div>
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ fontWeight: 500, marginBottom: 8 }}>
-          Bugün faturalanan {preview.postingNumbers.length} sipariş, {preview.lines.length} farklı ürün
+          {formatDateLabel(preview.dateLabel)} tarihinde faturalanan {preview.postingNumbers.length} sipariş,{" "}
+          {preview.lines.length} farklı ürün
         </div>
         <div className="hint">
           Fiyatlar: ürünün alış fiyatı (COGS) × 1,40 (%40 kâr payı) × güncel USD/TL kuru ({preview.fxRate}). Alış

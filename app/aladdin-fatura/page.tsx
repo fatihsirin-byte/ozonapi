@@ -9,9 +9,9 @@ export default function AladdinFaturaPage() {
         <h1>Aladdin → Fatih Gezgin Günlük Fatura</h1>
       </div>
       <div className="hint" style={{ marginBottom: 16 }}>
-        Bugün Ozon müşterisine faturası kesilen siparişlerin ürünlerini, Aladdin&apos;in Paraşüt
-        hesabından Fatih Gezgin&apos;e GERÇEK bir iç fatura olarak keser. Şu an sadece ELLE
-        tetiklenir — otomatik değildir.
+        Aşağıda gösterilen tarihte Ozon müşterisine faturası kesilen siparişlerin ürünlerini,
+        Aladdin&apos;in Paraşüt hesabından Fatih Gezgin&apos;e GERÇEK bir iç fatura olarak keser.
+        Şu an sadece ELLE tetiklenir — otomatik değildir.
       </div>
       <AladdinInvoicePanel />
     </div>

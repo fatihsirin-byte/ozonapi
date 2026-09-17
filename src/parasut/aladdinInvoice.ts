@@ -2,6 +2,7 @@ import { prisma } from "../db/prisma";
 import { env } from "../config/env";
 import { parasut2Get, parasut2Post, parasut2Put } from "./aladdinClient";
 import { buildSalesInvoicePrintUrl } from "./client";
+import { findEInvoicePreferences, submitEInvoiceJob, pollEInvoiceJob, findActiveEInvoice, EInvoiceJobTimeoutError } from "./aladdinEInvoice";
 import { getUsdToTryRate } from "../pricing/fx-rate";
 import { getIstanbulTodayRangeUtc, toIstanbulDateString } from "../utils/istanbulTime";
 import { transliterateRussian } from "../utils/transliterate";
@@ -14,10 +15,18 @@ import { transliterateRussian } from "../utils/transliterate";
 // kesiyoruz yani."
 //
 // Bu akış, Aladdin'in Paraşüt hesabında Fatih Gezgin'e ZATEN kesilmiş 8 gerçek faturadan
-// (2025-12'den beri, en sonuncusu 2026-08-26) doğrulanan BİREBİR AYNI şekli kullanıyor: TL, %1
-// KDV, is_abroad=false, item_type "invoice", e-Arşiv/e-Fatura adımı YOK ("plain" fatura — sadece
-// sales_invoices oluşturuluyor, createEArchive gibi ayrı bir GİB adımı çağrılmıyor). Bu proje bu
-// örnekleri TAKLİT ediyor, KDV oranını ya da e-belge türünü kendi kararıyla seçmiyor.
+// (2025-12'den beri, en sonuncusu 2026-08-26) doğrulanan şekli TABAN olarak kullanıyor: TL, %1
+// KDV, is_abroad=false, item_type "invoice" — sales_invoice ÖNCE bu 8 örnekle BİREBİR AYNI şekilde
+// oluşturuluyor.
+//
+// GÜNCELLEME (2026-09-17'de canlıda tespit edildi, kullanıcı doğrulaması): Fatih Gezgin'in
+// Paraşüt'teki cari kartı artık bir e-Fatura mükellefi kaydı taşıyor — bu 8 örnek faturanın
+// kesildiği tarihte (en sonuncusu 2026-08-26) BÖYLE DEĞİLDİ. Karşı taraf e-Fatura mükellefiyken
+// düz fatura kesilemediği için (Paraşüt faturayı numarasız bir "taslak"ta bırakıyor, ne
+// tamamlanıyor ne reddediliyor) — sales_invoice oluşturulduktan SONRA AYRICA bir e-Fatura'ya
+// dönüştürülüyor (bkz. aladdinEInvoice.ts, eArchives.ts'teki e-Arşiv adımıyla AYNI desen). Fatih
+// Gezgin ileride e-Fatura mükellefiyetinden çıkarsa (ya da bu YENİ bir kontağa kesiliyorsa) bu adım
+// kendiliğinden atlanır — bkz. findEInvoicePreferences.
 //
 // SADECE ELLE tetiklenir (2026-09-16, kullanıcı kararı: "önce elle/manuel buton" — birkaç gün
 // sonuçlar doğrulanınca otomatik 17:00 cron'a geçilecek).
@@ -215,6 +224,14 @@ export interface AladdinInvoiceResult {
   // Kullanıcı talebi (2026-09-16): "fatura kesince fatura linkli görüntüleme butonu gözükecek
   // mi?" — orderInvoice.ts'teki AYNI desen (printUrl), sadece Aladdin'in company id'siyle.
   printUrl: string;
+  // "approved": Paraşüt/GİB e-Faturayı onayladı, invoiceNo GERÇEK e-Fatura numarası. "pending":
+  // e-Fatura'ya dönüştürme adımı başlatıldı ama GİB onayı henüz gelmedi (Paraşüt panelinden takip
+  // edilmeli) — bu durumda invoiceNo geçici bir yer tutucu olabilir. "failed": kontak e-Fatura
+  // mükellefi ama dönüştürme adımı hata verdi — sales_invoice GERÇEKTEN oluştu (silinemez) ama
+  // e-Fatura'ya dönüşmedi, Paraşüt panelinden elle tamamlanmalı. "not_required": kontak e-Fatura
+  // mükellefi değil, eskisi gibi düz fatura yeterli (bkz. findEInvoicePreferences).
+  eInvoiceStatus: "approved" | "pending" | "failed" | "not_required";
+  eInvoiceError: string | null;
 }
 
 // SADECE bu çağrının kendi claimId'sine ait satırları serbest bırakır — başka bir (eşzamanlı)
@@ -301,6 +318,9 @@ export async function createDailyAladdinInvoice(postingNumbersInput: string[]): 
 
   let invoiceId: string;
   let invoiceNo: string | null;
+  let eInvoiceStatus: AladdinInvoiceResult["eInvoiceStatus"] = "not_required";
+  let eInvoiceError: string | null = null;
+  let eInvoicePrintUrl: string | null = null;
   try {
     // KÜÇÜK GRUPLAR HALİNDE, aralarında kısa bir bekleme ile — bkz. PRODUCT_BATCH_SIZE/
     // PRODUCT_BATCH_DELAY_MS yorumu (round 5): ne TAM paralel (rate limit'e takılır) ne TAM sıralı
@@ -348,12 +368,86 @@ export async function createDailyAladdinInvoice(postingNumbersInput: string[]): 
     });
 
     invoiceId = invoiceRes.data.id;
-    // Doküman/ilk 8 örnekte invoice_no HER ZAMAN oluşturma anında dolu geldi, ama bunu KÖR
-    // güvenle varsaymıyoruz — boş gelirse invoiceId'ye (Paraşüt'teki KALICI, birincil kimlik)
-    // düşüyoruz ki purchaseInvoiceNumber ASLA null'a geri dönmesin (null'a dönmesi, GERÇEKTEN
-    // kesilmiş bu faturayı "hiç kesilmemiş" gibi gösterip siparişlerin YENİDEN faturalanmasına yol
-    // açardı — 2026-09-16 code review round 2'de tespit edildi).
-    invoiceNo = invoiceRes.data.attributes.invoice_no || `PARASUT_ID:${invoiceId}`;
+    const plainInvoiceNo = invoiceRes.data.attributes.invoice_no || null;
+
+    // Fatih Gezgin'in cari kartı e-Fatura mükellefi kaydı taşıyorsa (bkz. dosya başı yorumu,
+    // 2026-09-17), sales_invoice'ı BURADA e-Fatura'ya dönüştürüyoruz — kontak e-Fatura mükellefi
+    // DEĞİLSE (findEInvoicePreferences null döner) bu adım TAMAMEN atlanır, eskisi gibi düz fatura
+    // yeterli sayılır.
+    let realInvoiceNo: string | null = null;
+    // findEInvoicePreferences'ı AYRI bir try/catch'te çağırıyoruz (2026-09-17 code review'da tespit
+    // edildi): burası sadece kontağın e-Fatura mükellefi OLUP OLMADIĞINI okuyor, henüz hiçbir
+    // dönüştürme denemesi YAPILMADI — bu adım geçici bir ağ/Paraşüt hatasıyla başarısız olursa,
+    // aşağıdaki asıl dönüştürme bloğuyla AYNI catch'e düşüp kullanıcıya yanıltıcı şekilde
+    // "e-Fatura'ya dönüştürme adımı başarısız oldu" denmemeli — hiçbir dönüştürme denenmedi,
+    // sadece mükellefiyet durumu ÖĞRENİLEMEDİ.
+    let eInvoicePrefs: Awaited<ReturnType<typeof findEInvoicePreferences>>;
+    try {
+      eInvoicePrefs = await findEInvoicePreferences(FATIH_GEZGIN_CONTACT_ID);
+    } catch (err) {
+      eInvoicePrefs = null;
+      eInvoiceStatus = "pending";
+      eInvoiceError = "Fatih Gezgin'in e-Fatura mükellefiyet durumu okunamadı — Paraşüt panelinden kontrol edin.";
+      console.error(`[aladdin-invoice] e-Fatura mükellefiyet durumu okunamadı (invoiceId ${invoiceId}):`, err);
+    }
+    try {
+      // eInvoicePrefs null ise iki durumdan biri: (a) kontak GERÇEKTEN e-Fatura mükellefi değil
+      // (eInvoiceStatus zaten varsayılan "not_required"te kaldı), (b) yukarıdaki okuma başarısız
+      // oldu (eInvoiceStatus zaten "pending" + net bir hata mesajıyla işaretlendi) — ikisinde de
+      // burada YAPILACAK bir şey yok, dönüştürme denemesi atlanır.
+      if (eInvoicePrefs) {
+        const jobId = await submitEInvoiceJob(invoiceId, eInvoicePrefs.scenario, eInvoicePrefs.to);
+        await pollEInvoiceJob(jobId);
+        const active = await findActiveEInvoice(invoiceId);
+        if (active?.status === "approved" && active.invoiceNumber) {
+          eInvoiceStatus = "approved";
+          realInvoiceNo = active.invoiceNumber;
+          if (active.printableUrl) eInvoicePrintUrl = active.printableUrl;
+        } else if (active?.status === "approved") {
+          // "approved" ama invoice_number BOŞ — normalde birlikte gelmesi beklenen iki alan
+          // tutarsız (2026-09-17 code review'da tespit edildi: aksi halde burada sessizce
+          // PARASUT_ID yer tutucusunu GERÇEK numaraymış gibi "onaylandı" diye gösterirdik). Gerçek
+          // durumu bilmediğimiz için iyimser "approved" yerine temkinli "pending" sayıp
+          // loglayarak elle kontrol edilebilir hale getiriyoruz.
+          eInvoiceStatus = "pending";
+          console.error(
+            `[aladdin-invoice] UYARI: e-Fatura durumu "approved" ama invoice_number boş geldi (invoiceId ${invoiceId}) — Paraşüt panelinden kontrol edin.`,
+          );
+        } else if (active?.status === "refused") {
+          eInvoiceStatus = "failed";
+          eInvoiceError = "Paraşüt/GİB e-Faturayı reddetti — Paraşüt panelinden kontrol edin.";
+        } else {
+          // "waiting"/"pending" — Paraşüt tarafında e-Fatura kaydı oluştu ama GİB onayı henüz
+          // gelmedi (e-Arşiv'deki PDF gecikmesiyle AYNI türden bir bekleme, bkz. eArchives.ts) —
+          // bu BAŞARISIZLIK değil, sadece henüz kesinleşmemiş demek.
+          eInvoiceStatus = "pending";
+        }
+      }
+    } catch (err) {
+      if (err instanceof EInvoiceJobTimeoutError) {
+        // Paraşüt tarafı süresinde YANIT VERMEDİ — bu bir BAŞARISIZLIK değil, iş muhtemelen hâlâ
+        // sürüyor (bkz. aladdinEInvoice.ts'teki pollEInvoiceJob yorumu); "failed" değil "pending"
+        // olarak işaretleyip kullanıcıyı Paraşüt panelinden kontrol etmeye yönlendiriyoruz.
+        eInvoiceStatus = "pending";
+        console.error(`[aladdin-invoice] e-Fatura işi zaman aşımına uğradı (invoiceId ${invoiceId}):`, err);
+      } else {
+        // e-Fatura'ya DÖNÜŞTÜRME başarısız oldu — ama sales_invoice KENDİSİ GERÇEKTEN oluştu
+        // (silinemez), bu yüzden burada işlemi GERİ ALMIYORUZ/claim'i iptal ETMİYORUZ; kullanıcıya
+        // "e-Fatura adımı başarısız" diye bildirip Paraşüt panelinden elle tamamlamasını istiyoruz —
+        // orderInvoice.ts'teki eArchiveFailed ile AYNI felsefe.
+        eInvoiceStatus = "failed";
+        eInvoiceError = err instanceof Error ? err.message : String(err);
+        console.error(`[aladdin-invoice] e-Fatura dönüştürme başarısız (invoiceId ${invoiceId}):`, err);
+      }
+    }
+
+    // Doküman/ilk 8 örnekte (e-Fatura mükellefi OLMAYAN bir kontağa) invoice_no HER ZAMAN oluşturma
+    // anında dolu geldi, ama bunu KÖR güvenle varsaymıyoruz — hiçbiri dolu gelmezse invoiceId'ye
+    // (Paraşüt'teki KALICI, birincil kimlik) düşüyoruz ki purchaseInvoiceNumber ASLA null'a geri
+    // dönmesin (null'a dönmesi, GERÇEKTEN kesilmiş bu faturayı "hiç kesilmemiş" gibi gösterip
+    // siparişlerin YENİDEN faturalanmasına yol açardı — 2026-09-16 code review round 2'de tespit
+    // edildi). e-Fatura onaylanmışsa GERÇEK e-Fatura numarası (realInvoiceNo) her zaman öncelikli.
+    invoiceNo = realInvoiceNo || plainInvoiceNo || `PARASUT_ID:${invoiceId}`;
   } catch (err) {
     // Fatura oluşturma BAŞARISIZ oldu — claim'i geri açıp tekrar denenebilir hale getiriyoruz.
     await releaseClaim(postingNumbers, claimId);
@@ -373,7 +467,11 @@ export async function createDailyAladdinInvoice(postingNumbersInput: string[]): 
   try {
     const finalized = await prisma.order.updateMany({
       where: { postingNumber: { in: postingNumbers }, aladdinInvoiceClaimId: claimId, purchaseInvoiceNumber: null },
-      data: { purchaseInvoiceNumber: invoiceNo },
+      // eInvoiceStatus/eInvoiceError BURADA, kalıcı olarak kaydediliyor — önceden sadece bu
+      // fonksiyonun tek seferlik HTTP yanıtında vardı, sunucu yeniden başlarsa ya da kullanıcı
+      // sayfayı kapatırsa "pending"/"failed" durumundaki GERÇEK bir faturanın takip edilmesi
+      // gerektiği bilgisi tamamen kaybolurdu (2026-09-17 code review'da tespit edildi).
+      data: { purchaseInvoiceNumber: invoiceNo, aladdinEInvoiceStatus: eInvoiceStatus, aladdinEInvoiceError: eInvoiceError },
     });
     // Hata FIRLATILMASA bile (Prisma updateMany 0 satır eşleşse de başarıyla döner) beklenenden AZ
     // satır güncellenmiş olabilir. En olası sebep bu sipariş(ler)in bu pencerede kullanıcı
@@ -401,6 +499,9 @@ export async function createDailyAladdinInvoice(postingNumbersInput: string[]): 
     await releaseClaim(postingNumbers, claimId);
   }
 
-  const printUrl = buildSalesInvoicePrintUrl(env.parasut2CompanyId ?? "", invoiceId);
-  return { invoiceId, invoiceNo, postingNumbers, totalTry, printUrl };
+  // e-Fatura GİB tarafından onaylandıysa Paraşüt'ün kendi verdiği resmi "printable_url"ü tercih
+  // ediyoruz (e-Fatura'nın gerçek görünümü, düz faturanın /print şablonundan FARKLI olabilir) —
+  // henüz onaylanmadıysa ya da e-Fatura gerekmiyorsa eskisi gibi genel /print linkine düşülür.
+  const printUrl = eInvoicePrintUrl ?? buildSalesInvoicePrintUrl(env.parasut2CompanyId ?? "", invoiceId);
+  return { invoiceId, invoiceNo, postingNumbers, totalTry, printUrl, eInvoiceStatus, eInvoiceError };
 }

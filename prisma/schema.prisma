@@ -118,6 +118,15 @@ model Order {
   // CLAIM_STALE_MS) eski bir claim, hâlâ "aladdinInvoiceClaimId" dolu olsa bile artık geçersiz
   // sayılıp yeniden claim edilebiliyor.
   aladdinInvoiceClaimedAt DateTime?
+  // Aladdin→Fatih Gezgin faturasının e-Fatura'ya dönüştürme adımının SONUCU (2026-09-17'de tespit
+  // edilen, Fatih Gezgin'in artık e-Fatura mükellefi olmasından kaynaklanan sorunun düzeltmesi) —
+  // BİLEREK burada, kalıcı olarak kaydediliyor: dönüştürme başarısız/askıda kalırsa (ör. sunucu
+  // yeniden başlarsa, tarayıcı kapanırsa) tek işaret sadece bir HTTP yanıtında kaybolmasın, sonradan
+  // sorgulanabilsin/elle takip edilebilsin diye (2026-09-17 code review'da "sonuç hiçbir yerde
+  // saklanmıyor, tek kanıt bir console.error satırı" bulgusuna karşılık). "approved"/"pending"/
+  // "failed"/"not_required" değerlerinden biri (bkz. aladdinInvoice.ts AladdinInvoiceResult).
+  aladdinEInvoiceStatus String?
+  aladdinEInvoiceError String?
   // Paraşüt'te bu sipariş için kesilmiş satış faturası — dolu ise buton tekrar fatura kesmez,
   // var olanı gösterir (2026-09-09, kullanıcı talebi: sipariş başına manuel, tek tek fatura).
   parasutInvoiceId String?

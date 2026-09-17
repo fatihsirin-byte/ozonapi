@@ -25,6 +25,8 @@ interface InvoiceResult {
   postingNumbers: string[];
   totalTry: number;
   printUrl: string;
+  eInvoiceStatus: "approved" | "pending" | "failed" | "not_required";
+  eInvoiceError: string | null;
 }
 
 function formatTry(value: number): string {
@@ -115,6 +117,19 @@ export function AladdinInvoicePanel() {
           {formatTry(result.totalTry)} TL — {result.postingNumbers.length} sipariş için alış faturası numarası
           kaydedildi.
         </div>
+        {result.eInvoiceStatus === "pending" && (
+          <div className="hint" style={{ color: "var(--warning)", marginBottom: 12 }}>
+            e-Fatura Paraşüt&apos;e gönderildi, GİB onayı bekleniyor — birkaç dakika sonra Paraşüt panelinden
+            kontrol edin.
+          </div>
+        )}
+        {result.eInvoiceStatus === "failed" && (
+          <div className="hint" style={{ color: "var(--danger)", marginBottom: 12 }}>
+            Fatura Paraşüt&apos;te oluştu ama e-Fatura&apos;ya dönüştürme adımı başarısız oldu
+            {result.eInvoiceError ? `: ${result.eInvoiceError}` : "."} Paraşüt panelinden elle tamamlamanız
+            gerekebilir.
+          </div>
+        )}
         <button
           className="btn-secondary"
           type="button"

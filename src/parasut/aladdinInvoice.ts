@@ -96,6 +96,13 @@ export interface AladdinInvoicePreview {
   // kullanıcı gerçek, geri alınamaz bir fatura onaylamadan önce HANGİ günü onayladığını net görsün
   // diye eklendi.
   dateLabel: string;
+  // O gün Ozon müşterisine faturalanmış TOPLAM sipariş sayısı (kaç tanesinin `lines`'a girdiğinden
+  // BAĞIMSIZ) — `lines` sıfır satır dönerse panel bunu "bugün hiç Ozon müşterisine fatura
+  // kesilmemiş" (yanlış olabilir) yerine "bugün faturalanan sipariş var ama işlenecek bir şey
+  // kalmamış" diye, KESİN SEBEBİ İDDİA ETMEDEN doğru gösterebilsin diye (2026-09-17 code review'da
+  // tespit edildi — sebep hem "zaten Aladdin'e faturalandı" hem "elle Alış Fatura No girildi" hem
+  // "sipariş sonradan bölünüp tüm kalemleri başka posting'e taşındı" olabilir, kesin ayırt edilemez).
+  ordersInvoicedTodayCount: number;
 }
 
 function parseCostUsd(rawCostPrice: string | null | undefined): { costUsd: number; usedFallback: boolean } {
@@ -108,6 +115,7 @@ function parseCostUsd(rawCostPrice: string | null | undefined): { costUsd: numbe
 
 interface OrderWithItems {
   postingNumber: string;
+  purchaseInvoiceNumber: string | null;
   items: Array<{ offerId: string; quantity: number; product: { name: string; costPrice: string | null } | null }>;
 }
 
@@ -122,6 +130,11 @@ async function loadOrdersForInvoice(selector: { postingNumbers: string[] } | { r
       include: { items: { include: { product: true } } },
     });
   }
+  // NOT: purchaseInvoiceNumber'a göre FİLTRELEMİYORUZ — çağıran (buildDailyAladdinInvoicePreview)
+  // bunu TEK sorgudan hem "işlenecek siparişler" (purchaseInvoiceNumber: null) hem "o gün
+  // faturalanan TOPLAM sipariş sayısı" (hepsi) için ayırıyor; iki ayrı DB sorgusu yerine (2026-09-17
+  // code review'da "sadece lines boşken kullanılan bir sayı için her seferinde ekstra sorgu"
+  // bulgusuna karşılık).
   return prisma.order.findMany({
     where: { parasutInvoicedAt: { gte: selector.range.start, lt: selector.range.end } },
     include: { items: { include: { product: true } } },
@@ -159,16 +172,36 @@ function summarizeOrders(orders: OrderWithItems[], rate: number): { lines: Aladd
 // gösterilecek bir önizleme. Hiçbir şey OLUŞTURMAZ, hiçbir Aladdin/Fatih Gezgin isteği ATMAZ.
 export async function buildDailyAladdinInvoicePreview(range?: { start: Date; end: Date }): Promise<AladdinInvoicePreview> {
   const effectiveRange = range ?? getIstanbulTodayRangeUtc();
-  const orders = await loadOrdersForInvoice({ range: effectiveRange });
+  const allOrdersToday = await loadOrdersForInvoice({ range: effectiveRange });
+  // Kullanıcı bulgusu (2026-09-17): "faturayı kestim, sayfayı yeniledim, tekrar kesme aktif" —
+  // önceden BURADA purchaseInvoiceNumber'a HİÇ BAKILMIYORDU, yani o gün zaten işlenmiş siparişler
+  // sayfa her yenilendiğinde AYNI şekilde "faturalanacak" olarak görünmeye devam ediyordu. Gerçek
+  // bir çift fatura kesilmiyordu (createDailyAladdinInvoice'daki claim adımı zaten
+  // purchaseInvoiceNumber: null şartını arıyor, bu yüzden POST isteği "zaten faturalanmış"
+  // hatasıyla reddediliyordu) ama önizleme yanıltıcıydı VE o gün SONRADAN faturalanan gerçekten
+  // yeni siparişler de eski/zaten-işlenmiş siparişlerle AYNI isteğe karışınca, hepsi TEK BİR grup
+  // olarak reddedilip yeni siparişler de faturalanamaz hale geliyordu. `claimableOrders` bu yüzden
+  // burada, TEK sorgudan (loadOrdersForInvoice) ayrılıyor — ikinci bir DB sorgusu GEREKMİYOR
+  // (2026-09-17 code review'da "sadece lines boşken kullanılan bir sayı için her seferinde ekstra
+  // sorgu" bulgusuna karşılık).
+  const claimableOrders = allOrdersToday.filter((o) => o.purchaseInvoiceNumber === null);
   const rate = await getUsdToTryRate();
   if (!rate) throw new AladdinInvoiceError("Güncel USD/TL kuru alınamadı, tekrar deneyin.");
-  const { lines, totalTry } = summarizeOrders(orders, rate);
+  const { lines, totalTry } = summarizeOrders(claimableOrders, rate);
   return {
     lines,
-    postingNumbers: orders.map((o) => o.postingNumber),
+    postingNumbers: claimableOrders.map((o) => o.postingNumber),
     totalTry,
     fxRate: rate,
     dateLabel: toIstanbulDateString(effectiveRange.start),
+    // O gün müşteriye faturalanmış TOPLAM sipariş sayısı (hariç tutma sebebinden BAĞIMSIZ — "Alış
+    // Fatura No" alanı Aladdin dışında elle de doldurulabiliyor, bkz. PurchaseInvoiceField.tsx;
+    // ayrıca bir sipariş sonradan bölünüp tüm kalemleri başka bir posting'e taşınmış da olabilir) —
+    // panelin "hiç sipariş yok" ile "bugünün işi zaten bitmiş/işlenecek bir şey kalmamış"
+    // durumlarını KESİN SEBEBİNİ İDDİA ETMEDEN ayırt edebilmesi için (2026-09-17 code review round
+    // 2'de "Aladdin'e faturalandı diye kesin iddia ediyor ama elle de doldurulmuş olabilir" ve
+    // "sıfır kalemli bir sipariş için de yanlış mesaj kalıyor" bulgularına karşılık).
+    ordersInvoicedTodayCount: allOrdersToday.length,
   };
 }
 

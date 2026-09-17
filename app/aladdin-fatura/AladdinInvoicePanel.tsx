@@ -17,6 +17,7 @@ interface Preview {
   totalTry: number;
   fxRate: number;
   dateLabel: string;
+  ordersInvoicedTodayCount: number;
 }
 
 interface InvoiceResult {
@@ -159,7 +160,19 @@ export function AladdinInvoicePanel() {
 
   if (!preview || preview.lines.length === 0) {
     const datePart = preview ? `${formatDateLabel(preview.dateLabel)} tarihinde` : "Bu gün için";
-    return <div className="empty-state">{datePart} henüz faturalanmış (Ozon müşterisine kesilmiş) sipariş yok.</div>;
+    // Sıfır satır İKİ farklı anlama gelebilir — "bu gün hiç Ozon müşterisine fatura kesilmemiş" ile
+    // "bu gün faturalanan siparişler var ama işlenecek bir şey kalmamış" birbirinden çok farklı,
+    // birini diğeriyle karıştırmak kullanıcıyı yanlışlıkla "sistem bugünü hiç görmüyor" sanmaya
+    // iterdi (2026-09-17 code review'da tespit edildi, aynı gün yaşanan gerçek bir karışıklığa
+    // karşılık). İKİNCİ durumun KESİN sebebini iddia etmiyoruz (zaten Aladdin'e faturalanmış
+    // olabilir, "Alış Fatura No" elle girilmiş olabilir, ya da sipariş sonradan bölünüp kalemleri
+    // başka bir posting'e taşınmış olabilir — round 2 code review'da tespit edildi) — sadece
+    // "işlenecek bir şey kalmadığını" söylüyoruz.
+    const message =
+      preview && preview.ordersInvoicedTodayCount > 0
+        ? `${datePart} faturalanan ${preview.ordersInvoicedTodayCount} sipariş var ama hiçbiri için yeni işlenecek bir şey kalmamış.`
+        : `${datePart} henüz faturalanmış (Ozon müşterisine kesilmiş) sipariş yok.`;
+    return <div className="empty-state">{message}</div>;
   }
 
   return (

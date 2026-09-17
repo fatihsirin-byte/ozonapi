@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildDailyAladdinInvoicePreview, createDailyAladdinInvoice, AladdinInvoiceError } from "@/parasut/aladdinInvoice";
 import { ParasutApiError } from "@/parasut/client";
-import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
-
-// GEÇİCİ (2026-09-18): Kullanıcı dünü test amaçlı faturalamak istiyor — bu satır kalktığında
-// önizleme tekrar BUGÜNÜ gösterir. Kullanıcı testi bitirince bu satırı kaldırıp deploy et.
-const PREVIEW_DAYS_AGO = 1;
 
 // KRİTİK (2026-09-16'da canlıda tespit edildi, kullanıcı bulgusu: "bugün kesilenler 73, yeni
 // panel 71 sipariş diyor"): GET handler'ı hiçbir dinamik Next.js API'si (request/cookies/headers)
@@ -33,10 +28,11 @@ function parasutErrorResponse(error: ParasutApiError) {
 // çağrılabilir.
 export async function GET() {
   try {
-    const todayRange = getIstanbulTodayRangeUtc();
-    const offsetMs = PREVIEW_DAYS_AGO * 24 * 60 * 60 * 1000;
-    const range = { start: new Date(todayRange.start.getTime() - offsetMs), end: new Date(todayRange.end.getTime() - offsetMs) };
-    const preview = await buildDailyAladdinInvoicePreview(range);
+    // Kullanıcı birkaç gün dünün verisiyle test etti (2026-09-17: PREVIEW_DAYS_AGO=1 geçici
+    // offset'i) — test tamamlanınca "aynı gün çalışacak şekilde" (kullanıcı talebi, 2026-09-17)
+    // eskisi gibi BUGÜNE dönüldü, argümansız çağrı varsayılan olarak getIstanbulTodayRangeUtc()
+    // kullanıyor (bkz. aladdinInvoice.ts).
+    const preview = await buildDailyAladdinInvoicePreview();
     return NextResponse.json(preview);
   } catch (error) {
     if (error instanceof AladdinInvoiceError) {

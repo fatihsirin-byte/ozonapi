@@ -34,8 +34,7 @@ function formatTry(value: number): string {
 }
 
 // "YYYY-MM-DD" -> "GG.AA.YYYY" — kullanıcı bu tarihi, GERÇEK bir fatura onaylamadan önce hangi
-// güne ait olduğunu net görebilsin diye her yerde gösteriyoruz (panel geçici olarak "bugün"
-// dışında bir günü gösterebiliyor, bkz. app/api/aladdin-invoice/route.ts PREVIEW_DAYS_AGO).
+// güne ait olduğunu net görebilsin diye her yerde gösteriyoruz.
 function formatDateLabel(dateLabel: string): string {
   const [y, m, d] = dateLabel.split("-");
   return `${d}.${m}.${y}`;

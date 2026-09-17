@@ -91,9 +91,10 @@ export interface AladdinInvoicePreview {
   postingNumbers: string[];
   totalTry: number;
   fxRate: number;
-  // Önizlemenin hangi GÜNE ait olduğunu (TSİ, "YYYY-MM-DD") panelin gösterebilmesi için — route.ts
-  // geçici olarak "bugün" dışında bir gün isteyebiliyor (PREVIEW_DAYS_AGO), kullanıcı gerçek,
-  // geri alınamaz bir fatura onaylamadan önce HANGİ günü onayladığını net görsün diye eklendi.
+  // Önizlemenin hangi GÜNE ait olduğunu (TSİ, "YYYY-MM-DD") panelin gösterebilmesi için —
+  // buildDailyAladdinInvoicePreview'a özel bir tarih aralığı da verilebildiğinden (bkz. altta),
+  // kullanıcı gerçek, geri alınamaz bir fatura onaylamadan önce HANGİ günü onayladığını net görsün
+  // diye eklendi.
   dateLabel: string;
 }
 

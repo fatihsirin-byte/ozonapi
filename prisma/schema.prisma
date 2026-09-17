@@ -127,6 +127,12 @@ model Order {
   // "failed"/"not_required" değerlerinden biri (bkz. aladdinInvoice.ts AladdinInvoiceResult).
   aladdinEInvoiceStatus String?
   aladdinEInvoiceError String?
+  // Kullanıcı talebi (2026-09-17): "kesilen faturayı göster" — önceden bu link SADECE fatura kesme
+  // isteğinin tek seferlik HTTP yanıtında vardı, sayfa yenilenince/kapanınca kalıcı olarak
+  // KAYBOLUYORDU; kullanıcı o günün faturasını görmek için bana (ya da Paraşüt'ün kendi arama
+  // ekranına) başvurmak zorunda kalıyordu. Artık purchaseInvoiceNumber ile AYNI anda kalıcı olarak
+  // yazılıyor, panel "işlenecek bir şey kalmadı" derken bu linki de gösterebiliyor.
+  aladdinInvoicePrintUrl String?
   // Paraşüt'te bu sipariş için kesilmiş satış faturası — dolu ise buton tekrar fatura kesmez,
   // var olanı gösterir (2026-09-09, kullanıcı talebi: sipariş başına manuel, tek tek fatura).
   parasutInvoiceId String?

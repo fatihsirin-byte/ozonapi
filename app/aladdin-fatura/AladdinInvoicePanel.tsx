@@ -18,6 +18,7 @@ interface Preview {
   fxRate: number;
   dateLabel: string;
   ordersInvoicedTodayCount: number;
+  existingInvoices: Array<{ invoiceNo: string | null; printUrl: string }>;
 }
 
 interface InvoiceResult {
@@ -172,7 +173,27 @@ export function AladdinInvoicePanel() {
       preview && preview.ordersInvoicedTodayCount > 0
         ? `${datePart} faturalanan ${preview.ordersInvoicedTodayCount} sipariş var ama hiçbiri için yeni işlenecek bir şey kalmamış.`
         : `${datePart} henüz faturalanmış (Ozon müşterisine kesilmiş) sipariş yok.`;
-    return <div className="empty-state">{message}</div>;
+    return (
+      <div className="empty-state">
+        {message}
+        {/* Kullanıcı talebi (2026-09-17): "kesilen faturayı göster" — önceden bu link sadece fatura
+            kesme isteğinin tek seferlik ekran cevabında vardı, sayfa yenilenince kayboluyordu. */}
+        {preview && preview.existingInvoices.length > 0 && (
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
+            {preview.existingInvoices.map((inv) => (
+              <button
+                key={inv.printUrl}
+                className="btn-secondary"
+                type="button"
+                onClick={() => window.open(inv.printUrl, "_blank", "noopener,noreferrer")}
+              >
+                {inv.invoiceNo ? `${inv.invoiceNo} Faturasını Görüntüle` : "Faturayı Görüntüle"} ↗
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (

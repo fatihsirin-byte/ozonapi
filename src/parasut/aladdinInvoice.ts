@@ -103,6 +103,13 @@ export interface AladdinInvoicePreview {
   // tespit edildi — sebep hem "zaten Aladdin'e faturalandı" hem "elle Alış Fatura No girildi" hem
   // "sipariş sonradan bölünüp tüm kalemleri başka posting'e taşındı" olabilir, kesin ayırt edilemez).
   ordersInvoicedTodayCount: number;
+  // Kullanıcı talebi (2026-09-17): "kesilen faturayı göster" — o gün zaten kesilmiş (Aladdin'e
+  // faturalanmış) her BENZERSİZ konsolide faturanın numarası + linki. Bir gün içinde (ör. sabah
+  // bir kısmı, akşam kalanı) birden fazla ayrı fatura kesilmiş olabileceği için dizi.
+  // invoiceNo null olabilir — Paraşüt henüz gerçek bir fatura numarası vermediyse (ör. e-Fatura GİB
+  // onayı sürüyorsa) "PARASUT_ID:..." iç kimliğini GERÇEK numaraymış gibi göstermek yerine null
+  // döndürülüyor; printUrl yine de geçerli ve tıklanabilir kalır.
+  existingInvoices: Array<{ invoiceNo: string | null; printUrl: string }>;
 }
 
 function parseCostUsd(rawCostPrice: string | null | undefined): { costUsd: number; usedFallback: boolean } {
@@ -116,6 +123,7 @@ function parseCostUsd(rawCostPrice: string | null | undefined): { costUsd: numbe
 interface OrderWithItems {
   postingNumber: string;
   purchaseInvoiceNumber: string | null;
+  aladdinInvoicePrintUrl: string | null;
   items: Array<{ offerId: string; quantity: number; product: { name: string; costPrice: string | null } | null }>;
 }
 
@@ -202,6 +210,24 @@ export async function buildDailyAladdinInvoicePreview(range?: { start: Date; end
     // 2'de "Aladdin'e faturalandı diye kesin iddia ediyor ama elle de doldurulmuş olabilir" ve
     // "sıfır kalemli bir sipariş için de yanlış mesaj kalıyor" bulgularına karşılık).
     ordersInvoicedTodayCount: allOrdersToday.length,
+    // "PARASUT_ID:..." yer tutucusu (invoice_no hiç dolmadıysa, bkz. createDailyAladdinInvoice —
+    // ör. e-Fatura GİB onayı henüz gelmemişken) GERÇEK bir fatura numarası gibi GÖSTERİLMEMELİ,
+    // ama link YİNE DE geçerli ve kullanışlı (Paraşüt işini bitirince aynı link çalışır hale gelir
+    // — bkz. 2026-09-17'de canlıda doğrulandı) — bu yüzden BUTONU gizlemek yerine sadece ekrandaki
+    // METNİ genel bir ifadeye düşürüyoruz (kullanıcı talebi: "kesilen faturayı göster").
+    existingInvoices: [
+      ...new Map(
+        allOrdersToday
+          .filter((o) => o.purchaseInvoiceNumber && o.aladdinInvoicePrintUrl)
+          .map((o) => [
+            o.purchaseInvoiceNumber as string,
+            {
+              invoiceNo: o.purchaseInvoiceNumber!.startsWith("PARASUT_ID:") ? null : (o.purchaseInvoiceNumber as string),
+              printUrl: o.aladdinInvoicePrintUrl as string,
+            },
+          ]),
+      ).values(),
+    ],
   };
 }
 
@@ -488,6 +514,12 @@ export async function createDailyAladdinInvoice(postingNumbersInput: string[]): 
     throw err;
   }
 
+  // e-Fatura GİB tarafından onaylandıysa Paraşüt'ün kendi verdiği resmi "printable_url"ü tercih
+  // ediyoruz — henüz onaylanmadıysa ya da e-Fatura gerekmiyorsa genel /print linkine düşülür (bkz.
+  // fonksiyon sonundaki dönüş değeriyle AYNI hesap — burada da lazım çünkü artık DB'ye de
+  // yazılıyor, bkz. aşağıdaki finalize adımı).
+  const printUrl = eInvoicePrintUrl ?? buildSalesInvoicePrintUrl(env.parasut2CompanyId ?? "", invoiceId);
+
   // Kullanıcı talebi: "buradan oluşan fatura numarasını da ilgili siparişlerin alış faturası no'ya
   // ekleyeceğiz" — o gün faturalanan TÜM siparişler AYNI (konsolide) fatura numarasını paylaşıyor.
   // Sadece BİZİM CLAIM'İMİZE ait (aladdinInvoiceClaimId: claimId) VE hâlâ boş olan
@@ -501,11 +533,12 @@ export async function createDailyAladdinInvoice(postingNumbersInput: string[]): 
   try {
     const finalized = await prisma.order.updateMany({
       where: { postingNumber: { in: postingNumbers }, aladdinInvoiceClaimId: claimId, purchaseInvoiceNumber: null },
-      // eInvoiceStatus/eInvoiceError BURADA, kalıcı olarak kaydediliyor — önceden sadece bu
-      // fonksiyonun tek seferlik HTTP yanıtında vardı, sunucu yeniden başlarsa ya da kullanıcı
-      // sayfayı kapatırsa "pending"/"failed" durumundaki GERÇEK bir faturanın takip edilmesi
-      // gerektiği bilgisi tamamen kaybolurdu (2026-09-17 code review'da tespit edildi).
-      data: { purchaseInvoiceNumber: invoiceNo, aladdinEInvoiceStatus: eInvoiceStatus, aladdinEInvoiceError: eInvoiceError },
+      // eInvoiceStatus/eInvoiceError/printUrl BURADA, kalıcı olarak kaydediliyor — önceden sadece
+      // bu fonksiyonun tek seferlik HTTP yanıtında vardı, sunucu yeniden başlarsa/kullanıcı sayfayı
+      // kapatırsa "pending"/"failed" durumu VE faturanın linki tamamen kaybolurdu (2026-09-17
+      // kullanıcı talebi: "kesilen faturayı göster" — panel bir daha ekranı açtığında o günün
+      // faturasını gösterebilsin diye).
+      data: { purchaseInvoiceNumber: invoiceNo, aladdinEInvoiceStatus: eInvoiceStatus, aladdinEInvoiceError: eInvoiceError, aladdinInvoicePrintUrl: printUrl },
     });
     // Hata FIRLATILMASA bile (Prisma updateMany 0 satır eşleşse de başarıyla döner) beklenenden AZ
     // satır güncellenmiş olabilir. En olası sebep bu sipariş(ler)in bu pencerede kullanıcı
@@ -533,9 +566,5 @@ export async function createDailyAladdinInvoice(postingNumbersInput: string[]): 
     await releaseClaim(postingNumbers, claimId);
   }
 
-  // e-Fatura GİB tarafından onaylandıysa Paraşüt'ün kendi verdiği resmi "printable_url"ü tercih
-  // ediyoruz (e-Fatura'nın gerçek görünümü, düz faturanın /print şablonundan FARKLI olabilir) —
-  // henüz onaylanmadıysa ya da e-Fatura gerekmiyorsa eskisi gibi genel /print linkine düşülür.
-  const printUrl = eInvoicePrintUrl ?? buildSalesInvoicePrintUrl(env.parasut2CompanyId ?? "", invoiceId);
   return { invoiceId, invoiceNo, postingNumbers, totalTry, printUrl, eInvoiceStatus, eInvoiceError };
 }

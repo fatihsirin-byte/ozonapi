@@ -234,8 +234,11 @@ model OrderItem {
   // işaretlediğinde true olur — resync'te upsert ile korunur (bkz. syncFbsOrders), üzerine yazılmaz.
   shippingReviewed Boolean @default(false)
 
-  // Aynı sipariş senkronize edilirken kalemler silinip yeniden oluşturuluyor (bkz. syncFbsOrders),
-  // bu yüzden id yerine bu ikili üzerinden idempotentlik garanti edilmiyor ama tekilliği sağlıyor.
+  // Aynı sipariş yeniden senkronize edilirken kalemler bu ikili üzerinden upsert ediliyor (bkz.
+  // upsertPostingIntoDb) — id ÜZERİNDEN değil, bu yüzden idempotentlik id'ye değil bu ikiliye
+  // dayanıyor. Ozon'da artık bulunmayan (ör. sipariş bölününce başka bir posting'e taşınan)
+  // kalemler de AYRICA (2026-09-17'de eklendi) offer_id bu listede yoksa siliniyor — "silinip
+  // yeniden oluşturuluyor" değil, "eskiyeni güncellenir, kalmayan silinir" şeklinde çalışıyor.
   @@unique([orderId, offerId])
 }
 

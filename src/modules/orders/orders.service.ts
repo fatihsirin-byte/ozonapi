@@ -33,6 +33,100 @@ function extractGtipCode(rawValue: string): string {
 // aralığı bazlı) VE shipOrder'ın (paketlemeden hemen sonra, TEK posting için anında) ortak
 // kullandığı çekirdek mantık (2026-09-11, kullanıcı talebi: "paket bölünce yeni siparişi hemen
 // göster, 15 dakika cron'unu bekleme" — daha önce bu mantık sadece syncFbsOrders içinde vardı).
+// KRİTİK (2026-09-17'de canlıda tespit edildi, kullanıcı bulgusu: "bu paket 2'ye ayrılmıştı ama
+// bizde tek gözüküyor"): Ozon bir siparişi paketleme sırasında birden fazla kutuya BÖLDÜĞÜNDE,
+// orijinal posting numarası ARTIK sadece kutulardan BİRİNİN ürünlerini listeliyor — diğer
+// ürün(ler) YENİ bir posting numarasına taşınıyor. `upsertPostingIntoDb` (ve shipOrder'ın
+// "awaiting_packaging" özel durumu, bkz. aşağıda) sadece Ozon'un GÜNCEL listesindeki ürünleri
+// upsert ediyordu, DB'de kalan ama artık bu posting'e ait OLMAYAN eski OrderItem'ları HİÇ
+// SİLMİYORDU — bu yüzden bölünen bir siparişin orijinal posting'i, ürün gerçekte yeni posting'e
+// taşınmış olsa bile, DB'de HÂLÂ o ürünü içeriyormuş gibi görünmeye devam ediyordu. Gerçek bir
+// siparişte (70239805-0653-1 → -3'e bölündü) bu, aynı ürünün İKİ AYRI GERÇEK Paraşüt faturasında
+// (biri orijinal posting'in stale/hatalı kalemiyle, biri yeni posting'in doğru kalemiyle) mükerrer
+// faturalanmasına yol açtı — ayrıca ASE'nin "The data from you and the data in the system do not
+// match" diye reddetmesinin de sebebiydi (orijinal posting'in faturası, Ozon'un o takip numarası
+// için GERÇEKTE taşıdığı üründen FAZLASINI içeriyordu). Bu fonksiyon HEM syncFbsOrders/
+// upsertPostingIntoDb'nin normal akışından HEM shipOrder'ın "awaiting_packaging" özel dalından
+// (durumu YAZMADIĞI ama kalemleri YİNE DE güncel tutması gereken tek yer, bkz. shipOrder — 2026-09-17
+// code review'da "tam bölünmenin olduğu an bu adım atlanıyor" tespitine karşılık) çağrılabilsin diye
+// ayrı bir fonksiyona çıkarıldı.
+async function syncOrderItemsFromPosting(orderId: string, posting: OzonFbsPosting): Promise<void> {
+  const freshOfferIds = new Set((posting.products ?? []).map((item) => item.offer_id));
+
+  for (const item of posting.products ?? []) {
+    let product = await prisma.product.findUnique({ where: { offerId: item.offer_id } });
+    // Ürün panelden değil, doğrudan Ozon'un kendi arayüzünden açıldıysa bizim DB'mizde hiç
+    // kaydı olmuyor — görsel/isim panelde boş kalıyordu. Bu durumda Ozon'dan aynı
+    // importFromOzon() ile (bkz. products.service.ts, "Ozon'dan içe aktar" butonuyla aynı
+    // mantık) canlı ürün bilgisini çekip otomatik bir Product kaydı açıyoruz (2026-08-24,
+    // kullanıcı talebi). costPrice bilinmediği için boş kalır — kâr hesabı bunu bekleyene
+    // kadar "bilinmiyor" döner, sipariş senkronizasyonunu engellemez.
+    if (!product) {
+      try {
+        product = await importFromOzon(item.offer_id);
+      } catch (error) {
+        console.error(`[syncOrderItemsFromPosting] ${item.offer_id} Ozon'dan otomatik içe aktarılamadı:`, error);
+      }
+    }
+    await prisma.orderItem.upsert({
+      where: { orderId_offerId: { orderId, offerId: item.offer_id } },
+      create: {
+        orderId,
+        productId: product?.id,
+        offerId: item.offer_id,
+        ozonSku: item.sku != null ? BigInt(item.sku) : null,
+        quantity: item.quantity,
+        price: item.price,
+      },
+      update: {
+        productId: product?.id,
+        ozonSku: item.sku != null ? BigInt(item.sku) : null,
+        quantity: item.quantity,
+        price: item.price,
+      },
+    });
+  }
+
+  // Silme adımı BİLEREK yukarıdaki upsert döngüsünden SONRA çalışıyor (2026-09-17 code review'da
+  // tespit edildi): süreç upsert sırasında çökerse/yeniden başlarsa, silme ÖNCE yapılsaydı sipariş
+  // GEÇİCİ olarak OLDUĞUNDAN AZ kalemle kalabilirdi (ör. faturalama tam o anda çalışırsa eksik veri
+  // okurdu) — sonradan yapılınca en kötü ihtimalle GEÇİCİ olarak fazladan (stale) bir kalem kalır,
+  // bu zaten bu düzeltmeden ÖNCEKİ (bilinen, kabul edilmiş) davranıştı, YENİ bir risk değil. Ozon'un
+  // ürün listesi her zaman DOLU gelmeli — bomboş/tanımsız gelirse (hiç canlı görülmedi, muhtemelen
+  // geçici bir API tuhaflığı YA DA bir bölünmede TÜM ürünlerin bu posting'den tamamen tahliye
+  // olduğu, hiç doğrulanmamış bir uç durum) TÜM kalemleri sessizce silmemek için bu silme adımı
+  // BİLEREK atlanıyor — bilinmeyen/nadir bir durumda "hiç silmemek" riski, "yanlışlıkla her şeyi
+  // silmek" riskinden daha güvenli kabul edildi. Ayrıca try/catch içinde: transient bir DB hatası
+  // burada senkronizasyonun TAMAMINI (syncFbsOrders'ın sıralı döngüsündeki DİĞER tüm posting'leri)
+  // durdurmasın diye (2026-09-17 code review'da tespit edildi) — bu adım başarısız olursa bir
+  // sonraki cron turu yine dener.
+  //
+  // BİLİNEN, KABUL EDİLMİŞ bir sınır: bu fonksiyon 15 dakikalık cron'dan, shipOrder'ın paketleme-
+  // sonrası ANINDA senkronundan VE kullanıcının elle bastığı "Senkronize Et" butonundan (bkz.
+  // app/api/orders/sync/route.ts) çağrılabiliyor — bunlardan ikisi AYNI posting için neredeyse
+  // eşzamanlı çalışırsa (nadir), daha ESKİ bir Ozon anlık görüntüsünü taşıyan çağrı, daha YENİ bir
+  // çağrının az önce sildiği stale kalemi yeniden yazabilir. Bu proje zaten başka yerlerde de (bkz.
+  // shipOrder'daki Promise.allSettled yorumu) benzer nadir yarış durumlarını "bir sonraki cron turu
+  // düzeltir" diyerek kabul ediyor — burada da aynı felsefe; ayrıca bir sonraki tur, bir önceki
+  // turun bıraktığı stale kalemi de zaten silecektir.
+  if (freshOfferIds.size > 0) {
+    try {
+      const removed = await prisma.orderItem.deleteMany({
+        where: { orderId, offerId: { notIn: [...freshOfferIds] } },
+      });
+      // shippingReviewed gibi Ozon'dan gelmeyen, kullanıcının elle işaretlediği veriyi de birlikte
+      // siliyor olabilir (2026-09-17 code review'da tespit edildi) — bölünme dışında bir sebeple
+      // (ör. Ozon'un kalemi iptal etmesi) de tetiklenebileceği için "muhtemelen bölündü" gibi kesin
+      // bir sebep İDDİA ETMİYORUZ, sadece silindiğini kaydediyoruz.
+      if (removed.count > 0) {
+        console.log(`[syncOrderItemsFromPosting] ${posting.posting_number}: Ozon'un güncel ürün listesinde artık olmayan ${removed.count} eski kalem silindi.`);
+      }
+    } catch (error) {
+      console.error(`[syncOrderItemsFromPosting] ${posting.posting_number}: eski kalemler silinemedi:`, error);
+    }
+  }
+}
+
 async function upsertPostingIntoDb(posting: OzonFbsPosting) {
   // Bazı posting'lerde (örn. aggregator akışı) order_date boş/geçersiz geliyor — bu durumda
   // in_process_at'e düşüyoruz, o da yoksa alanı boş bırakıyoruz (upsert'in patlamaması için).
@@ -55,39 +149,7 @@ async function upsertPostingIntoDb(posting: OzonFbsPosting) {
     },
   });
 
-  for (const item of posting.products ?? []) {
-    let product = await prisma.product.findUnique({ where: { offerId: item.offer_id } });
-    // Ürün panelden değil, doğrudan Ozon'un kendi arayüzünden açıldıysa bizim DB'mizde hiç
-    // kaydı olmuyor — görsel/isim panelde boş kalıyordu. Bu durumda Ozon'dan aynı
-    // importFromOzon() ile (bkz. products.service.ts, "Ozon'dan içe aktar" butonuyla aynı
-    // mantık) canlı ürün bilgisini çekip otomatik bir Product kaydı açıyoruz (2026-08-24,
-    // kullanıcı talebi). costPrice bilinmediği için boş kalır — kâr hesabı bunu bekleyene
-    // kadar "bilinmiyor" döner, sipariş senkronizasyonunu engellemez.
-    if (!product) {
-      try {
-        product = await importFromOzon(item.offer_id);
-      } catch (error) {
-        console.error(`[upsertPostingIntoDb] ${item.offer_id} Ozon'dan otomatik içe aktarılamadı:`, error);
-      }
-    }
-    await prisma.orderItem.upsert({
-      where: { orderId_offerId: { orderId: order.id, offerId: item.offer_id } },
-      create: {
-        orderId: order.id,
-        productId: product?.id,
-        offerId: item.offer_id,
-        ozonSku: item.sku != null ? BigInt(item.sku) : null,
-        quantity: item.quantity,
-        price: item.price,
-      },
-      update: {
-        productId: product?.id,
-        ozonSku: item.sku != null ? BigInt(item.sku) : null,
-        quantity: item.quantity,
-        price: item.price,
-      },
-    });
-  }
+  await syncOrderItemsFromPosting(order.id, posting);
 
   return order;
 }
@@ -1302,7 +1364,13 @@ export async function shipOrder(
         // ham/muhtemelen bayat veriyi YAZMIYORUZ, iyimser "awaiting_deliver"e düşüyoruz. Yeni
         // (bölünmeden doğan) posting'lerde bu özel durum söz konusu değil, doğrudan upsert ediliyor.
         console.log(`[shipOrder] ${pn} paketlendi ama Ozon hâlâ eski durumu (awaiting_packaging) dönüyor — muhtemelen gecikme, iyimser değer yazılıyor`);
-        await prisma.order.update({ where: { postingNumber: pn }, data: { status: "awaiting_deliver" } });
+        const staleOrder = await prisma.order.update({ where: { postingNumber: pn }, data: { status: "awaiting_deliver" } });
+        // DURUMU kasıtlı olarak eski/iyimser bırakıyoruz (yukarıdaki yorum) ama KALEMLERİ yine de
+        // Ozon'un bu isteğe verdiği GÜNCEL cevaba göre güncel tutuyoruz (2026-09-17 code review'da
+        // tespit edildi: bir bölünme TAM bu anda gerçekleşmişse, bu adım atlanırsa orijinal
+        // posting'in stale kalemi bir sonraki 15 dakikalık cron'a kadar düzelmez — o arada elle
+        // fatura kesilirse tekrar mükerrer faturalanma riski doğar).
+        await syncOrderItemsFromPosting(staleOrder.id, fresh);
       } else {
         await upsertPostingIntoDb(fresh);
       }

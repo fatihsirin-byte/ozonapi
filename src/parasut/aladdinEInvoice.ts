@@ -52,13 +52,21 @@ export async function findEInvoicePreferences(
 
 // Var olan bir sales_invoice'ı e-Fatura'ya dönüştürme isteği başlatır — GERÇEK e-Fatura'yı DEĞİL,
 // bunu hazırlayan ASENKRON işin (trackable_job) kimliğini döner (bkz. dosya başı yorumu).
+//
+// KRİTİK DÜZELTME (2026-09-17'de canlıda tespit edildi, Paraşüt'ün kendi hata mesajıyla): bu
+// ilişkinin anahtarı "sales_invoice" DEĞİL "invoice" olmalıymış — üçüncü parti SDK'nın kaynak
+// kodundan çıkardığımız "sales_invoice" anahtarı Paraşüt'ün GERÇEK API'sinde geçersizdi, Paraşüt
+// "invoice->data->type must be: sales_invoices" diye net bir doğrulama hatası döndürdü (relationship
+// anahtarı Paraşüt tarafında "invoice" olarak bekleniyor, sadece içindeki type "sales_invoices").
+// Bu, resmi dokümanı okuyamadığımız için üçüncü parti bir SDK'ya güvenmenin gerçek bir riskiydi —
+// Paraşüt'ün kendi canlı hata mesajı burada dokümandan daha güvenilir bir kaynak.
 export async function submitEInvoiceJob(salesInvoiceId: string, scenario: EInvoiceScenario, to: string): Promise<string> {
   const res = await parasut2Post<{ data: { id: string; type: string } }>("e_invoices", {
     data: {
       type: "e_invoices",
       attributes: { scenario, to },
       relationships: {
-        sales_invoice: { data: { id: salesInvoiceId, type: "sales_invoices" } },
+        invoice: { data: { id: salesInvoiceId, type: "sales_invoices" } },
       },
     },
   });

@@ -11,6 +11,18 @@ import { ParasutApiError } from "@/parasut/client";
 // HER istekte yeniden çalıştırır.
 export const dynamic = "force-dynamic";
 
+// Paraşüt'ün kendi hata metni İNGİLİZCE ve teknik olabiliyor (ör. 429 hız sınırında "Try again in
+// 10 seconds" — 2026-09-16'da kullanıcı bulgusu, sebebi ayrıca düzeltildi: bkz. aladdinInvoice.ts'
+// teki mapWithBatchedConcurrency — ürün aramaları artık tek tek değil, PRODUCT_BATCH_SIZE'lık
+// gruplar halinde ve aralarında gecikmeli işleniyor) — kullanıcıya en azından NEREDE olduğunu
+// Türkçe belirtiyoruz, orijinal mesajı da yanında koruyoruz. GET ve POST aynı formatı kullanır.
+function parasutErrorResponse(error: ParasutApiError) {
+  return NextResponse.json(
+    { error: `Paraşüt'e bağlanırken sorun oluştu: ${error.message}`, body: error.body },
+    { status: error.status ?? 502 },
+  );
+}
+
 // GET: sadece ÖNİZLEME — hiçbir şey oluşturmaz, hiçbir Aladdin/Fatih Gezgin isteği ATMAZ (Paraşüt'e
 // sadece USD/TL kuru için bir istek gider). Kullanıcı sayfayı her açtığında/yenilediğinde güvenle
 // çağrılabilir.
@@ -23,7 +35,7 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     if (error instanceof ParasutApiError) {
-      return NextResponse.json({ error: error.message, body: error.body }, { status: error.status ?? 502 });
+      return parasutErrorResponse(error);
     }
     throw error;
   }
@@ -50,7 +62,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     if (error instanceof ParasutApiError) {
-      return NextResponse.json({ error: error.message, body: error.body }, { status: error.status ?? 502 });
+      return parasutErrorResponse(error);
     }
     throw error;
   }

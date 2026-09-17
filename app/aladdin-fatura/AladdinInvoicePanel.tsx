@@ -23,6 +23,7 @@ interface InvoiceResult {
   invoiceNo: string | null;
   postingNumbers: string[];
   totalTry: number;
+  printUrl: string;
 }
 
 function formatTry(value: number): string {
@@ -101,10 +102,17 @@ export function AladdinInvoicePanel() {
         <div style={{ color: "var(--success)", fontWeight: 500, marginBottom: 8 }}>
           Fatura kesildi ✓ {result.invoiceNo ? `(${result.invoiceNo})` : ""}
         </div>
-        <div className="hint">
+        <div className="hint" style={{ marginBottom: 12 }}>
           {formatTry(result.totalTry)} TL — {result.postingNumbers.length} sipariş için alış faturası numarası
           kaydedildi.
         </div>
+        <button
+          className="btn-secondary"
+          type="button"
+          onClick={() => window.open(result.printUrl, "_blank", "noopener,noreferrer")}
+        >
+          Faturayı Görüntüle ↗
+        </button>
       </div>
     );
   }

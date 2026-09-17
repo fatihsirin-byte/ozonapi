@@ -1,5 +1,7 @@
 import { prisma } from "../db/prisma";
+import { env } from "../config/env";
 import { parasut2Get, parasut2Post, parasut2Put } from "./aladdinClient";
+import { buildSalesInvoicePrintUrl } from "./client";
 import { getUsdToTryRate } from "../pricing/fx-rate";
 import { getIstanbulTodayRangeUtc } from "../utils/istanbulTime";
 import { transliterateRussian } from "../utils/transliterate";
@@ -31,14 +33,38 @@ const FALLBACK_COST_USD = 5;
 const VAT_RATE = 1;
 // Bir claim bu süreden eskiyse artık GEÇERSİZ sayılır — süreç bu claim'i temizlemeden çökerse/
 // yeniden başlarsa (ör. pm2 restart) sipariş sonsuza dek "claim'li" takılı kalıp bir daha asla
-// faturalanamazdı (2026-09-16 code review round 3'te tespit edildi). DİKKAT (round 4'te tespit
-// edildi): tek bir istek zincirinin üst sınırı ~40sn olsa da (client.ts MAX_BACKOFF_MS ×
-// MAX_RETRIES), bu akış SIRAYLA üç ayrı zincir çalıştırabiliyor (her ürün için GET, gerekirse PUT,
-// sonra tek bir sales_invoices POST) — en kötü ihtimalde (art arda 429'lar tam 30sn zaman aşımına
-// yakın gelirse) toplam ~450sn'ye kadar çıkabiliyor. 10 dakika bu en kötü senaryonun bile rahatça
-// üzerinde kalıyor; yine de kesin bir garanti değil, teorik olarak son derece nadir bir yarış
-// durumu payı bırakıyor — bu buton günde bir kez elle tetiklendiği için kabul edilebilir bulundu.
+// faturalanamazdı (2026-09-16 code review round 3'te tespit edildi).
+//
+// DİKKAT (round 5'te tespit edildi): ürün araması/oluşturması bir ara TAM PARALEL (Promise.all)
+// çalıştırılmıştı ama bu, çok sayıda farklı ürün olduğunda TÜM istekleri AYNI ANDA Paraşüt'e
+// göndererek hız sınırına (rate limit) takılıp canlıda gerçek bir hataya yol açtı (kullanıcı
+// bulgusu: "toplu fatura denedim kesemedim ... Try again in 10 seconds"). Bunun üzerine SIRALI
+// hale getirilmişti, ama o zaman da TERSİ sorun oluştu: N farklı ürün varsa toplam süre O(N)
+// zincire çıkıyor, bu da CLAIM_STALE_MS'i aşıp AYNI siparişlerin ikinci kez claim edilip GERÇEKTEN
+// iki fatura kesilmesi riskini artırıyordu (round 5'te tespit edildi). Şimdiki çözüm ORTA YOL:
+// PRODUCT_BATCH_SIZE kadar ürün birlikte (paralel), aralarında PRODUCT_BATCH_DELAY_MS bekleyerek —
+// hem Paraşüt'ü aynı anda çok sayıda istekle boğmuyor hem de toplam süreyi ~O(N/PRODUCT_BATCH_SIZE)
+// ile sınırlı tutuyor. Örnek: 90 farklı ürün, grup başı ~1sn (istek + gecikme) ⇒ ~30 grup ⇒ ~30sn —
+// 10 dakikalık payın çok altında, art arda birkaç 429 olsa bile.
+const PRODUCT_BATCH_SIZE = 3;
+const PRODUCT_BATCH_DELAY_MS = 400;
 const CLAIM_STALE_MS = 10 * 60 * 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// items'ı `limit` kadarlık gruplar halinde, gruplar arasında `delayMs` bekleyerek işler — TAM
+// paralel (rate limit riski) ile TAM sıralı (claim penceresi çok uzar) arasındaki orta yol.
+async function mapWithBatchedConcurrency<T, R>(items: T[], limit: number, delayMs: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = [];
+  for (let i = 0; i < items.length; i += limit) {
+    const batch = items.slice(i, i + limit);
+    results.push(...(await Promise.all(batch.map(fn))));
+    if (i + limit < items.length) await sleep(delayMs);
+  }
+  return results;
+}
 
 export class AladdinInvoiceError extends Error {}
 
@@ -175,6 +201,9 @@ export interface AladdinInvoiceResult {
   invoiceNo: string | null;
   postingNumbers: string[];
   totalTry: number;
+  // Kullanıcı talebi (2026-09-16): "fatura kesince fatura linkli görüntüleme butonu gözükecek
+  // mi?" — orderInvoice.ts'teki AYNI desen (printUrl), sadece Aladdin'in company id'siyle.
+  printUrl: string;
 }
 
 // SADECE bu çağrının kendi claimId'sine ait satırları serbest bırakır — başka bir (eşzamanlı)
@@ -262,15 +291,13 @@ export async function createDailyAladdinInvoice(postingNumbersInput: string[]): 
   let invoiceId: string;
   let invoiceNo: string | null;
   try {
-    // Her ürün araması/oluşturması BAĞIMSIZ — sıraya sokup beklemek yerine paralel çalıştırılıyor,
-    // bu da faturanın claim'li kaldığı pencereyi kısaltıyor (2026-09-16 code review round 2'de
-    // tespit edildi).
-    const details = await Promise.all(
-      lines.map(async (line) => {
-        const productId = await findOrCreateAladdinProduct(line.offerId, line.name, line.unitPriceTry);
-        return { quantity: line.quantity, unit_price: line.unitPriceTry, vat_rate: VAT_RATE, description: line.name, productId };
-      }),
-    );
+    // KÜÇÜK GRUPLAR HALİNDE, aralarında kısa bir bekleme ile — bkz. PRODUCT_BATCH_SIZE/
+    // PRODUCT_BATCH_DELAY_MS yorumu (round 5): ne TAM paralel (rate limit'e takılır) ne TAM sıralı
+    // (claim penceresi çok uzayıp ikinci bir claim'in devreye girmesine yol açabilir).
+    const details = await mapWithBatchedConcurrency(lines, PRODUCT_BATCH_SIZE, PRODUCT_BATCH_DELAY_MS, async (line) => {
+      const productId = await findOrCreateAladdinProduct(line.offerId, line.name, line.unitPriceTry);
+      return { quantity: line.quantity, unit_price: line.unitPriceTry, vat_rate: VAT_RATE, description: line.name, productId };
+    });
 
     const issueDate = new Date().toISOString().slice(0, 10);
     // Aladdin↔Fatih Gezgin arasındaki 8 gerçek faturayla BİREBİR aynı şekil: item_type "invoice",
@@ -363,5 +390,6 @@ export async function createDailyAladdinInvoice(postingNumbersInput: string[]): 
     await releaseClaim(postingNumbers, claimId);
   }
 
-  return { invoiceId, invoiceNo, postingNumbers, totalTry };
+  const printUrl = buildSalesInvoicePrintUrl(env.parasut2CompanyId ?? "", invoiceId);
+  return { invoiceId, invoiceNo, postingNumbers, totalTry, printUrl };
 }

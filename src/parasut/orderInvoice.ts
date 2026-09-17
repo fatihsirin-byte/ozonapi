@@ -6,6 +6,7 @@ import { createEArchive } from "./eArchives";
 import { searchProductsByCode, createProduct, updateProduct } from "./products";
 import { getUsdToTryRate } from "../pricing/fx-rate";
 import { transliterateRussian } from "../utils/transliterate";
+import { buildSalesInvoicePrintUrl } from "./client";
 
 interface OrderRawPayload {
   customer?: {
@@ -202,7 +203,7 @@ async function doCreateInvoiceForOzonOrder(postingNumber: string) {
 
   const invoiceId = invoiceRes.data.id;
   const invoiceNo = (invoiceRes.data.attributes as { invoice_no?: string }).invoice_no ?? null;
-  const printUrl = `https://uygulama.parasut.com/${process.env.PARASUT_COMPANY_ID}/sales_invoices/${invoiceId}/print`;
+  const printUrl = buildSalesInvoicePrintUrl(process.env.PARASUT_COMPANY_ID ?? "", invoiceId);
 
   // KRİTİK ADIM: yalnızca sales_invoices oluşturmak faturayı TASLAK'ta bırakıyor — resmi
   // e-Arşiv'e dönüşmesi (GİB'e gidip QR/ETTN kazanması, KDV istisnasının gerçekten işlenmesi)

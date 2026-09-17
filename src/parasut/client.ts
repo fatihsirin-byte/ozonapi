@@ -17,6 +17,14 @@ export class ParasutApiError extends Error {
   }
 }
 
+// Paraşüt panelinde bir satış faturasının "yazdır" görünümüne giden URL — hem Fatih Gezgin'in
+// hesabı (orderInvoice.ts) hem Aladdin'in hesabı (aladdinInvoice.ts) AYNI şekli, sadece farklı bir
+// company id ile kullanıyordu; iki ayrı kopya yerine tek yerden (2026-09-16, round 5 code
+// review'da "iki dosyada birebir aynı şablon tekrarlanıyor" bulgusuna karşılık).
+export function buildSalesInvoicePrintUrl(companyId: string, invoiceId: string): string {
+  return `https://uygulama.parasut.com/${companyId}/sales_invoices/${invoiceId}/print`;
+}
+
 export interface ParasutAccountConfig {
   clientId: string;
   clientSecret: string;

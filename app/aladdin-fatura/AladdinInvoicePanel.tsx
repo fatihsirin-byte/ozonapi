@@ -73,12 +73,20 @@ export function AladdinInvoicePanel() {
   // AÇMAK yerine, aynı sayfada bir <iframe> içinde GÖMÜLÜ gösteriyoruz. Tek seferde tek fatura
   // açık olabilir (aynı anda birden fazla PDF görüntüleme kullanım senaryosu yok, sade tutuluyor).
   const [openPdfUrl, setOpenPdfUrl] = useState<string | null>(null);
+  // Kullanıcı talebi (2026-09-18): "tarih filtresi, geri dönük tek gün seçerek gidebilelim, fatura
+  // var mı yok mu görürüz yoksa keseriz" — dateInput, <input type="date"> ile ANLIK düzenlenen
+  // değer; selectedDate ise "Git"e basılıp GERÇEKTEN yüklenmiş olan tarih (boş = bugün, sunucu
+  // varsayılanı). İkisi ayrı tutuluyor ki kullanıcı takvimde bir tarih seçip henüz "Git"e basmadan
+  // ekranın "seçili tarih" sanıp yanlışlıkla o günü onayladığı bir fatura kesmesin.
+  const [dateInput, setDateInput] = useState("");
+  const [selectedDate, setSelectedDate] = useState("");
 
-  async function loadPreview() {
+  async function loadPreview(date?: string) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/aladdin-invoice");
+      const url = date ? `/api/aladdin-invoice?date=${encodeURIComponent(date)}` : "/api/aladdin-invoice";
+      const res = await fetch(url);
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "Önizleme alınamadı");
@@ -95,6 +103,44 @@ export function AladdinInvoicePanel() {
   useEffect(() => {
     loadPreview();
   }, []);
+
+  function handleGoToDate() {
+    if (!dateInput) return;
+    setSelectedDate(dateInput);
+    loadPreview(dateInput);
+  }
+
+  function handleBackToToday() {
+    setDateInput("");
+    setSelectedDate("");
+    loadPreview();
+  }
+
+  // Diğer aksiyon butonlarıyla (Faturayı Şimdi Oluştur/Önizlemeyi Yenile) AYNI şekilde `creating`
+  // ile de kilitleniyor — aksi halde kullanıcı GERÇEK bir fatura kesme isteği daha bitmeden başka
+  // bir güne geçebilir, o istek sonuçlanınca "Fatura kesildi" ekranı kullanıcının o an baktığı
+  // FARKLI günün önizlemesini sessizce üstüne yazardı (2026-09-18 code review'da tespit edildi —
+  // bu özelliğin bütün amacı "hangi günü onayladığından emin olmak" olduğu için özellikle riskli).
+  const dateFilterBar = (
+    <div className="card" style={{ marginBottom: 16, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <span className="hint">Geçmiş bir günü kontrol et:</span>
+      <input
+        type="date"
+        value={dateInput}
+        disabled={loading || creating}
+        onChange={(e) => setDateInput(e.target.value)}
+        style={{ padding: 6, borderRadius: 6, border: "1px solid var(--border)", background: "transparent", color: "inherit" }}
+      />
+      <button className="btn-secondary" type="button" disabled={loading || creating || !dateInput} onClick={handleGoToDate}>
+        Git
+      </button>
+      {selectedDate && (
+        <button className="btn-secondary" type="button" disabled={loading || creating} onClick={handleBackToToday}>
+          Bugüne Dön
+        </button>
+      )}
+    </div>
+  );
 
   async function handleCreate() {
     if (!preview) return;
@@ -170,18 +216,31 @@ export function AladdinInvoicePanel() {
   }
 
   if (loading) {
-    return <div className="hint">Faturalar taranıyor...</div>;
+    return (
+      <div>
+        {dateFilterBar}
+        <div className="hint">Faturalar taranıyor...</div>
+      </div>
+    );
   }
 
   if (error) {
     return (
-      <div className="card">
-        <div className="hint" style={{ color: "var(--danger)", marginBottom: 8 }}>
-          {error}
+      <div>
+        {dateFilterBar}
+        <div className="card">
+          <div className="hint" style={{ color: "var(--danger)", marginBottom: 8 }}>
+            {error}
+          </div>
+          {/* onClick={loadPreview} DEĞİL — loadPreview artık opsiyonel bir "date" parametresi
+              alıyor, doğrudan geçilirse React'ın tıklama olayı (MouseEvent) "date" sanılırdı
+              (2026-09-18'de bu değişiklikle eklenen bir riskti, BURADA baştan önlendi). Kullanıcı
+              geçmiş bir günü görüntülerken hata alırsa "Tekrar Dene" o günü tekrar denemeli,
+              sessizce bugüne dönmemeli. */}
+          <button className="btn-secondary" type="button" onClick={() => loadPreview(selectedDate || undefined)}>
+            Tekrar Dene
+          </button>
         </div>
-        <button className="btn-secondary" onClick={loadPreview}>
-          Tekrar Dene
-        </button>
       </div>
     );
   }
@@ -201,7 +260,9 @@ export function AladdinInvoicePanel() {
         ? `${datePart} faturalanan ${preview.ordersInvoicedTodayCount} sipariş var ama hiçbiri için yeni işlenecek bir şey kalmamış.`
         : `${datePart} henüz faturalanmış (Ozon müşterisine kesilmiş) sipariş yok.`;
     return (
-      <div className="empty-state">
+      <div>
+        {dateFilterBar}
+        <div className="empty-state">
         {message}
         {/* Kullanıcı talebi (2026-09-17): "kesilen faturayı göster" — önceden bu link sadece fatura
             kesme isteğinin tek seferlik ekran cevabında vardı, sayfa yenilenince kayboluyordu. */}
@@ -236,12 +297,14 @@ export function AladdinInvoicePanel() {
           </div>
         )}
         <PdfViewer url={openPdfUrl} onClose={() => setOpenPdfUrl(null)} />
+        </div>
       </div>
     );
   }
 
   return (
     <div>
+      {dateFilterBar}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ fontWeight: 500, marginBottom: 8 }}>
           {formatDateLabel(preview.dateLabel)} tarihinde faturalanan {preview.postingNumbers.length} sipariş,{" "}
@@ -286,7 +349,7 @@ export function AladdinInvoicePanel() {
         <button className="btn-primary" disabled={creating} onClick={handleCreate}>
           {creating ? "Kesiliyor..." : `Faturayı Şimdi Oluştur (${formatTry(preview.totalTry)} TL)`}
         </button>
-        <button className="btn-secondary" disabled={creating} onClick={loadPreview}>
+        <button className="btn-secondary" disabled={creating} onClick={() => loadPreview(selectedDate || undefined)}>
           Önizlemeyi Yenile
         </button>
       </div>

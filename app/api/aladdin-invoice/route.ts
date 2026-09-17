@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildDailyAladdinInvoicePreview, createDailyAladdinInvoice, AladdinInvoiceError } from "@/parasut/aladdinInvoice";
 import { ParasutApiError } from "@/parasut/client";
+import { getIstanbulDayRangeUtc } from "@/utils/istanbulTime";
 
 // KRİTİK (2026-09-16'da canlıda tespit edildi, kullanıcı bulgusu: "bugün kesilenler 73, yeni
 // panel 71 sipariş diyor"): GET handler'ı hiçbir dinamik Next.js API'si (request/cookies/headers)
@@ -26,13 +27,22 @@ function parasutErrorResponse(error: ParasutApiError) {
 // GET: sadece ÖNİZLEME — hiçbir şey oluşturmaz, hiçbir Aladdin/Fatih Gezgin isteği ATMAZ (Paraşüt'e
 // sadece USD/TL kuru için bir istek gider). Kullanıcı sayfayı her açtığında/yenilediğinde güvenle
 // çağrılabilir.
-export async function GET() {
+//
+// `?date=YYYY-MM-DD` OPSİYONEL — kullanıcı talebi (2026-09-18): "tarih filtresi, geri dönük tek gün
+// seçerek gidebilelim, fatura var mı yok mu görürüz yoksa keseriz". Verilmezse eskisi gibi BUGÜNE
+// (TSİ) düşülür (bkz. aladdinInvoice.ts'teki varsayılan davranış).
+export async function GET(request: NextRequest) {
   try {
-    // Kullanıcı birkaç gün dünün verisiyle test etti (2026-09-17: PREVIEW_DAYS_AGO=1 geçici
-    // offset'i) — test tamamlanınca "aynı gün çalışacak şekilde" (kullanıcı talebi, 2026-09-17)
-    // eskisi gibi BUGÜNE dönüldü, argümansız çağrı varsayılan olarak getIstanbulTodayRangeUtc()
-    // kullanıyor (bkz. aladdinInvoice.ts).
-    const preview = await buildDailyAladdinInvoicePreview();
+    const dateParam = request.nextUrl.searchParams.get("date");
+    let range: { start: Date; end: Date } | undefined;
+    if (dateParam) {
+      try {
+        range = getIstanbulDayRangeUtc(dateParam);
+      } catch {
+        return NextResponse.json({ error: `Geçersiz tarih: "${dateParam}" (beklenen format: YYYY-MM-DD)` }, { status: 400 });
+      }
+    }
+    const preview = await buildDailyAladdinInvoicePreview(range);
     return NextResponse.json(preview);
   } catch (error) {
     if (error instanceof AladdinInvoiceError) {

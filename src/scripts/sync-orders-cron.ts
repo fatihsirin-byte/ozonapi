@@ -3,6 +3,7 @@ import { syncFbsOrders } from "../modules/orders/orders.service";
 import { syncTransactionsForDateRange } from "../modules/finance/finance.service";
 import { backfillMissingStock } from "../modules/products/products.service";
 import { pollAseShipmentStatuses } from "../ase/statusPolling";
+import { syncReturns, syncRfbsReturns } from "../modules/returns/returns.service";
 
 const DEFAULT_STOCK = 100;
 
@@ -48,8 +49,27 @@ async function runAsePoll() {
   }
 }
 
+// İade/iptal sayfası (2026-09-18, kullanıcı talebi) — durum değişiklikleri gün içinde olabiliyor,
+// bu yüzden dar bir pencere (son 7 gün) her 15 dakikada bir tazeleniyor. İlk kurulumda geçmişe
+// dönük 90 günlük veri "Senkronize Et" butonuyla (bkz. app/api/returns/sync/route.ts) elle
+// çekiliyor — burada BİLEREK geniş pencere kullanılmıyor, her turda 90 günü baştan taramak
+// gereksiz Ozon isteği anlamına gelirdi.
+async function runReturnsSync() {
+  try {
+    const to = new Date();
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const count = await syncReturns({ since, to });
+    const rfbsCount = await syncRfbsReturns();
+    console.log(`[sync-orders-cron] ${new Date().toISOString()} — ${count} iade kaydı, ${rfbsCount} rFBS iade/imha kaydı senkronize edildi`);
+  } catch (error) {
+    console.error(`[sync-orders-cron] ${new Date().toISOString()} — iade senkronu hatası:`, error);
+  }
+}
+
 cron.schedule("*/15 * * * *", runSync);
+cron.schedule("*/15 * * * *", runReturnsSync);
 cron.schedule("0 */3 * * *", runAsePoll);
-console.log("[sync-orders-cron] başlatıldı — sipariş/finans senkronu 15 dakikada bir, ASE durum kontrolü 3 saatte bir çalışacak");
+console.log("[sync-orders-cron] başlatıldı — sipariş/finans/iade senkronu 15 dakikada bir, ASE durum kontrolü 3 saatte bir çalışacak");
 runSync();
+runReturnsSync();
 runAsePoll();

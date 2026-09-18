@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getAseDeclarationBacklog, type AseDeclarationBacklogMode } from "@/modules/orders/orders.service";
+import { formatIstanbulDate } from "@/utils/istanbulTime";
 
 // ASE'nin gümrük beyanı durumunu takip eder — kullanıcı talebi (2026-09-16): "bi view yapıp
 // beyanname durumunu takip etmeliyiz kaç gün geçti beyannamesi yok gibi çoktan aza ... ase'ye
@@ -75,7 +76,7 @@ export default async function AseDurumuPage({ searchParams }: { searchParams: Pr
                 </td>
                 {mode === "pending" ? (
                   <>
-                    <td>{o.referenceDate ? o.referenceDate.toLocaleDateString("tr-TR") : "-"}</td>
+                    <td>{o.referenceDate ? formatIstanbulDate(o.referenceDate) : "-"}</td>
                     <td>
                       {o.daysElapsed != null ? (
                         <span style={o.daysElapsed >= 14 ? { color: "var(--danger)", fontWeight: 500 } : undefined}>
@@ -89,7 +90,7 @@ export default async function AseDurumuPage({ searchParams }: { searchParams: Pr
                 ) : (
                   <>
                     <td>{o.customDeclarationCode}</td>
-                    <td>{o.customDeclarationDate ? o.customDeclarationDate.toLocaleDateString("tr-TR") : "-"}</td>
+                    <td>{o.customDeclarationDate ? formatIstanbulDate(o.customDeclarationDate) : "-"}</td>
                   </>
                 )}
               </tr>

@@ -45,6 +45,20 @@ export function getIstanbulDayRangeUtc(dateStr: string): { start: Date; end: Dat
   return istanbulDayRangeFromYmd(y, m - 1, d);
 }
 
+// Sunucu tarafında (Server Component) render edilen tarihler BİLEREK burada toplanıyor — Docker
+// imajı (node:20-slim) varsayılan olarak UTC saat dilimiyle çalışıyor, `toLocaleDateString("tr-TR")`
+// gibi çıplak bir çağrı bu yüzden Türkiye saatinden 3 saat geri gösterirdi (2026-09-18, kullanıcı
+// bulgusu: "biz türkiyedeyiz, server saati kullanıyor sorun yaratabilir"). Client component'lerde
+// (tarayıcıda render edilen, "use client" içeren dosyalarda) bu sorun YOK — kullanıcının kendi
+// tarayıcısı zaten Türkiye saatinde, bu yüzden oralara dokunulmadı.
+export function formatIstanbulDate(date: Date): string {
+  return date.toLocaleDateString("tr-TR", { timeZone: "Europe/Istanbul" });
+}
+
+export function formatIstanbulDateTime(date: Date): string {
+  return date.toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" });
+}
+
 // Bir Date'in TSİ'ye göre takvim gününü "YYYY-MM-DD" olarak döner — dış bir API'ye (ör. ASE)
 // "bugünün tarihi" gibi bir gün sınırı göndermek için. UTC ile hesaplansaydı gece yarısından
 // sonraki ~3 saatlik pencerede bir gün geride kalırdı (2026-09-16 code review'da

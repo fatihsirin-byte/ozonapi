@@ -275,6 +275,68 @@ model OrderItem {
 // otherCharges üçünden sadece biri dolu oluyor artık (eskiden aynı operasyonda ikisi birden dolu
 // olabiliyordu). Alan isimleri ve bu tabloyu okuyan sayfalar (orders/page.tsx, order detail,
 // getPnlSummary) değişmeden kalsın diye şekli korundu.
+// Ozon'un /v1/returns/list uç noktasından senkronize edilen iade kayıtları — kullanıcı talebi
+// (2026-09-18): "hangi iade/iptallerin bize maliyet çıkardığını anlayamıyorum, panelde kafam
+// karıştı" — Ozon paneli bunu net göstermiyor, bu tablo iadenin ürün olarak geri mi geldiğini,
+// imha mı edildiğini (storage.utilization_sum doluysa) yoksa Ozon'un bize tazminat mı ödediğini
+// (compensatedAt doluysa) tek bakışta ayırt edilebilir tutuyor. Order'a FK ile bağlı DEĞİL —
+// FinanceTransaction'daki aynı gerekçeyle (iade, Order senkronizasyon penceremizin dışındaki bir
+// posting'e referans verebilir).
+model OzonReturn {
+  id             String    @id // Ozon'un kendi return id'si
+  postingNumber  String
+  offerId        String?
+  productName    String?
+  quantity       Int?
+  reasonName     String?
+  type           String? // ör. "FullReturn"
+  schema         String? // "Fbs" | "Fbo"
+  statusName     String? // visual.status.display_name — panelde görünen durum adı
+  statusChangedAt DateTime?
+  // Depoda bekleme süresince işleyen saklama ücreti — ürün imha edilmese bile bize kesilebilir.
+  storageFee     Float?
+  // Ürün belirli sürede geri istenmezse Ozon imha ediyor ve bu bedeli bize kesiyor — "maliyeti
+  // silinenler" dediğiniz muhtemelen bunlar (storage.utilization_sum).
+  utilizationFee Float?
+  currency       String?
+  // logistic.cancelled_with_compensation_moment doluysa Ozon bu iade için bize tazminat ödemiş
+  // demektir — bu durumda bize gerçek bir maliyet çıkmaz (kullanıcının "bize bedel ödetilmeyenler"
+  // dediği kategori).
+  compensatedAt  DateTime?
+  rawPayload     Json?
+  syncedAt       DateTime  @default(now())
+
+  @@index([postingNumber])
+  @@index([statusChangedAt])
+}
+
+// Ozon'un /v2/returns/rfbs/list uç noktasından senkronize edilen rFBS iade/imha kayıtları
+// (2026-09-18, kullanıcı bulgusu) — bu hesap "realFBS" şemasını kullanıyor, OzonReturn tablosunun
+// beslendiği /v1/returns/list bu hesap için hep BOŞ dönüyor (yanlış uç nokta, standart FBO/FBS
+// içindir). Kullanıcının Ozon panelinden indirdiği "rFBS İadeler" raporuyla (posting_number,
+// state_name, product.price) birebir eşleştiği canlıda doğrulandı. groupState="utilization" ise
+// ürün imha edilmiş (gerçek kayıp: ürün + varsa saklama), "approved" + money_return_state_name
+// doluysa müşteriye para iade edilmiş/tazminat ödenmiş (gerçek kayıp: satış bedeli).
+model OzonRfbsReturn {
+  id                  String   @id // Ozon'un return_id'si (string'e çevrilmiş)
+  postingNumber       String
+  orderNumber         String?
+  offerId             String?
+  productName         String?
+  price               Float? // USD — satış bedeli (maliyet fiyatı DEĞİL)
+  currency            String?
+  stateCode           String? // ör. "Utilizing"
+  stateName           String? // Ozon'un panelde gösterdiği durum adı
+  groupState           String? // "utilization" | "approved" | ...
+  moneyReturnStateName String?
+  createdAt           DateTime?
+  rawPayload          Json?
+  syncedAt            DateTime @default(now())
+
+  @@index([postingNumber])
+  @@index([groupState])
+}
+
 model FinanceTransaction {
   id             String   @id @default(cuid())
   postingNumber  String

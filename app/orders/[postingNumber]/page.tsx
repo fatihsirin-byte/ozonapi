@@ -31,6 +31,7 @@ import {
 } from "@/modules/finance/pnl-report.service";
 import { getUsdToRubRate } from "@/pricing/fx-rate";
 import { translateOrderStatus } from "@/utils/orderStatus";
+import { formatIstanbulDate, formatIstanbulDateTime } from "@/utils/istanbulTime";
 
 export const dynamic = "force-dynamic";
 
@@ -153,7 +154,7 @@ export default async function OrderDetailPage({
         </div>
         <div>
           <div className="hint">Sipariş Tarihi</div>
-          <div className="value" style={{ fontSize: 15 }}>{order.orderDate ? new Date(order.orderDate).toLocaleString("tr-TR") : "-"}</div>
+          <div className="value" style={{ fontSize: 15 }}>{order.orderDate ? formatIstanbulDateTime(new Date(order.orderDate)) : "-"}</div>
         </div>
         <div>
           <div className="hint">Sipariş Tutarı</div>
@@ -195,7 +196,7 @@ export default async function OrderDetailPage({
           <div>
             <div className="hint">Kargoya Verme Süresi</div>
             <div className="value" style={{ fontSize: 15, color: shipmentDelay.isDelayed ? "var(--danger)" : undefined }}>
-              {new Date(raw.shipment_date).toLocaleDateString("tr-TR")}
+              {formatIstanbulDate(new Date(raw.shipment_date))}
               {shipmentDelay.isDelayed && (
                 <div className="hint" style={{ color: "var(--danger)" }}>
                   {shipmentDelay.daysLate === 0 ? "bugün gecikti" : `${shipmentDelay.daysLate} gün gecikti`}

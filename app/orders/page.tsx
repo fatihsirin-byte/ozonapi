@@ -14,7 +14,7 @@ import {
 } from "@/modules/orders/orders.service";
 import { getRealShippingAndFeesUsdByPosting } from "@/modules/finance/pnl-report.service";
 import { getUsdToTryRate } from "@/pricing/fx-rate";
-import { getIstanbulTodayRangeUtc } from "@/utils/istanbulTime";
+import { getIstanbulTodayRangeUtc, formatIstanbulDate, formatIstanbulDateTime } from "@/utils/istanbulTime";
 import { parsePageParam } from "@/utils/pagination";
 import { OrdersToolbar } from "./OrdersToolbar";
 import { OrdersSearchBar } from "./OrdersSearchBar";
@@ -301,9 +301,9 @@ export default async function OrdersPage({
                         </div>
                       )}
                     </td>
-                    <td>{o.orderDate ? new Date(o.orderDate).toLocaleString("tr-TR") : "-"}</td>
+                    <td>{o.orderDate ? formatIstanbulDateTime(new Date(o.orderDate)) : "-"}</td>
                     <td>
-                      {shipmentDate ? new Date(shipmentDate).toLocaleDateString("tr-TR") : "-"}
+                      {shipmentDate ? formatIstanbulDate(new Date(shipmentDate)) : "-"}
                       {delay.isDelayed && (
                         <div className="hint" style={{ color: "var(--danger)" }}>
                           {delay.daysLate === 0 ? "bugün gecikti" : `${delay.daysLate} gün gecikti`}

@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/analitik", label: "Analitik" },
   { href: "/kampanyalar", label: "Kampanyalar" },
   { href: "/pnl", label: "Kâr/Zarar" },
+  { href: "/iade-iptal", label: "İade & İptaller" },
   { href: "/ase-durumu", label: "ASE Beyanname" },
   { href: "/aladdin-fatura", label: "Aladdin Fatura" },
 ];

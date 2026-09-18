@@ -238,9 +238,27 @@ export interface ClassifiedRfbsReturn {
   category: RfbsReturnCategory;
 }
 
-// moneyReturnStateName alanı Ozon'dan HEP boş geliyor (canlıda doğrulandı, 2026-09-18) — para
-// iadesi/tazminat kayıtları aslında groupState="approved" + stateCode="MoneyReturned" ya da
-// "PartialCompensationReturnedByOzon" ile geliyor, o yüzden asıl ayrım groupState üzerinden.
+// Ozon'un /v2/returns/rfbs/list uç noktası "Accept-Language" başlığını YOK SAYIYOR (canlıda
+// denendi: tr/tr-TR farketmiyor), state_name her zaman Rusça dönüyor — kullanıcı bulgusu
+// (2026-09-18): "durumlar rusça yazıyor". Ozon'un kendi panel arayüzü ve XLSX raporu bunu
+// SADECE kendi tarafında Türkçeye çeviriyor, API bunu vermiyor. Kullanıcının indirdiği gerçek
+// XLSX raporundaki Türkçe karşılıklarla, canlıda doğrulanan stateCode (İngilizce, stabil enum)
+// değerleri eşleştirilerek elle çevriliyor — Rusça metne göre değil, stateCode'a göre eşleniyor
+// (Rusça metin küçük varyasyonlarla değişebilir, stateCode değişmez).
+const RFBS_STATE_TR: Record<string, string> = {
+  Utilizing: "İmha sürecinde",
+  Utilized: "İmha edildi",
+  UtilizingByOzon: "Ozon tarafından imha ediliyor",
+  UtilizedByOzon: "Ozon tarafından imha edildi",
+  MoneyReturned: "Para iade edildi",
+  PartialCompensationReturnedByOzon: "Alıcıya tazminat ödendi",
+};
+
+export function translateRfbsState(stateCode: string | null, fallback: string | null): string {
+  if (stateCode && RFBS_STATE_TR[stateCode]) return RFBS_STATE_TR[stateCode];
+  return fallback ?? "-";
+}
+
 function classifyRfbsReturn(r: { groupState: string | null }): RfbsReturnCategory {
   if (r.groupState === "utilization") return "utilized";
   if (r.groupState === "approved") return "refunded";
@@ -266,7 +284,7 @@ export async function getRfbsReturnsForRange(params: { since: Date; to: Date }):
     price: r.price,
     costPrice: r.offerId ? costByOfferId.get(r.offerId) ?? null : null,
     currency: r.currency,
-    stateName: r.stateName,
+    stateName: translateRfbsState(r.stateCode, r.stateName),
     createdAt: r.createdAt,
     category: classifyRfbsReturn(r),
   }));

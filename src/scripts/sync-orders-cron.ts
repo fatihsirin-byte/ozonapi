@@ -165,6 +165,14 @@ const ASE_AUTO_SEND_DELAY_MS = 1500;
 // hariç tutuldu (iptal edilmiş bir siparişe gümrük beyanı gitmesi asla doğru olmaz).
 const ASE_AUTO_SEND_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
+// NOT (2026-09-23, kullanıcı doğruladı): bu sınır eklendiğinde 236 adet ESKİ (10-15 Eylül tarihli)
+// sipariş "faturası onaylı ama ASE'ye hiç gönderilmemiş" halde bulunmuştu — bu bir HATA/BUG
+// DEĞİL: "Fatura Kes" ve "ASE'ye Gönder" 16 Eylül'e kadar AYRI iki manuel butondu (bkz.
+// InvoiceAndAseButton.tsx ve sendOrderToAse'in üstündeki tarihçe notu), bu siparişlerde ikinci adım
+// elle atlanmış/unutulmuş. Kullanıcı kararı: bu geçmiş siparişler kasıtlı olarak GÖRMEZDEN
+// GELİNİYOR, geriye dönük ASE gönderimi yapılmayacak — 24 saatlik sınır bunları zaten kapsam
+// dışında tutuyor, burada AYRICA bir "temizlik" kodu YAZILMADI.
+
 async function runAseAutoSend() {
   const pending = await prisma.order.findMany({
     where: {

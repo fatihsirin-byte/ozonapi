@@ -110,8 +110,32 @@ export function listSalesInvoices(page = 1, size = 25) {
 // alanına HER ZAMAN postingNumber'ı yazıyor — bu, Paraşüt'te bu sipariş için zaten kesilmiş bir
 // fatura olup olmadığını, kendi DB'mize hiç güvenmeden, doğrudan Paraşüt'ün kendi kaydından
 // sorgulamamızı sağlıyor.
-export function findSalesInvoiceByDescription(description: string) {
-  return parasutGet<ParasutSalesInvoiceListResponse>(`sales_invoices?filter[description]=${encodeURIComponent(description)}`);
+//
+// ACİL DÜZELTME (2026-09-23'te canlıda, ilk deploy'dan dakikalar sonra tespit edildi): Paraşüt
+// "'description' is not a valid filter" diye reddediyor — sales_invices'ta filtrelenebilir alanlar
+// SADECE due_date/issue_date/currency/remaining/contact_id/invoice_id/invoice_series/item_type.
+// description'a göre arama YAPILAMIYOR. Bunun yerine, faturanın kesildiği GÜNE göre (issue_date —
+// createSalesInvoice'ta HER ZAMAN "bugün" yazılıyor, bkz. orderInvoice.ts) filtreleyip, o günün
+// (genelde birkaç yüz) faturasını sayfalayarak çekip description eşleşmesini KENDİMİZ (istemci
+// tarafında) arıyoruz.
+export async function findSalesInvoiceByPostingNumber(
+  postingNumber: string,
+  issueDate: string,
+): Promise<{ id: string; type: "sales_invoices"; attributes: Record<string, unknown> } | null> {
+  // Paraşüt page[size] için 25 ÜST SINIRINI kabul ediyor ("page[size] can be maximum 25" —
+  // 2026-09-23'te canlıda denenip tespit edildi, 100 denenmişti).
+  const pageSize = 25;
+  const MAX_PAGES = 20; // 20 x 25 = 500 fatura/gün üst sınırı — güvenlik için, sonsuz döngüye girmesin
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const res = await parasutGet<ParasutSalesInvoiceListResponse>(
+      `sales_invoices?filter[issue_date]=${encodeURIComponent(issueDate)}&page[number]=${page}&page[size]=${pageSize}`,
+    );
+    const match = res.data.find((inv) => (inv.attributes as { description?: string }).description === postingNumber);
+    if (match) return match;
+    if (res.data.length < pageSize) return null; // son sayfaya gelindi, bulunamadı
+  }
+  console.error(`[parasut] findSalesInvoiceByPostingNumber: ${MAX_PAGES} sayfa (${MAX_PAGES * pageSize} fatura) tarandı, postingNumber ${postingNumber} bulunamadı — üst sınıra takıldı.`);
+  return null;
 }
 
 export function showSalesInvoice(invoiceId: string) {

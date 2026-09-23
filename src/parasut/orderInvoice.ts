@@ -1,7 +1,7 @@
 import { prisma } from "../db/prisma";
 import { getOrderDetail } from "../modules/orders/orders.service";
 import { createContact } from "./contacts";
-import { createSalesInvoice, findSalesInvoiceByDescription, updateSalesInvoiceNote } from "./invoices";
+import { createSalesInvoice, findSalesInvoiceByPostingNumber, updateSalesInvoiceNote } from "./invoices";
 import { createEArchive } from "./eArchives";
 import { searchProductsByCode, createProduct, updateProduct } from "./products";
 import { getUsdToTryRate } from "../pricing/fx-rate";
@@ -129,19 +129,15 @@ export async function createInvoiceForOzonOrder(postingNumber: string) {
 // "zaten var mı" diye soruyoruz — varsa yeni bir tane kesmek yerine var olanı DB'ye yazıp onu
 // dönüyoruz. Bu kontrol claim ALINDIKTAN sonra, ama contact/ürün oluşturmadan ÖNCE yapılıyor ki
 // hem gereksiz iş yapılmasın hem de kontak/ürün oluşturma adımları bu güvenlik ağını atlayamasın.
-async function findExistingParasutInvoice(postingNumber: string) {
-  const existing = await findSalesInvoiceByDescription(postingNumber);
-  if (existing.data.length === 0) return null;
-  if (existing.data.length > 1) {
-    // Normalde asla olmamalı (description=postingNumber benzersiz olmalı) — olduysa muhtemelen bu
-    // güvenlik ağı eklenmeden ÖNCE zaten mükerrer kesilmiş demektir. En yeni kaydı kullanıyoruz ama
-    // durumu loglayıp elle incelenebilir hale getiriyoruz; burada SESSİZCE üçüncü bir fatura
-    // kesmiyoruz.
-    console.error(
-      `[parasut] UYARI: postingNumber ${postingNumber} için Paraşüt'te birden fazla (${existing.data.length}) fatura bulundu — elle kontrol edin. ID'ler: ${existing.data.map((d) => d.id).join(", ")}`,
-    );
-  }
-  const match = existing.data[existing.data.length - 1];
+//
+// NOT (2026-09-23'te canlıda, ilk deploy'dan dakikalar sonra tespit edildi): description'a göre
+// DOĞRUDAN filtrelemek Paraşüt'te desteklenmiyor ("'description' is not a valid filter") — bu
+// yüzden issue_date'e (faturanın kesildiği gün — createSalesInvoice'a HER ZAMAN "bugün" yazılıyor,
+// bkz. aşağıdaki issueDate) göre filtreleyip eşleşmeyi kendimiz arıyoruz (bkz.
+// findSalesInvoiceByPostingNumber). Bu yüzden issueDate ÖNCEDEN, faturayı kesmeden bilinmeli.
+async function findExistingParasutInvoice(postingNumber: string, issueDate: string) {
+  const match = await findSalesInvoiceByPostingNumber(postingNumber, issueDate);
+  if (!match) return null;
   const invoiceId = match.id;
   const invoiceNo = (match.attributes as { invoice_no?: string }).invoice_no ?? null;
   const printUrl = buildSalesInvoicePrintUrl(process.env.PARASUT_COMPANY_ID ?? "", invoiceId);
@@ -149,9 +145,12 @@ async function findExistingParasutInvoice(postingNumber: string) {
 }
 
 async function doCreateInvoiceForOzonOrder(postingNumber: string) {
+  // Faturanın issue_date'i HER ZAMAN "bugün" (bkz. aşağıdaki ikinci issueDate ataması) — güvenlik
+  // ağı ile gerçek fatura oluşturmada AYNI günü kullanmak için burada, en başta hesaplanıyor.
+  const todayIssueDate = new Date().toISOString().slice(0, 10);
   // Paraşüt'ün kendi kaydını, bizim DB'mize güvenmeden sorguluyoruz (bkz. yukarıdaki fonksiyon
   // yorumu) — order detayını/ürünlerini çekmeden ÖNCE, gereksiz iş yapmayalım diye en başta.
-  const existingInvoice = await findExistingParasutInvoice(postingNumber);
+  const existingInvoice = await findExistingParasutInvoice(postingNumber, todayIssueDate);
   if (existingInvoice) {
     console.error(
       `[parasut] Mükerrer fatura önlendi: postingNumber ${postingNumber} için Paraşüt'te zaten fatura ${existingInvoice.invoiceId} bulundu, yeni fatura KESİLMEDİ.`,

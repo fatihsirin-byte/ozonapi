@@ -1,7 +1,7 @@
 import { prisma } from "../db/prisma";
 import { getOrderDetail } from "../modules/orders/orders.service";
 import { createContact } from "./contacts";
-import { createSalesInvoice, updateSalesInvoiceNote } from "./invoices";
+import { createSalesInvoice, findSalesInvoiceByDescription, updateSalesInvoiceNote } from "./invoices";
 import { createEArchive } from "./eArchives";
 import { searchProductsByCode, createProduct, updateProduct } from "./products";
 import { getUsdToTryRate } from "../pricing/fx-rate";
@@ -116,7 +116,62 @@ export async function createInvoiceForOzonOrder(postingNumber: string) {
   }
 }
 
+// SON GÜVENLİK AĞI (2026-09-23'te canlıda tespit edildi, kullanıcı bulgusu: 28786010-0549-1
+// siparişi için Paraşüt'te GZ02026000000814 numaralı GERÇEK fatura vardı ama panel siparişi hâlâ
+// faturalanmamış gösteriyordu): createInvoiceForOzonOrder'daki claim (parasutInvoiceId
+// null→"PENDING") sadece Paraşüt'e istek gitmeden ÖNCEKİ çift tıklama/iki sekme yarış durumunu
+// önlüyor — createSalesInvoice BAŞARILI olduktan SONRA, ama bu fonksiyonun sonundaki
+// prisma.order.update'e ulaşmadan ÖNCE süreç çökerse/restart olursa, dıştaki catch (bkz.
+// createInvoiceForOzonOrder) parasutInvoiceId'yi tekrar null'a çekiyor — sistem siparişi "hiç
+// faturalanmamış" sanıyor, oysa Paraşüt'te fatura ZATEN ve KALICI olarak var. Bir sonraki deneme bu
+// yüzden GERÇEK, ikinci bir fatura kesebilirdi. Burada, createSalesInvoice'a HER ZAMAN description
+// olarak yazdığımız postingNumber ile Paraşüt'ün kendi kaydını sorgulayıp, DB'mize hiç güvenmeden
+// "zaten var mı" diye soruyoruz — varsa yeni bir tane kesmek yerine var olanı DB'ye yazıp onu
+// dönüyoruz. Bu kontrol claim ALINDIKTAN sonra, ama contact/ürün oluşturmadan ÖNCE yapılıyor ki
+// hem gereksiz iş yapılmasın hem de kontak/ürün oluşturma adımları bu güvenlik ağını atlayamasın.
+async function findExistingParasutInvoice(postingNumber: string) {
+  const existing = await findSalesInvoiceByDescription(postingNumber);
+  if (existing.data.length === 0) return null;
+  if (existing.data.length > 1) {
+    // Normalde asla olmamalı (description=postingNumber benzersiz olmalı) — olduysa muhtemelen bu
+    // güvenlik ağı eklenmeden ÖNCE zaten mükerrer kesilmiş demektir. En yeni kaydı kullanıyoruz ama
+    // durumu loglayıp elle incelenebilir hale getiriyoruz; burada SESSİZCE üçüncü bir fatura
+    // kesmiyoruz.
+    console.error(
+      `[parasut] UYARI: postingNumber ${postingNumber} için Paraşüt'te birden fazla (${existing.data.length}) fatura bulundu — elle kontrol edin. ID'ler: ${existing.data.map((d) => d.id).join(", ")}`,
+    );
+  }
+  const match = existing.data[existing.data.length - 1];
+  const invoiceId = match.id;
+  const invoiceNo = (match.attributes as { invoice_no?: string }).invoice_no ?? null;
+  const printUrl = buildSalesInvoicePrintUrl(process.env.PARASUT_COMPANY_ID ?? "", invoiceId);
+  return { invoiceId, invoiceNo, printUrl };
+}
+
 async function doCreateInvoiceForOzonOrder(postingNumber: string) {
+  // Paraşüt'ün kendi kaydını, bizim DB'mize güvenmeden sorguluyoruz (bkz. yukarıdaki fonksiyon
+  // yorumu) — order detayını/ürünlerini çekmeden ÖNCE, gereksiz iş yapmayalım diye en başta.
+  const existingInvoice = await findExistingParasutInvoice(postingNumber);
+  if (existingInvoice) {
+    console.error(
+      `[parasut] Mükerrer fatura önlendi: postingNumber ${postingNumber} için Paraşüt'te zaten fatura ${existingInvoice.invoiceId} bulundu, yeni fatura KESİLMEDİ.`,
+    );
+    await prisma.order.update({
+      where: { postingNumber },
+      data: {
+        parasutInvoiceId: existingInvoice.invoiceId,
+        parasutInvoiceNo: existingInvoice.invoiceNo,
+        parasutPrintUrl: existingInvoice.printUrl,
+        parasutInvoicedAt: new Date(),
+        // Bilinmeyen bir eArchive durumundan geliyoruz — burada iyimser "false" yazıp otomatik bir
+        // e-Arşiv retry'ı TETİKLEMİYORUZ (mevcut e-Arşiv durumu her ne ise, "Faturayı Aç"/PDF
+        // sorgulama akışı zaten kendi başına doğru durumu okuyacak, bkz. eArchives.ts).
+        parasutEArchiveFailed: false,
+      },
+    });
+    return { ...existingInvoice, alreadyExisted: true, eArchiveFailed: false };
+  }
+
   const order = await getOrderDetail(postingNumber);
   if (!order) throw new OrderInvoiceError("Sipariş bulunamadı");
   if (order.items.length === 0) throw new OrderInvoiceError("Siparişte kalem yok");

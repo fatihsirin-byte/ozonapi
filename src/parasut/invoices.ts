@@ -105,6 +105,15 @@ export function listSalesInvoices(page = 1, size = 25) {
   return parasutGet<ParasutSalesInvoiceListResponse>(`sales_invoices?page[number]=${page}&page[size]=${size}`);
 }
 
+// SON GÜVENLİK AĞI (2026-09-23'te canlıda tespit edildi, bkz. orderInvoice.ts'teki
+// findExistingParasutInvoice yorumu): orderInvoice.ts createSalesInvoice çağrılırken description
+// alanına HER ZAMAN postingNumber'ı yazıyor — bu, Paraşüt'te bu sipariş için zaten kesilmiş bir
+// fatura olup olmadığını, kendi DB'mize hiç güvenmeden, doğrudan Paraşüt'ün kendi kaydından
+// sorgulamamızı sağlıyor.
+export function findSalesInvoiceByDescription(description: string) {
+  return parasutGet<ParasutSalesInvoiceListResponse>(`sales_invoices?filter[description]=${encodeURIComponent(description)}`);
+}
+
 export function showSalesInvoice(invoiceId: string) {
   return parasutGet<ParasutSalesInvoiceResponse>(`sales_invoices/${invoiceId}?include=active_e_document,contact,details.product`);
 }

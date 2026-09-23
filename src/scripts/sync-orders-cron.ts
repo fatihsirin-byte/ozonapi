@@ -4,6 +4,11 @@ import { syncTransactionsForDateRange } from "../modules/finance/finance.service
 import { backfillMissingStock } from "../modules/products/products.service";
 import { pollAseShipmentStatuses } from "../ase/statusPolling";
 import { syncReturns, syncRfbsReturns } from "../modules/returns/returns.service";
+import { prisma } from "../db/prisma";
+import { resolveInvoicePdfForOrder } from "../parasut/eArchives";
+import { showSalesInvoice } from "../parasut/invoices";
+import { cacheInvoicePdfIfMissing } from "../parasut/pdfCache";
+import { INVOICE_CLAIM_SENTINEL } from "../parasut/orderInvoice";
 
 const DEFAULT_STOCK = 100;
 
@@ -66,10 +71,71 @@ async function runReturnsSync() {
   }
 }
 
+// KRİTİK (2026-09-23'te canlıda tespit edildi, kullanıcı bulgusu: "bugün faturası kesilenler"
+// listesinde birkaç sipariş gri/onaysız takılı kaldı): fatura kesildikten sonraki e-Arşiv/GİB
+// onayı ŞİMDİYE KADAR SADECE o siparişin satırı bir tarayıcıda açıkken çalışan istemci-taraflı
+// polling'le (InvoiceAndAseButton.tsx, en fazla 2 dakika/12 deneme) tetikleniyordu — sayfa
+// kapatılır/başka yere gidilirse ya da tam o an Paraşüt'ün 429 hız sınırına denk gelinirse (bkz.
+// src/parasut/client.ts), onay bir daha KİMSE o siparişi elle "Tekrar Dene"lemeden asla
+// gerçekleşmiyordu (fatura Paraşüt'te GERÇEKTEN var, sadece bizim DB'miz numarayı hiç
+// öğrenemiyordu). Burada AYNI, güvenli resolveInvoicePdfForOrder'ı (yeni bir e-Arşiv OLUŞTURMUYOR,
+// sadece var olanın durumunu soruyor — bkz. src/parasut/eArchives.ts) periyodik olarak sunucudan
+// tekrar deniyoruz, kimse sayfayı açık tutmak zorunda kalmasın diye. Sıralı (paralel DEĞİL) ve
+// aralarında kısa bir gecikmeyle işleniyor — 429 hız sınırına toplu çarpmayı önlemek için.
+const INVOICE_CONFIRM_BATCH_SIZE = 25;
+const INVOICE_CONFIRM_DELAY_MS = 1500;
+
+async function runInvoiceConfirmationSync() {
+  const pending = await prisma.order.findMany({
+    where: {
+      parasutInvoiceId: { not: null },
+      parasutInvoiceNoConfirmed: false,
+      NOT: { parasutInvoiceId: INVOICE_CLAIM_SENTINEL },
+    },
+    select: { postingNumber: true, parasutInvoiceId: true },
+    take: INVOICE_CONFIRM_BATCH_SIZE,
+  });
+  if (pending.length === 0) return;
+
+  let confirmed = 0;
+  for (const order of pending) {
+    const invoiceId = order.parasutInvoiceId as string;
+    try {
+      const result = await resolveInvoicePdfForOrder(order.postingNumber, invoiceId);
+      if (result.status === "ready") {
+        try {
+          await cacheInvoicePdfIfMissing(order.postingNumber, result.pdfUrl);
+        } catch (err) {
+          console.error(`[sync-orders-cron] PDF önbelleğe alınamadı (posting ${order.postingNumber}):`, err);
+        }
+        const invoice = await showSalesInvoice(invoiceId);
+        const invoiceNo = (invoice.data.attributes as { invoice_no?: string }).invoice_no ?? null;
+        if (invoiceNo) {
+          await prisma.order.update({
+            where: { postingNumber: order.postingNumber },
+            data: { parasutInvoiceNo: invoiceNo, parasutInvoiceNoConfirmed: true },
+          });
+          confirmed += 1;
+        }
+      }
+    } catch (error) {
+      console.error(`[sync-orders-cron] fatura onay kontrolü hatası (posting ${order.postingNumber}):`, error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, INVOICE_CONFIRM_DELAY_MS));
+  }
+  if (confirmed > 0) {
+    console.log(`[sync-orders-cron] ${new Date().toISOString()} — ${confirmed}/${pending.length} bekleyen fatura onayı arka planda tamamlandı`);
+  }
+}
+
 cron.schedule("*/15 * * * *", runSync);
 cron.schedule("*/15 * * * *", runReturnsSync);
 cron.schedule("0 */3 * * *", runAsePoll);
-console.log("[sync-orders-cron] başlatıldı — sipariş/finans/iade senkronu 15 dakikada bir, ASE durum kontrolü 3 saatte bir çalışacak");
+cron.schedule("*/5 * * * *", runInvoiceConfirmationSync);
+console.log(
+  "[sync-orders-cron] başlatıldı — sipariş/finans/iade senkronu 15 dakikada bir, ASE durum kontrolü 3 saatte bir, bekleyen fatura onayı 5 dakikada bir çalışacak",
+);
 runSync();
 runReturnsSync();
 runAsePoll();
+runInvoiceConfirmationSync();

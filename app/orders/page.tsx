@@ -442,8 +442,8 @@ export default async function OrdersPage({
                             href={`/api/orders/${encodeURIComponent(o.postingNumber)}/label`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="btn-secondary"
-                            style={{ display: "inline-block", fontSize: 12, padding: "4px 8px", textDecoration: "none" }}
+                            className="btn-primary"
+                            style={{ display: "inline-block", textAlign: "center", textDecoration: "none" }}
                           >
                             Etiket Yazdır
                           </a>

@@ -432,6 +432,23 @@ export default async function OrdersPage({
                           />
                         </div>
                       )}
+                      {/* Ozon'un etiket API'si SADECE "awaiting_deliver" (Kargoya Hazır) durumunda
+                          çalışıyor (bkz. app/api/orders/[postingNumber]/label/route.ts) — daha
+                          erken/geç denenirse Ozon reddediyor, o yüzden buton sadece bu durumda
+                          gösteriliyor. PDF her zaman Ozon'dan canlı çekiliyor, biz saklamıyoruz. */}
+                      {o.status === "awaiting_deliver" && (
+                        <div style={{ marginBottom: 6 }}>
+                          <a
+                            href={`/api/orders/${encodeURIComponent(o.postingNumber)}/label`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn-secondary"
+                            style={{ display: "inline-block", fontSize: 12, padding: "4px 8px", textDecoration: "none" }}
+                          >
+                            Etiket Yazdır
+                          </a>
+                        </div>
+                      )}
                       <InvoiceAndAseButton
                         key={o.postingNumber}
                         postingNumber={o.postingNumber}

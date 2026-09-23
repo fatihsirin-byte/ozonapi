@@ -64,13 +64,23 @@ export async function resolveOrderHsCodes(postingNumber: string): Promise<OrderH
   }));
 }
 
-// Bir Ozon siparişini ASE'ye (gümrük/ETGB) bildirir. SADECE ELLE, kullanıcı sipariş sayfasındaki
-// "ASE'ye Gönder" butonuna bastığında çağrılır (bkz. app/api/orders/[postingNumber]/ase-shipment/route.ts)
-// — önceki bir sürümde hem fatura PDF durumu kontrol edilirken hem 15 dakikalık cron'da otomatik
-// deneniyordu, kullanıcı bunu öngörülemez bulup kaldırılmasını istedi (2026-09-13). Fatura numarası
-// KESİNLEŞMEDEN (bkz. Order.parasutInvoiceNoConfirmed) hiçbir şey yapmaz — henüz geçici olabilecek
-// bir numarayı gümrüğe bildirmemek için. TASARIM GEREĞİ hiçbir zaman exception fırlatmaz — çağıran
-// route sonucu (isSuccess/mesaj) DB'den okuyup kullanıcıya gösterir.
+// Bir Ozon siparişini ASE'ye (gümrük/ETGB) bildirir. Kullanıcı sipariş sayfasındaki "Fatura Kes +
+// ASE'ye Gönder" akışından (bkz. InvoiceAndAseButton.tsx, fatura onaylanınca otomatik tetikler) VE
+// src/scripts/sync-orders-cron.ts'teki runAseAutoSend'den (2026-09-23'ten itibaren, 5 dakikada bir
+// — henüz hiç denenmemiş siparişler için) çağrılır.
+//
+// TARİHÇE: 2026-09-13'te bu otomatik/periyodik çağrı BİLEREK kaldırılmıştı ("kullanıcı bunu
+// öngörülemez bulmuştu") — o zaman fatura kesme ve ASE gönderme AYRI iki buton/adımdı. 2026-09-16'da
+// akış "Fatura Kes + ASE'ye Gönder" olarak TEK bir otomatik zincire birleştirildi; kullanıcı artık
+// "fatura onaylanınca ASE otomatik gitsin" davranışını İSTİYOR, sadece bunun bir tarayıcı sekmesinin
+// açık kalmasına bağlı olmamasını istedi (2026-09-23, canlıda: "f5 attım ... demek ki tam
+// arkaplanda çalışmıyor" bulgusu üzerine, kullanıcı onayıyla periyodik çağrı GERİ eklendi) — bu
+// yüzden aşağıdaki güvenli davranış (inFlight kilidi + zaten başarılıysa atlama) hem tıklamalar hem
+// periyodik cron çağrıları için AYNI korumayı sağlıyor, tekrar tekrar çağrılması ZARARSIZ.
+//
+// Fatura numarası KESİNLEŞMEDEN (bkz. Order.parasutInvoiceNoConfirmed) hiçbir şey yapmaz — henüz
+// geçici olabilecek bir numarayı gümrüğe bildirmemek için. TASARIM GEREĞİ hiçbir zaman exception
+// fırlatmaz — çağıran route/cron sonucu (isSuccess/mesaj) DB'den okuyup kullanıcıya gösterir.
 export function sendOrderToAse(postingNumber: string): Promise<void> {
   const existing = inFlight.get(postingNumber);
   if (existing) return existing;

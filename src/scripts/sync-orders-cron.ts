@@ -9,6 +9,7 @@ import { resolveInvoicePdfForOrder } from "../parasut/eArchives";
 import { showSalesInvoice } from "../parasut/invoices";
 import { cacheInvoicePdfIfMissing } from "../parasut/pdfCache";
 import { INVOICE_CLAIM_SENTINEL } from "../parasut/orderInvoice";
+import { sendOrderToAse } from "../ase/orderShipment";
 
 const DEFAULT_STOCK = 100;
 
@@ -128,14 +129,60 @@ async function runInvoiceConfirmationSync() {
   }
 }
 
+// GÜNCELLEME (2026-09-23'te canlıda, kullanıcı bulgusu: "f5 attım paraşüt geldi, asey sonra yaptı
+// demek ki tam arkaplanda çalışmıyor bu flow"): yukarıdaki runInvoiceConfirmationSync fatura
+// numarasını arka planda onaylıyordu AMA ASE'ye gönderim hâlâ SADECE InvoiceAndAseButton.tsx
+// bileşeni bir tarayıcıda mount olduğunda (sayfa açılınca) tetikleniyordu — kimse o siparişin
+// sayfasını açmazsa, fatura onaylansa bile ASE'ye HİÇBİR ZAMAN gönderilmiyordu.
+//
+// NOT: sendOrderToAse'in üstündeki eski yorum ("SADECE ELLE ... kullanıcı bunu öngörülemez
+// bulmuştu, 2026-09-13") o zamanki AYRI "ASE'ye Gönder" butonu modeli içindi. 2026-09-16'da akış
+// "Fatura Kes + ASE'ye Gönder" olarak TEK bir otomatik zincire birleştirildi (bkz.
+// InvoiceAndAseButton.tsx dosya başı yorumu) — yani kullanıcı zaten "fatura onaylanınca ASE
+// otomatik gitsin" davranışını istiyor, sadece bunun bir tarayıcı sekmesi açık kalmasına bağlı
+// olmaması gerekiyordu (2026-09-23, kullanıcı onayı: "evet, hemen ekle").
+//
+// sendOrderToAse KENDİ İÇİNDE güvenli: aynı sipariş için eşzamanlı çağrıları birleştiriyor
+// (inFlight Map) ve aseShipmentSuccess zaten true ise hiçbir şey yapmıyor (bkz.
+// src/ase/orderShipment.ts) — bu yüzden burada tekrar tekrar çağrılması ZARARSIZ. BİLEREK SADECE
+// hiç denenmemiş (aseShipmentSentAt boş) siparişler için çalışıyor — daha önce GERÇEKTEN
+// başarısız olmuş (ör. kalıcı HS kod hatası) siparişleri burada otomatik tekrar DENEMİYORUZ, o
+// hâlâ kullanıcının "Tekrar Dene" butonuna basmasını gerektiriyor (aksi halde aynı bozuk siparişe
+// 5 dakikada bir gereksiz ASE isteği atılırdı).
+const ASE_AUTO_SEND_BATCH_SIZE = 25;
+const ASE_AUTO_SEND_DELAY_MS = 1500;
+
+async function runAseAutoSend() {
+  const pending = await prisma.order.findMany({
+    where: { parasutInvoiceNoConfirmed: true, aseShipmentSentAt: null },
+    select: { postingNumber: true },
+    take: ASE_AUTO_SEND_BATCH_SIZE,
+  });
+  if (pending.length === 0) return;
+
+  let sent = 0;
+  for (const order of pending) {
+    try {
+      await sendOrderToAse(order.postingNumber);
+      sent += 1;
+    } catch (error) {
+      console.error(`[sync-orders-cron] ASE otomatik gönderim hatası (posting ${order.postingNumber}):`, error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, ASE_AUTO_SEND_DELAY_MS));
+  }
+  console.log(`[sync-orders-cron] ${new Date().toISOString()} — ${sent}/${pending.length} sipariş arka planda ASE'ye gönderildi`);
+}
+
 cron.schedule("*/15 * * * *", runSync);
 cron.schedule("*/15 * * * *", runReturnsSync);
 cron.schedule("0 */3 * * *", runAsePoll);
 cron.schedule("*/5 * * * *", runInvoiceConfirmationSync);
+cron.schedule("*/5 * * * *", runAseAutoSend);
 console.log(
-  "[sync-orders-cron] başlatıldı — sipariş/finans/iade senkronu 15 dakikada bir, ASE durum kontrolü 3 saatte bir, bekleyen fatura onayı 5 dakikada bir çalışacak",
+  "[sync-orders-cron] başlatıldı — sipariş/finans/iade senkronu 15 dakikada bir, ASE durum kontrolü 3 saatte bir, bekleyen fatura onayı ve ASE gönderimi 5 dakikada bir çalışacak",
 );
 runSync();
 runReturnsSync();
 runAsePoll();
 runInvoiceConfirmationSync();
+runAseAutoSend();

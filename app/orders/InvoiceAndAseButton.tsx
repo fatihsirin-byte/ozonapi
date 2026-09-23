@@ -388,7 +388,7 @@ export function InvoiceAndAseButton({
     return (
       <div>
         <button className="btn-primary" disabled={invoiceLoading} onClick={handleCreate}>
-          {invoiceLoading ? "Kesiliyor..." : "Fatura Kes + ASE'ye Gönder"}
+          {invoiceLoading ? "Kesiliyor..." : "Fatura + ASE"}
         </button>
         {invoiceError && (
           <div className="hint" style={{ color: "var(--danger)", marginTop: 4 }}>

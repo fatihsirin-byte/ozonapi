@@ -152,9 +152,27 @@ async function runInvoiceConfirmationSync() {
 const ASE_AUTO_SEND_BATCH_SIZE = 25;
 const ASE_AUTO_SEND_DELAY_MS = 1500;
 
+// ACİL SINIRLAMA (2026-09-23'te canlıda, ilk deploy'dan dakikalar sonra tespit edildi): yukarıdaki
+// sorgu filtresiz haliyle deploy edildiğinde, "fatura onaylı ama ASE hiç gönderilmemiş" 261 GEÇMİŞ
+// siparişle karşılaşıldı — hepsi 2026-09-10/15 tarihli (8-13 gün önce faturalanmış), 2'si de
+// "cancelled" (İPTAL EDİLMİŞ) durumda. Cron bunları hemen ilk turda 25'erli gruplar halinde
+// göndermeye BAŞLAMIŞTI BİLE. Bu, planlanan davranış DEĞİL — bu iş SADECE "fatura az önce onaylandı
+// ama kimse sayfayı açmadığı için ASE gönderilemedi" tazeliğindeki siparişler için tasarlanmıştı,
+// günler önceki geçmiş bir birikimi geriye dönük toptan bildirmek için değil (geç/geriye dönük
+// gümrük beyanı ASE tarafından reddedilebilir ya da başka bir sonuç doğurabilir — bu kullanıcının
+// kararı, otomatik bir cron'un DEĞİL). Bu yüzden BURADA, karar verilene kadar: (a) sadece SON 24
+// SAATTE faturalanmış siparişlerle sınırlandı, (b) "cancelled" durumundaki siparişler KESİN olarak
+// hariç tutuldu (iptal edilmiş bir siparişe gümrük beyanı gitmesi asla doğru olmaz).
+const ASE_AUTO_SEND_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 async function runAseAutoSend() {
   const pending = await prisma.order.findMany({
-    where: { parasutInvoiceNoConfirmed: true, aseShipmentSentAt: null },
+    where: {
+      parasutInvoiceNoConfirmed: true,
+      aseShipmentSentAt: null,
+      parasutInvoicedAt: { gte: new Date(Date.now() - ASE_AUTO_SEND_MAX_AGE_MS) },
+      NOT: { status: "cancelled" },
+    },
     select: { postingNumber: true },
     take: ASE_AUTO_SEND_BATCH_SIZE,
   });

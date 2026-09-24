@@ -29,12 +29,22 @@ interface AseShipmentResponse {
   items: OrderHsCodeInfo[];
 }
 
-type PdfStatus = "idle" | "checking" | "ready" | "processing" | "error" | "stalled";
+type PdfStatus = "idle" | "checking" | "ready" | "processing" | "error";
 
-const AUTO_CHECK_INTERVAL_MS = 10_000;
-// bkz. eski ParasutInvoiceButton'daki aynı sabit — sınırsız otomatik yeniden deneme Paraşüt'e
-// sürekli yük bindirir, 2 dakika sonra durup elle "Tekrar Dene" sunuluyor.
-const MAX_AUTO_CHECKS = 12;
+// GÜNCELLEME (2026-09-24'te canlıda, kullanıcı bulgusu: "bende hala tekrar dene duruyor, sayfa
+// yenile dedim gidiyor ama yeniden aynısı oluyor" + "neden statü güncellemesi için sayfayı
+// yeniletiyoruz"): eskiden 2 dakika sonra TAMAMEN vazgeçip kırmızı "✗ Tekrar Dene"ye düşülüyordu —
+// bu, GİB'in saniyeler/dakikalar içinde bitireceği ESKİ bir varsayıma dayanıyordu (bkz.
+// eArchives.ts ActiveEArchiveInfo yorumu — artık saatler sürebildiği doğrulandı). Arka planda
+// zaten sync-orders-cron.ts otomatik tamamlıyor, ama tarayıcı 2 dakika sonra bir daha KENDİLİĞİNDEN
+// kontrol etmediği için kullanıcı arka planın bitirdiğini asla GÖRMÜYORDU — sayfayı elle
+// yenilemek (yeni bir bileşen örneği = yeni bir polling döngüsü) TEK çözüm yolu oluyordu. Artık
+// ASLA tam vazgeçmiyoruz: ilk 2 dakika sık (10sn), sonrasında SEYREK (60sn) ama SÜRESİZ kontrol
+// ediyoruz — "stalled" (kalıcı başarısız) durumu kaldırıldı, kırmızı "✗ Tekrar Dene" artık SADECE
+// gerçek bir ağ/istek hatasında (pdfStatus "error") gösteriliyor.
+const FAST_CHECK_INTERVAL_MS = 10_000;
+const FAST_CHECK_COUNT = 12; // ilk 2 dakika
+const SLOW_CHECK_INTERVAL_MS = 60_000; // sonrasında dakikada bir, sınırsız
 
 // "Fatura Kes" + "ASE'ye Gönder" TEK bir akış olarak birleştirildi (2026-09-16, kullanıcı talebi:
 // "paraşüt fatura yazdır ve ase gönderin tek butonla bekleyerek yapılması, retry lar olması,
@@ -203,19 +213,23 @@ export function InvoiceAndAseButton({
     if (!hasInvoice || invoiceConfirmed) return;
     attemptsRef.current = 0;
     checkPdfStatus();
-    const interval = setInterval(() => {
+    // İlk FAST_CHECK_COUNT turu sık (10sn) aralıkla, sonrasında SEYREK (60sn) ama SÜRESİZ devam
+    // eder — bkz. dosya başındaki FAST_CHECK_COUNT yorumu, artık hiçbir zaman tam vazgeçmiyoruz.
+    let interval = setInterval(tick, FAST_CHECK_INTERVAL_MS);
+    let slowedDown = false;
+    function tick() {
       if (statusRef.current === "ready") {
         clearInterval(interval);
         return;
       }
       attemptsRef.current += 1;
-      if (attemptsRef.current >= MAX_AUTO_CHECKS) {
+      if (!slowedDown && attemptsRef.current >= FAST_CHECK_COUNT) {
+        slowedDown = true;
         clearInterval(interval);
-        setPdfStatus("stalled");
-        return;
+        interval = setInterval(tick, SLOW_CHECK_INTERVAL_MS);
       }
       checkPdfStatus();
-    }, AUTO_CHECK_INTERVAL_MS);
+    }
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasInvoice, invoiceConfirmed, retryTick]);
@@ -284,8 +298,11 @@ export function InvoiceAndAseButton({
   }
 
   // "Fatura" tik'i — kullanıcı talebi (2026-09-16): "paraşüte tıkladığımızda fatura önizleme
-  // açar pdf görüntüleme olarak". Hazırsa yeşil ✓ ve tıklanınca PDF'i yeni sekmede açar; onay
-  // beklerken gri "…", hata/2 dakikadır hazır değilse kırmızı ✗ ve yanında "Tekrar Dene".
+  // açar pdf görüntüleme olarak". Hazırsa yeşil ✓ ve tıklanınca PDF'i yeni sekmede açar (fatura
+  // numarası onaylanır onaylanmaz, PDF'imiz henüz önbellekte olmasa bile Paraşüt panel linkine
+  // düşerek); gerçek bir ağ hatasında kırmızı ✗ ve yanında "Tekrar Dene" — GİB'in yavaş olması
+  // ARTIK bir hata sayılmıyor (bkz. dosya başındaki FAST_CHECK_COUNT yorumu), sadece gri "…"
+  // gösterip sessizce arka planda beklemeye devam ediyoruz.
   function renderInvoiceTick() {
     const href = invoiceConfirmed ? invoiceHref() : null;
     if (href) {
@@ -301,7 +318,7 @@ export function InvoiceAndAseButton({
         </a>
       );
     }
-    if (pdfStatus === "error" || pdfStatus === "stalled") {
+    if (pdfStatus === "error") {
       return (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <span style={{ color: "var(--danger)", fontWeight: 600 }}>✗ Fatura</span>
@@ -312,7 +329,10 @@ export function InvoiceAndAseButton({
       );
     }
     return (
-      <span style={{ color: "var(--muted)", fontWeight: 600 }} title="Fatura onaylanıyor...">
+      <span
+        style={{ color: "var(--muted)", fontWeight: 600 }}
+        title="Fatura onaylanıyor — GİB tarafında saatler sürebilir, arka planda otomatik kontrol ediliyor, elle bir şey yapmanıza gerek yok"
+      >
         … Fatura
       </span>
     );

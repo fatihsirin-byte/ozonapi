@@ -68,12 +68,13 @@ function getShipmentDate(rawPayload: unknown): string | null {
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; page?: string; invoicedToday?: string; delayed?: string; q?: string }>;
+  searchParams: Promise<{ status?: string; page?: string; invoicedToday?: string; delayed?: string; asePending?: string; q?: string }>;
 }) {
   const params = await searchParams;
   const page = parsePageParam(params.page);
   const showInvoicedToday = params.invoicedToday === "1";
   const showDelayed = params.delayed === "1";
+  const showAsePending = params.asePending === "1";
   const todayRange = getIstanbulTodayRangeUtc();
   // getUsdToTryRate() matchingIds'e bağlı değil — arama sorgusunu (pahalı ILIKE) beklemeden hemen
   // paralel başlatılıyor (2026-09-10'da code review'da tespit edildi — daha önce matchingIds'in
@@ -89,10 +90,11 @@ export default async function OrdersPage({
   // (2026-09-10'da code review'da tespit edildi — filterCounts listOrders'ı gereksiz yere
   // sırayla bekliyordu).
   const listOrdersPromise = listOrders({
-    status: showInvoicedToday || showDelayed ? undefined : params.status,
+    status: showInvoicedToday || showDelayed || showAsePending ? undefined : params.status,
     invoicedSince: showInvoicedToday ? todayRange.start : undefined,
     invoicedTo: showInvoicedToday ? todayRange.end : undefined,
     delayedOnly: showDelayed,
+    asePendingOnly: showAsePending,
     matchingIds,
     skip: (page - 1) * 50,
     take: 50,
@@ -138,7 +140,7 @@ export default async function OrdersPage({
   // (status/invoicedToday/q) tek bir yerden üretiyor — daha önce ikisi ayrı ayrı elle yazılmıştı
   // (2026-09-10'da code review'da tespit edildi: iki yerde aynı mantığın tekrarlanması, yeni bir
   // filtre eklendiğinde birinin unutulma riskini taşıyordu).
-  function ordersQuery(overrides: { status?: string; invoicedToday?: string; delayed?: string } = {}) {
+  function ordersQuery(overrides: { status?: string; invoicedToday?: string; delayed?: string; asePending?: string } = {}) {
     const qs = new URLSearchParams(overrides);
     if (params.q) qs.set("q", params.q);
     return qs.toString();
@@ -148,7 +150,7 @@ export default async function OrdersPage({
   // linkler de aramayı korumalı — aksi halde kullanıcı "iphone" aratıp "Teslim Edildi (2)" görüp
   // tıkladığında arama sıfırlanır ve gördüğü sayı ile indiği liste birbirini tutmazdı (2026-09-10'da
   // code review'da tespit edildi).
-  function filterHref(overrides: { status?: string; invoicedToday?: string; delayed?: string }) {
+  function filterHref(overrides: { status?: string; invoicedToday?: string; delayed?: string; asePending?: string }) {
     const s = ordersQuery(overrides);
     return s ? `/orders?${s}` : "/orders";
   }
@@ -157,6 +159,7 @@ export default async function OrdersPage({
     ...(params.status ? { status: params.status } : {}),
     ...(showInvoicedToday ? { invoicedToday: "1" } : {}),
     ...(showDelayed ? { delayed: "1" } : {}),
+    ...(showAsePending ? { asePending: "1" } : {}),
   });
   const pageQueryPrefix = currentQuery ? `${currentQuery}&` : "";
   // Filtre/arama/sayfa DEĞİŞTİĞİNDE toplu paketleme seçimi (BulkShipProvider'ın içindeki state)
@@ -194,7 +197,7 @@ export default async function OrdersPage({
       <BulkShipBar />
       <div className="card" style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <Link href={filterHref({})}>
-          <button className={`btn-secondary${!params.status && !showInvoicedToday && !showDelayed ? " active" : ""}`}>
+          <button className={`btn-secondary${!params.status && !showInvoicedToday && !showDelayed && !showAsePending ? " active" : ""}`}>
             Tümü <span className="hint">({filterCounts.total})</span>
           </button>
         </Link>
@@ -205,13 +208,13 @@ export default async function OrdersPage({
                 birlikte varsa (ör. ?delayed=1&status=delivered) sadece "Gecikenler" aktif
                 görünmeli, aksi halde iki buton aynı anda "aktif" görünüp gerçek filtreyle
                 çelişirdi (2026-09-11'de code review'da tespit edildi). */}
-            <button className={`btn-secondary${params.status === s && !showDelayed ? " active" : ""}`}>
+            <button className={`btn-secondary${params.status === s && !showDelayed && !showAsePending ? " active" : ""}`}>
               {translateOrderStatus(s)} <span className="hint">({filterCounts.byStatus[s] ?? 0})</span>
             </button>
           </Link>
         ))}
         <Link href={filterHref({ invoicedToday: "1" })}>
-          <button className={`btn-secondary${showInvoicedToday && !showDelayed ? " active" : ""}`}>
+          <button className={`btn-secondary${showInvoicedToday && !showDelayed && !showAsePending ? " active" : ""}`}>
             Bugün Faturası Kesilenler <span className="hint">({filterCounts.invoicedToday})</span>
           </button>
         </Link>
@@ -223,6 +226,17 @@ export default async function OrdersPage({
             Gecikenler{" "}
             <span className="hint" style={{ color: filterCounts.delayedCount > 0 ? "var(--danger)" : undefined }}>
               ({filterCounts.delayedCount})
+            </span>
+          </button>
+        </Link>
+        <Link href={filterHref({ asePending: "1" })}>
+          <button
+            className={`btn-secondary${showAsePending ? " active" : ""}`}
+            title="Faturası kesilmiş ama ASE'ye henüz başarıyla gönderilmemiş siparişler — tarihten bağımsız (ör. henüz kargoya verilmediği için Ozon'un ASE'ye iletmediği siparişleri bulmak için)"
+          >
+            ASE Bekleyen{" "}
+            <span className="hint" style={{ color: filterCounts.asePending > 0 ? "var(--danger)" : undefined }}>
+              ({filterCounts.asePending})
             </span>
           </button>
         </Link>
@@ -494,6 +508,7 @@ export default async function OrdersPage({
                       <InvoiceAndAseButton
                         key={o.postingNumber}
                         postingNumber={o.postingNumber}
+                        orderStatus={o.status}
                         initialInvoiceNo={o.parasutInvoiceNo}
                         initialPrintUrl={o.parasutPrintUrl}
                         initialInvoiceConfirmed={o.parasutInvoiceNoConfirmed}

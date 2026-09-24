@@ -129,6 +129,7 @@ export default async function OrderDetailPage({
           <InvoiceAndAseButton
             key={order.postingNumber}
             postingNumber={order.postingNumber}
+            orderStatus={order.status}
             initialInvoiceNo={order.parasutInvoiceNo}
             initialPrintUrl={order.parasutPrintUrl}
             initialInvoiceConfirmed={order.parasutInvoiceNoConfirmed}

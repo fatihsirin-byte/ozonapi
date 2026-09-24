@@ -69,7 +69,16 @@ export function BulkShipBar() {
   }
 
   async function handleBulkInvoiceAse() {
-    if (!confirm(`${entries.length} sipariş için Paraşüt'te GERÇEK satış faturaları kesilecek. Onaylıyor musunuz?`)) return;
+    // ACİL DÜZELTME (2026-09-24, kullanıcı bulgusu): henüz "Toplanmamış"/kargoya verilmemiş
+    // siparişler faturalanınca ASE bunları asla kabul etmiyor (Ozon iletene kadar, bkz.
+    // InvoiceAndAseButton.tsx'teki aynı uyarı). Tekil butondaki uyarıyla AYNI gerekçeyle burada da
+    // ekleniyor — akış engellenmiyor, sadece bilgilendiriliyor.
+    const notYetPacked = entries.filter((e) => e.status === "awaiting_packaging").length;
+    const earlyWarning =
+      notYetPacked > 0
+        ? `\n\nUYARI: Seçilenlerden ${notYetPacked} tanesi henüz kargoya verilmedi (Paketleme Bekliyor) — Ozon paketi ASE'ye iletene kadar ASE gönderimi otomatik olarak bekleyecek.`
+        : "";
+    if (!confirm(`${entries.length} sipariş için Paraşüt'te GERÇEK satış faturaları kesilecek. Onaylıyor musunuz?${earlyWarning}`)) return;
     setInvoiceLoading(true);
     setError(null);
     setInvoiceResults(null);

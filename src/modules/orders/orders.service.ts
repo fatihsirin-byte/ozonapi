@@ -540,6 +540,13 @@ export async function listOrders(params: {
   // (durumu delivering/delivered/cancelled DIŞINDA) siparişler — status filtresiyle BİRLİKTE değil,
   // ONUN YERİNE kullanılır (2026-09-11, kullanıcı talebi).
   delayedOnly?: boolean;
+  // "ASE Bekleyen" sekmesi (2026-09-24, kullanıcı talebi: "erken faturalanan siparişlere sonradan
+  // nasıl erişebiliriz") — faturası kesilmiş ama ASE'ye henüz BAŞARIYLA gönderilmemiş siparişleri,
+  // TARİHTEN BAĞIMSIZ (invoicedToday gibi sadece "bugün" DEĞİL) gösterir. En sık örneği: sipariş
+  // henüz "Topla" ile kargoya verilmeden fatura kesilmiş (Ozon paketi ASE'ye iletene kadar ASE
+  // kabul etmiyor, bkz. src/ase/orderShipment.ts SHIPMENT_NOT_YET_SYNCED_ERROR_CODE) — bu sekme,
+  // "bugün kesilenler" filtresi ertesi güne geçince o siparişleri kaybetmemek için var.
+  asePendingOnly?: boolean;
   skip?: number;
   take?: number;
 }) {
@@ -584,6 +591,11 @@ export async function listOrders(params: {
           },
         }
       : {}),
+    // "PENDING" — orderInvoice.ts'teki INVOICE_CLAIM_SENTINEL ile AYNI değer, döngüsel import
+    // oluşturmamak için burada elle tekrarlanıyor (o dosya zaten bu dosyadan import ediyor).
+    ...(params.asePendingOnly
+      ? { parasutInvoiceId: { not: null }, NOT: { parasutInvoiceId: "PENDING" }, aseShipmentSuccess: { not: true } }
+      : {}),
     ...matchingIdsWhere(matchingIds),
   };
 
@@ -621,7 +633,7 @@ export async function getOrderFilterCounts(params: {
   // "total" ayrı bir COUNT(*) yerine durum gruplarının toplamından türetiliyor — Order.status
   // zorunlu (non-nullable) bir alan olduğu için bu iki değer matematiksel olarak hep eşit, ayrı
   // sorgu sadece gereksiz bir DB gidiş-dönüşüydü (2026-09-10'da code review'da tespit edildi).
-  const [statusGroups, invoicedToday, delayCandidates] = await Promise.all([
+  const [statusGroups, invoicedToday, delayCandidates, asePending] = await Promise.all([
     prisma.order.groupBy({ by: ["status"], where: baseWhere, _count: { _all: true } }),
     prisma.order.count({
       where: { ...baseWhere, parasutInvoicedAt: { gte: params.invoicedSince, lt: params.invoicedTo } },
@@ -632,6 +644,11 @@ export async function getOrderFilterCounts(params: {
           where: { ...baseWhere, status: { notIn: [...SHIPPED_OR_DONE_STATUSES] } },
           select: { status: true, rawPayload: true },
         }),
+    // "PENDING" — bkz. listOrders'taki asePendingOnly yorumu (döngüsel import'tan kaçınmak için
+    // INVOICE_CLAIM_SENTINEL yerine elle tekrarlandı).
+    prisma.order.count({
+      where: { ...baseWhere, parasutInvoiceId: { not: null }, NOT: { parasutInvoiceId: "PENDING" }, aseShipmentSuccess: { not: true } },
+    }),
   ]);
 
   const byStatus: Record<string, number> = {};
@@ -642,7 +659,7 @@ export async function getOrderFilterCounts(params: {
   }
   const delayedCount = params.knownDelayedCount ?? delayCandidates.filter((o) => getShipmentDelayInfo(o).isDelayed).length;
 
-  return { total, byStatus, invoicedToday, delayedCount };
+  return { total, byStatus, invoicedToday, delayedCount, asePending };
 }
 
 // Toast bildirimleri için — bu tarihten SONRA bizim DB'ye düşen (createdAt, yani sync'in yeni

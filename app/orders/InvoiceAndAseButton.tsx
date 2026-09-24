@@ -6,6 +6,13 @@ import { isHsCodeError } from "@/ase/constants";
 
 interface Props {
   postingNumber: string;
+  // Sipariş durumu — SADECE erken fatura kesme uyarısı için (2026-09-24, kullanıcı bulgusu:
+  // "Paketleme Bekliyor" listesinde tek tek tıklanarak henüz kargoya verilmemiş siparişler
+  // faturalanmıştı — Ozon paketi ASE'ye iletmeden ASE bunu asla kabul etmiyor, bkz.
+  // src/ase/orderShipment.ts SHIPMENT_NOT_YET_SYNCED_ERROR_CODE). Akışın kendisini DEĞİŞTİRMİYOR
+  // (hâlâ her durumda fatura kesilebiliyor, iş kuralı bunu gerektirebiliyor), sadece kullanıcıyı
+  // bilgilendirip yanlışlıkla/farkında olmadan yapmasını zorlaştırıyor.
+  orderStatus: string;
   initialInvoiceNo: string | null;
   initialPrintUrl: string | null;
   initialInvoiceConfirmed: boolean;
@@ -62,6 +69,7 @@ const SLOW_CHECK_INTERVAL_MS = 60_000; // sonrasında dakikada bir, sınırsız
 // değeri okumasını önlemek için) BİREBİR korunuyor.
 export function InvoiceAndAseButton({
   postingNumber,
+  orderStatus,
   initialInvoiceNo,
   initialPrintUrl,
   initialInvoiceConfirmed,
@@ -246,7 +254,17 @@ export function InvoiceAndAseButton({
   }, []);
 
   async function handleCreate() {
-    if (!confirm("Paraşüt'te bu sipariş için GERÇEK bir satış faturası kesilecek. Onaylıyor musunuz?")) return;
+    // ACİL DÜZELTME (2026-09-24'te canlıda, kullanıcı bulgusu): "Paketleme Bekliyor" listesinde
+    // sipariş sipariş "Fatura Kes"e basılınca, henüz kargoya verilmemiş (Ozon tarafından ASE'ye
+    // hiç iletilmemiş) siparişler faturalanmıştı — Ozon paketi ASE'ye iletmeden ASE bunu asla
+    // kabul etmiyor (bkz. src/ase/orderShipment.ts SHIPMENT_NOT_YET_SYNCED_ERROR_CODE yorumu).
+    // Akış hâlâ engellenmiyor (bazen bilerek erken faturalamak gerekebilir) ama ekstra bir uyarı
+    // ile yanlışlıkla/farkında olmadan yapılması zorlaştırılıyor.
+    const earlyWarning =
+      orderStatus === "awaiting_packaging"
+        ? "\n\nUYARI: Bu sipariş henüz kargoya verilmedi (Paketleme Bekliyor) — Ozon paketi ASE'ye iletene kadar ASE gönderimi otomatik olarak bekleyecek."
+        : "";
+    if (!confirm(`Paraşüt'te bu sipariş için GERÇEK bir satış faturası kesilecek. Onaylıyor musunuz?${earlyWarning}`)) return;
     setInvoiceLoading(true);
     setInvoiceError(null);
     try {

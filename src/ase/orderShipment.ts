@@ -1,6 +1,7 @@
 import { prisma } from "../db/prisma";
 import { getOrderDetail, suggestHsCodesForOrder } from "../modules/orders/orders.service";
-import { readCachedInvoicePdf } from "../parasut/pdfCache";
+import { readCachedInvoicePdf, fetchAndCacheInvoicePdf } from "../parasut/pdfCache";
+import { resolveInvoicePdfForOrder } from "../parasut/eArchives";
 import { sendShipment, ASE_SHIPMENT_TYPE, describeAseCode, type AseShipmentProduct, type SendShipmentPayload } from "./client";
 import { HSCODE_ERROR_CODE } from "./constants";
 
@@ -136,14 +137,36 @@ async function doSendOrderToAse(postingNumber: string): Promise<void> {
     }
 
     // PDF, fatura "hazır" göründüğü an zaten diske önbelleğe alınmış oluyor (bkz.
-    // src/parasut/pdfCache.ts cacheInvoicePdfIfMissing — bu fonksiyon çağrılmadan HEMEN önce,
-    // aynı route'ta çalışıyor). Görev talimatındaki "parasutPrintUrl'den indir" yaklaşımı yerine
-    // BİLEREK bu önbelleği kullanıyoruz: parasutPrintUrl aslında Paraşüt'ün giriş gerektiren
-    // /print sayfası (oturum çerezi olmadan sunucu tarafından indirilemez), oysa pdfCache.ts
-    // zaten doğrulanmış, çalışan bir PDF kaynağı sağlıyor.
-    const pdfBuffer = await readCachedInvoicePdf(postingNumber);
+    // src/parasut/pdfCache.ts cacheInvoicePdfIfMissing). Görev talimatındaki "parasutPrintUrl'den
+    // indir" yaklaşımı yerine BİLEREK bu önbelleği kullanıyoruz: parasutPrintUrl aslında Paraşüt'ün
+    // giriş gerektiren /print sayfası (oturum çerezi olmadan sunucu tarafından indirilemez), oysa
+    // pdfCache.ts zaten doğrulanmış, çalışan bir PDF kaynağı sağlıyor.
+    //
+    // GÜNCELLEME/DÜZELTME (2026-09-24'te canlıda tespit edildi, kullanıcı bulgusu: "hepsinin ASE'si
+    // X diyor, fatura PDF'i önbellekte bulunamadı diye"): sendOrderToAse artık ASE'ye Gönder
+    // butonuna/otomatik cron'a parasutInvoiceNoConfirmed true olur olmaz tetikleniyor — ama bu
+    // artık PDF'in TAM hazır olduğu anlamına gelmiyor (bkz. eArchives.ts ActiveEArchiveInfo yorumu:
+    // invoice_number, GİB onayından ÖNCE atanıyor). Önceden PDF'in zaten önbellekte olduğu
+    // GARANTİYDİ (ASE sadece PDF "ready" olduktan sonra tetikleniyordu) — artık değil, bu yüzden
+    // burada KENDİMİZ aktif olarak bir kez daha denemeliyiz. GİB hâlâ işlemdeyse (gerçek bir hata
+    // DEĞİL) recordResult(false) ile KALICI bir "başarısız/X" işaretlemiyoruz — bu, kullanıcının
+    // elle "Tekrar Dene"lemesini gerektirirdi; bunun yerine sessizce dönüyoruz ki runAseAutoSend
+    // (aseShipmentSentAt hâlâ null olduğu için) bir sonraki turda kendiliğinden tekrar dener.
+    let pdfBuffer = await readCachedInvoicePdf(postingNumber);
+    if (!pdfBuffer && order.parasutInvoiceId) {
+      try {
+        const result = await resolveInvoicePdfForOrder(postingNumber, order.parasutInvoiceId);
+        if (result.status === "ready") {
+          pdfBuffer = await fetchAndCacheInvoicePdf(postingNumber, result.pdfUrl);
+        }
+      } catch (err) {
+        console.error(`[ase] PDF'i şimdi almaya çalışırken hata (posting ${postingNumber}):`, err);
+      }
+    }
     if (!pdfBuffer) {
-      await recordResult(postingNumber, false, "Fatura PDF'i önbellekte bulunamadı");
+      // GİB hâlâ işlemde — GERÇEK bir hata değil, sadece henüz zamanı gelmedi. Kalıcı "başarısız"
+      // işaretlemiyoruz (bkz. yukarıdaki yorum), sadece loglayıp sessizce dönüyoruz.
+      console.log(`[ase] ${postingNumber}: fatura PDF'i henüz hazır değil (GİB'de işlemde olabilir), ASE gönderimi ertelendi.`);
       return;
     }
     const invoiceBase64String = pdfBuffer.toString("base64");

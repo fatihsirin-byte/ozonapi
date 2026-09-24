@@ -3,7 +3,7 @@ import { getOrderDetail, suggestHsCodesForOrder } from "../modules/orders/orders
 import { readCachedInvoicePdf, fetchAndCacheInvoicePdf } from "../parasut/pdfCache";
 import { resolveInvoicePdfForOrder } from "../parasut/eArchives";
 import { sendShipment, ASE_SHIPMENT_TYPE, describeAseCode, type AseShipmentProduct, type SendShipmentPayload } from "./client";
-import { HSCODE_ERROR_CODE } from "./constants";
+import { HSCODE_ERROR_CODE, SHIPMENT_NOT_YET_SYNCED_ERROR_CODE } from "./constants";
 
 // Menşe ülke kodu — kullanıcı kararı (2026-09-12): sabit "TR", ekstra alan/DB değişikliği yok.
 const PRODUCT_ORIGIN_COUNTRY_CODE = "TR";
@@ -225,6 +225,21 @@ async function doSendOrderToAse(postingNumber: string): Promise<void> {
 
     const result = await sendShipment(payload);
     const message = result.message || describeAseCode(result.code);
+
+    // DÜZELTME (2026-09-24'te canlıda, kullanıcı bulgusu: "hs kod sorması gerekmiyor muydu... bu
+    // ürünlerin HS'sinde hiçbir sorun yok" — resmi ASE API dokümanıyla doğrulandı): kod 32,
+    // HS/GTIP ile İLGİLİ DEĞİL — "Pazaryerinden(Ozon) ASE'ye iletilmemiş gönderi için işlem
+    // yapılamaz" demek, yani Ozon bu kargoyu ASE'ye henüz kendi tarafından bildirmemiş (bkz.
+    // src/ase/constants.ts SHIPMENT_NOT_YET_SYNCED_ERROR_CODE yorumu). Bu GERÇEK bir hata değil,
+    // saf bir zamanlama meselesi — fatura onayımız hızlandığı için (bkz. eArchives.ts) artık
+    // Ozon'un kendi ASE senkronundan daha erken davranabiliyoruz. Kalıcı "başarısız/✗" işaretlemek
+    // yerine (PDF-hazır-değil durumuyla AYNI mantık) sessizce erteliyoruz — aseShipmentSentAt boş
+    // kalır, runAseAutoSend bir sonraki turda kendiliğinden tekrar dener.
+    if (!result.isSuccess && result.code === SHIPMENT_NOT_YET_SYNCED_ERROR_CODE) {
+      console.log(`[ase] ${postingNumber}: Ozon bu kargoyu ASE'ye henüz iletmemiş (kod 32), gönderim ertelendi.`);
+      return;
+    }
+
     await recordResult(postingNumber, result.isSuccess, message, result.isSuccess ? null : result.code);
     if (!result.isSuccess) {
       console.error(`[ase] Gönderim başarısız (posting ${postingNumber}, code ${result.code}): ${message}`);

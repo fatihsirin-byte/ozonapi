@@ -167,21 +167,26 @@ export function InvoiceAndAseButton({
     try {
       const res = await fetch(`/api/orders/${encodeURIComponent(postingNumber)}/parasut-invoice/pdf`);
       const data = await res.json();
+      if (data.invoiceNo) setInvoiceNo(data.invoiceNo);
+      // GÜNCELLEME (2026-09-24, kullanıcı bulgusu: "bu status fatura oluştu anlamına geliyor,
+      // invoice_number gelmiş, burada beklememize gerek yok"): fatura numarası onayı (dolayısıyla
+      // ASE'nin otomatik tetiklenmesi) artık PDF'in "ready" olmasını BEKLEMİYOR — sunucu
+      // (pdf/route.ts) invoiceConfirmed'ı e-Arşiv'in invoice_number'ı dolar dolmaz true dönüyor,
+      // GİB'in PDF'i tam işlemesi (status "ready") AYRI ve daha yavaş bir adım olarak devam ediyor.
+      const justConfirmed = data.invoiceConfirmed && !aseAutoTriggeredRef.current;
+      if (data.invoiceConfirmed && !invoiceConfirmed) {
+        setInvoiceConfirmed(true);
+        router.refresh();
+      }
       if (data.status === "ready" && data.pdfUrl) {
         setPdfUrl(data.pdfUrl);
-        if (data.invoiceNo) setInvoiceNo(data.invoiceNo);
-        const justConfirmed = statusRef.current !== "ready";
-        if (justConfirmed) {
-          setInvoiceConfirmed(true);
-          router.refresh();
-        }
         setPdfStatus("ready");
-        if (justConfirmed && !aseAutoTriggeredRef.current) {
-          aseAutoTriggeredRef.current = true;
-          await runAseStep();
-        }
       } else {
         setPdfStatus("processing");
+      }
+      if (justConfirmed) {
+        aseAutoTriggeredRef.current = true;
+        await runAseStep();
       }
     } catch {
       setPdfStatus("error");

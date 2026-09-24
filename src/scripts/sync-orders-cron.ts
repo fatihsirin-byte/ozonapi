@@ -5,8 +5,7 @@ import { backfillMissingStock } from "../modules/products/products.service";
 import { pollAseShipmentStatuses } from "../ase/statusPolling";
 import { syncReturns, syncRfbsReturns } from "../modules/returns/returns.service";
 import { prisma } from "../db/prisma";
-import { resolveInvoicePdfForOrder } from "../parasut/eArchives";
-import { showSalesInvoice } from "../parasut/invoices";
+import { findActiveEArchive, getEArchivePdfUrl } from "../parasut/eArchives";
 import { cacheInvoicePdfIfMissing } from "../parasut/pdfCache";
 import { INVOICE_CLAIM_SENTINEL } from "../parasut/orderInvoice";
 import { sendOrderToAse } from "../ase/orderShipment";
@@ -80,10 +79,18 @@ async function runReturnsSync() {
 // kapatılır/başka yere gidilirse ya da tam o an Paraşüt'ün 429 hız sınırına denk gelinirse (bkz.
 // src/parasut/client.ts), onay bir daha KİMSE o siparişi elle "Tekrar Dene"lemeden asla
 // gerçekleşmiyordu (fatura Paraşüt'te GERÇEKTEN var, sadece bizim DB'miz numarayı hiç
-// öğrenemiyordu). Burada AYNI, güvenli resolveInvoicePdfForOrder'ı (yeni bir e-Arşiv OLUŞTURMUYOR,
-// sadece var olanın durumunu soruyor — bkz. src/parasut/eArchives.ts) periyodik olarak sunucudan
-// tekrar deniyoruz, kimse sayfayı açık tutmak zorunda kalmasın diye. Sıralı (paralel DEĞİL) ve
-// aralarında kısa bir gecikmeyle işleniyor — 429 hız sınırına toplu çarpmayı önlemek için.
+// öğrenemiyordu). Sıralı (paralel DEĞİL) ve aralarında kısa bir gecikmeyle işleniyor — 429 hız
+// sınırına toplu çarpmayı önlemek için.
+//
+// GÜNCELLEME (2026-09-24'te canlıda, kullanıcı bulgusu: 10 fatura saatlerce "PDF hazır değil"
+// diye onaysız kaldı, ama Paraşüt'ün kendi kaydına bakılınca hepsinde invoice_number ZATEN
+// atanmıştı, sadece GİB durumu "reporting"ti): "onay" artık PDF'in tam indirilebilir olmasını
+// DEĞİL, e-Arşiv'in invoice_number alanının dolmasını bekliyor — kullanıcı kararı: "bu status
+// fatura oluştu anlamına geliyor, invoice_number gelmiş, burada beklememize gerek yok" (bkz.
+// src/parasut/eArchives.ts ActiveEArchiveInfo yorumu). PDF'in kendisi hâlâ AYRI ve best-effort
+// olarak önbelleğe alınmaya çalışılıyor (varsa) ama bu artık onayı GECİKTİRMİYOR — bu sayede ASE
+// gönderimi (parasutInvoiceNoConfirmed'a bağlı, bkz. runAseAutoSend) GİB onayını beklemeden, GİB'e
+// gönderim anında (invoice_number atanır atanmaz) tetiklenebiliyor.
 const INVOICE_CONFIRM_BATCH_SIZE = 25;
 const INVOICE_CONFIRM_DELAY_MS = 1500;
 
@@ -103,21 +110,20 @@ async function runInvoiceConfirmationSync() {
   for (const order of pending) {
     const invoiceId = order.parasutInvoiceId as string;
     try {
-      const result = await resolveInvoicePdfForOrder(order.postingNumber, invoiceId);
-      if (result.status === "ready") {
+      const archive = await findActiveEArchive(invoiceId);
+      if (archive?.invoiceNumber) {
+        await prisma.order.update({
+          where: { postingNumber: order.postingNumber },
+          data: { parasutInvoiceNo: archive.invoiceNumber, parasutInvoiceNoConfirmed: true },
+        });
+        confirmed += 1;
+        // PDF'in kendisi hazırsa (genelde henüz değildir, GİB onayı ayrı/daha yavaş bir adım)
+        // fırsat bu fırsattır diye önbelleğe alınıyor — başarısız olsa da onayı ETKİLEMEZ.
         try {
-          await cacheInvoicePdfIfMissing(order.postingNumber, result.pdfUrl);
-        } catch (err) {
-          console.error(`[sync-orders-cron] PDF önbelleğe alınamadı (posting ${order.postingNumber}):`, err);
-        }
-        const invoice = await showSalesInvoice(invoiceId);
-        const invoiceNo = (invoice.data.attributes as { invoice_no?: string }).invoice_no ?? null;
-        if (invoiceNo) {
-          await prisma.order.update({
-            where: { postingNumber: order.postingNumber },
-            data: { parasutInvoiceNo: invoiceNo, parasutInvoiceNoConfirmed: true },
-          });
-          confirmed += 1;
+          const pdfUrl = await getEArchivePdfUrl(archive.id);
+          if (pdfUrl) await cacheInvoicePdfIfMissing(order.postingNumber, pdfUrl);
+        } catch {
+          // sessizce atlanır — PDF ne zaman hazır olursa "Faturayı Aç" butonu zaten indirir.
         }
       }
     } catch (error) {

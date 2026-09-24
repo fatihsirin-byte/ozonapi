@@ -45,13 +45,46 @@ export function showEArchive(eArchiveId: string) {
   return parasutGet<ParasutEArchivePdfResponse>(`e_archives/${eArchiveId}/pdf`);
 }
 
+interface ActiveEArchiveInclude {
+  id: string;
+  type: string;
+  attributes?: { invoice_number?: string | null; status?: string | null };
+}
+
+export interface ActiveEArchiveInfo {
+  id: string;
+  // Paraşüt bu numarayı GİB onayını (status "reporting"/"reported" vb.) BEKLEMEDEN, e-Arşiv GİB'e
+  // gönderilir gönderilmez atıyor (2026-09-24'te canlıda kullanıcıyla birlikte doğrulandı — 10
+  // fatura saatlerdir "reporting" durumundaydı ama hepsinde invoice_number ZATEN doluydu). Önceki
+  // varsayım (bkz. orderInvoice.ts'teki "GİB'in yeniden numaralandırması anında olmuyor, bayat
+  // dönebilir" yorumu, 2026-09-10) sales_invoice'ın KENDİ invoice_no alanı için geçerliydi —
+  // e-Arşiv OLUŞTUKTAN SONRA (createEArchive çağrıldıktan sonra) bu alanın e_archives kaydındaki
+  // hali için geçerli değil, kullanıcı kararıyla artık PDF hazır olmasını BEKLEMEDEN bu numara
+  // "kesin" kabul ediliyor.
+  invoiceNumber: string | null;
+  status: string | null;
+}
+
 // Bir sales_invoice'a bağlı e-Arşiv'in id'sini bulur (varsa) — include=active_e_document ile.
 export async function findActiveEArchiveId(salesInvoiceId: string): Promise<string | null> {
-  const res = await parasutGet<{ included?: Array<{ id: string; type: string }> }>(
+  const info = await findActiveEArchive(salesInvoiceId);
+  return info?.id ?? null;
+}
+
+// findActiveEArchiveId ile AYNI istek, ama sadece id değil invoice_number/status'ü de dönüyor
+// (2026-09-24, kullanıcı talebi: "bu status fatura oluştu anlamına geliyor, invoice_number gelmiş,
+// burada beklememize gerek yok" — bkz. ActiveEArchiveInfo yorumu).
+export async function findActiveEArchive(salesInvoiceId: string): Promise<ActiveEArchiveInfo | null> {
+  const res = await parasutGet<{ included?: ActiveEArchiveInclude[] }>(
     `sales_invoices/${salesInvoiceId}?include=active_e_document`,
   );
   const eDoc = res.included?.find((i) => i.type === "e_archives");
-  return eDoc?.id ?? null;
+  if (!eDoc) return null;
+  return {
+    id: eDoc.id,
+    invoiceNumber: eDoc.attributes?.invoice_number || null,
+    status: eDoc.attributes?.status ?? null,
+  };
 }
 
 // PDF'in kendisi değil, S3'teki geçici (presigned) indirme linkini döner — asıl dosyayı çekmek

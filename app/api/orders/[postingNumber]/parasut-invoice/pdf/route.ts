@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/db/prisma";
-import { resolveInvoicePdfForOrder } from "@/parasut/eArchives";
-import { showSalesInvoice } from "@/parasut/invoices";
+import { resolveInvoicePdfForOrder, findActiveEArchive } from "@/parasut/eArchives";
 import { INVOICE_CLAIM_SENTINEL } from "@/parasut/orderInvoice";
 import { cacheInvoicePdfIfMissing } from "@/parasut/pdfCache";
 
@@ -19,17 +18,44 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const decodedPostingNumber = decodeURIComponent(postingNumber);
   const order = await prisma.order.findUnique({
     where: { postingNumber: decodedPostingNumber },
-    select: { parasutInvoiceId: true, parasutInvoiceNoConfirmed: true },
+    select: { parasutInvoiceId: true, parasutInvoiceNoConfirmed: true, parasutInvoiceNo: true },
   });
 
   if (!order?.parasutInvoiceId || order.parasutInvoiceId === INVOICE_CLAIM_SENTINEL) {
     return NextResponse.json({ status: "not_invoiced" }, { status: 404 });
   }
 
+  // GÜNCELLEME (2026-09-24'te canlıda, kullanıcı bulgusu: "bu status fatura oluştu anlamına
+  // geliyor, invoice_number gelmiş, burada beklememize gerek yok" — bkz. src/parasut/eArchives.ts
+  // ActiveEArchiveInfo yorumu): fatura numarası ARTIK PDF'in tam indirilebilir olmasını
+  // BEKLEMEDEN, e-Arşiv'in kendi invoice_number alanı dolar dolmaz (GİB'e gönderim anında,
+  // "reporting" durumundayken bile) onaylanıyor — bu, ASE gönderiminin (parasutInvoiceNoConfirmed'a
+  // bağlı) GİB'in daha yavaş nihai onayını beklemeden tetiklenebilmesini sağlıyor. PDF'in kendisi
+  // (indirilebilir/görüntülenebilir hali) HÂLÂ ayrı ve gerçekten hazır olmasını gerektiriyor —
+  // aşağıdaki resolveInvoicePdfForOrder o yüzden AYRICA çalışıyor, sadece artık invoiceNo onayını
+  // ENGELLEMİYOR.
+  let invoiceNo = order.parasutInvoiceNo;
+  let invoiceConfirmed = order.parasutInvoiceNoConfirmed;
+  if (!invoiceConfirmed) {
+    try {
+      const archive = await findActiveEArchive(order.parasutInvoiceId);
+      if (archive?.invoiceNumber) {
+        invoiceNo = archive.invoiceNumber;
+        invoiceConfirmed = true;
+        await prisma.order.update({
+          where: { postingNumber: decodedPostingNumber },
+          data: { parasutInvoiceNo: invoiceNo, parasutInvoiceNoConfirmed: true },
+        });
+      }
+    } catch {
+      // Henüz e-Arşiv/numara okunamadıysa bir sonraki pollingde tekrar denenir.
+    }
+  }
+
   const result = await resolveInvoicePdfForOrder(decodedPostingNumber, order.parasutInvoiceId);
 
   if (result.status === "processing") {
-    return NextResponse.json({ status: "processing" }, { status: 202 });
+    return NextResponse.json({ status: "processing", invoiceNo, invoiceConfirmed });
   }
 
   // PDF ilk kez "hazır" göründüğü an, diske kalıcı olarak kaydediliyor (2026-09-10, kullanıcı
@@ -43,39 +69,13 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     console.error(`[parasut] PDF önbelleğe alınamadı (posting ${decodedPostingNumber}):`, err);
   }
 
-  // PDF'in gerçekten hazır olması, e-Arşiv'in GİB tarafında tam işlendiğinin en güvenilir işareti
-  // — gerçek (GİB'e kayıtlı seriye göre yeniden atanmış) fatura numarasını burada okuyup
-  // kaydediyoruz. Fatura kesilir kesilmez okumak (eski kod) bayat/geçici bir değer dönebilirdi,
-  // çünkü GİB'in yeniden numaralandırması anında olmuyor (2026-09-10'da code review'da tespit
-  // edildi) — bkz. src/parasut/orderInvoice.ts. SÜREYE DAYALI bir pencere (ör. "ilk 30 dakika")
-  // KULLANILMIYOR — GİB o gün yavaşsa numara kalıcı olarak yanlış kalabilirdi (aynı incelemede
-  // tespit edildi). Bunun yerine parasutInvoiceNoConfirmed true OLANA KADAR her "ready" kontrolünde
-  // tekrar denenir; true olduktan sonra (gerçek numara elde edildiğinde) bir daha denenmez — aylar
-  // önce kesilmiş, numarası çoktan netleşmiş faturalar için gereksiz Paraşüt isteği atılmaz.
-  let invoiceNo: string | null = null;
-  if (!order.parasutInvoiceNoConfirmed) {
-    try {
-      const invoice = await showSalesInvoice(order.parasutInvoiceId);
-      invoiceNo = (invoice.data.attributes as { invoice_no?: string }).invoice_no ?? null;
-      if (invoiceNo) {
-        await prisma.order.update({
-          where: { postingNumber: decodedPostingNumber },
-          data: { parasutInvoiceNo: invoiceNo, parasutInvoiceNoConfirmed: true },
-        });
-      }
-    } catch {
-      // Gerçek numara okunamazsa mevcut (muhtemelen geçici) değer kalır — bir sonraki kontrolde
-      // tekrar denenir, PDF linki bu arada yine de çalışır.
-    }
-  }
-
   // ASE'ye (gümrük/ETGB) gönderim BURADA OTOMATİK yapılmıyor — kullanıcı talebi (2026-09-13):
   // önceki sürüm hem burada hem 15 dakikalık cron'da "kendiliğinden bulup gönderiyordu", bu
   // öngörülemez bulundu. Artık kullanıcı fatura kesildikten sonra kendi isteğiyle sipariş
   // sayfasındaki "ASE'ye Gönder" butonuna basıyor (bkz. AseShipmentButton.tsx,
-  // app/api/orders/[postingNumber]/ase-shipment/route.ts).
+  // app/api/orders/[postingNumber]/ase-shipment/route.ts) — YA DA fatura numarası onaylanır
+  // onaylanmaz src/scripts/sync-orders-cron.ts'teki runAseAutoSend tarafından arka planda
+  // (2026-09-23'ten itibaren, kullanıcı onayıyla).
 
-  // invoiceNo'yu (güncellendiyse) yanıta da ekliyoruz — aksi halde DB'ye yazılan doğru numara
-  // sayfa yeniden yüklenene kadar ön yüzde görünmezdi (2026-09-10'da code review'da tespit edildi).
-  return NextResponse.json({ status: "ready", pdfUrl: result.pdfUrl, invoiceNo });
+  return NextResponse.json({ status: "ready", pdfUrl: result.pdfUrl, invoiceNo, invoiceConfirmed });
 }

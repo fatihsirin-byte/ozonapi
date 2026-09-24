@@ -26,6 +26,7 @@ import { translateOrderStatus } from "@/utils/orderStatus";
 import { BulkShipProvider } from "./BulkShipContext";
 import { BulkShipBar } from "./BulkShipBar";
 import { BulkCheckbox } from "./BulkCheckbox";
+import { SelectAllCheckbox } from "./SelectAllCheckbox";
 import { WEIGHT_WARNING_TEXT } from "./weightWarningText";
 import { ShipDeadlineCountdown } from "./ShipDeadlineCountdown";
 
@@ -167,6 +168,16 @@ export default async function OrdersPage({
   // React'e "bu farklı bir görünüm" dedirtmenin standart yolu key değiştirmek — bu, provider'ı
   // TAMAMEN yeniden bağlar (remount) ve state'i sıfırlar.
   const selectionKey = `${currentQuery}|page=${page}`;
+  // "Tümünü Seç" (bkz. SelectAllCheckbox) için — bu sayfadaki TÜM siparişlerin toplu-seçim
+  // bilgisi, satır bazında zaten aşağıdaki .map içinde ayrı ayrı hesaplanan AYNI değerler
+  // (2026-09-23, kullanıcı talebi).
+  const bulkEntries = orders.map((o) => ({
+    postingNumber: o.postingNumber,
+    totalQuantity: orderTotalQuantity(o.items),
+    weightWarning: getWeightSplitWarning(o),
+    status: o.status,
+    locked: o.shipClaimedAt != null,
+  }));
 
   return (
     <div className="page-wide">
@@ -227,9 +238,18 @@ export default async function OrdersPage({
           </div>
         ) : (
           <table>
+            {/* Toplu işlemler (paketle/etiket/fatura+ase) artık her durumdaki siparişte kullanılabilir
+                (2026-09-23, kullanıcı talebi: "tüm sipariş durumları için checkbox ekle") — sadece
+                "Toplu Paketle" sihirbazı hâlâ eskisi gibi seçilenler arasından SADECE paketlenebilir
+                (awaiting_packaging, kilitsiz) olanları filtreleyip kullanıyor, bkz. BulkShipBar.tsx. */}
             <thead>
               <tr>
-                <th style={{ whiteSpace: "nowrap" }} title="Toplu paketleme için seçim — sadece 'Paketleme Bekliyor' durumundaki siparişlerde çıkar">Seç</th>
+                <th style={{ whiteSpace: "nowrap" }} title="Toplu işlemler için seçim">
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <SelectAllCheckbox entries={bulkEntries} />
+                    <span>Seç</span>
+                  </div>
+                </th>
                 <th style={{ whiteSpace: "nowrap" }}>Posting No</th>
                 <th style={{ whiteSpace: "nowrap" }}>Durum</th>
                 <th style={{ whiteSpace: "nowrap" }}>Kabul Tarihi</th>
@@ -274,15 +294,21 @@ export default async function OrdersPage({
                   !Number.isNaN(shipmentDeadline.getTime()) &&
                   !delay.isDelayed &&
                   !SHIPPED_OR_DONE_STATUSES.has(o.status);
-                const canBulkShip = o.status === "awaiting_packaging" && o.shipClaimedAt == null;
                 const weightWarning = getWeightSplitWarning(o);
                 const totalQuantity = orderTotalQuantity(o.items);
                 return (
                   <tr key={o.id} className={o.aseCancelledAt ? "row-ase-cancelled" : undefined}>
                     <td>
-                      {canBulkShip && (
-                        <BulkCheckbox postingNumber={o.postingNumber} totalQuantity={totalQuantity} weightWarning={weightWarning} />
-                      )}
+                      {/* Checkbox artık HER durumdaki siparişte çıkıyor (2026-09-23, kullanıcı
+                          talebi) — hangi toplu işlemin (paketle/etiket/fatura+ase) hangi durumla
+                          uyumlu olduğu BulkShipBar.tsx'te ayrıca filtreleniyor. */}
+                      <BulkCheckbox
+                        postingNumber={o.postingNumber}
+                        totalQuantity={totalQuantity}
+                        weightWarning={weightWarning}
+                        status={o.status}
+                        locked={o.shipClaimedAt != null}
+                      />
                     </td>
                     <td>
                       <Link href={`/orders/${o.postingNumber}`}>{o.postingNumber}</Link>

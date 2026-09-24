@@ -10,6 +10,7 @@ import { showSalesInvoice } from "../parasut/invoices";
 import { cacheInvoicePdfIfMissing } from "../parasut/pdfCache";
 import { INVOICE_CLAIM_SENTINEL } from "../parasut/orderInvoice";
 import { sendOrderToAse } from "../ase/orderShipment";
+import { fetchAndCacheLabel } from "../ozon/labelCache";
 
 const DEFAULT_STOCK = 100;
 
@@ -199,16 +200,59 @@ async function runAseAutoSend() {
   console.log(`[sync-orders-cron] ${new Date().toISOString()} — ${sent}/${pending.length} sipariş arka planda ASE'ye gönderildi`);
 }
 
+// KRİTİK (2026-09-23, kullanıcı bulgusu: "etiket yazdır diyince 4-5 saniye bekliyor bence ozona
+// gidip soruyor. db de tut ve backfill at"): doğru — /api/orders/[postingNumber]/label HER
+// tıklamada Ozon'a canlı istek atıyordu. Artık önce diske bakıyor (bkz. src/ozon/labelCache.ts),
+// burada da o önbelleği DOLDURAN arka plan işi var — sipariş "awaiting_deliver" (Kargoya Hazır)
+// olur olmaz etiketi önceden çekip kaydediyor, kullanıcı butona basmadan ÖNCE hazır olsun diye.
+// SADECE bu durumdaki siparişler taranıyor çünkü Ozon'un etiket API'si BAŞKA hiçbir durumda
+// çalışmıyor (bkz. label/route.ts) — "henüz hazırlanıyor" hatası alırsa (posting paketlendikten
+// hemen sonra, etiket Ozon tarafında henüz oluşmamışsa) burada sessizce loglanır, bir sonraki
+// turda (5 dakika sonra) otomatik tekrar denenir.
+const LABEL_BACKFILL_BATCH_SIZE = 25;
+const LABEL_BACKFILL_DELAY_MS = 1000;
+
+async function runLabelBackfill() {
+  const pending = await prisma.order.findMany({
+    where: { status: "awaiting_deliver", shippingLabelCached: false },
+    select: { postingNumber: true },
+    take: LABEL_BACKFILL_BATCH_SIZE,
+  });
+  if (pending.length === 0) return;
+
+  let cached = 0;
+  for (const order of pending) {
+    try {
+      await fetchAndCacheLabel(order.postingNumber);
+      cached += 1;
+    } catch (error) {
+      console.error(`[sync-orders-cron] Etiket önbelleğe alınamadı (posting ${order.postingNumber}):`, error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, LABEL_BACKFILL_DELAY_MS));
+  }
+  console.log(`[sync-orders-cron] ${new Date().toISOString()} — ${cached}/${pending.length} sipariş etiketi arka planda önbelleğe alındı`);
+}
+
+// ACİL DÜZELTME (2026-09-24, kullanıcı bulgusu: bugün art arda kesilen 10 fatura, saatlerdir
+// onaylanmıyordu): runInvoiceConfirmationSync + runAseAutoSend + runLabelBackfill hepsi AYNI
+// "*/5 * * * *" zamanlamasında, yani TAM AYNI ANDA çalışıyordu — üçü birden Paraşüt'e (ve ASE'ye)
+// eşzamanlı istek yağdırınca, kendi trafiğimiz kendi hız sınırımıza (429) çarpıyordu. Ana Paraşüt
+// API erişimi ayrıca test edilip HIZLI/sağlıklı olduğu doğrulandı (genel bir Paraşüt kesintisi
+// DEĞİL) — bu yüzden dakikaları birbirinden AYIRARAK (eşzamanlı yük yerine art arda, seyrek yük)
+// kendi kendine çarpışmayı azaltıyoruz. Not: GİB'in kendi e-Arşiv onay süresi bizim kontrolümüzde
+// değil — bu değişiklik SADECE bizim kendi isteklerimizin üst üste binmesini önlüyor.
 cron.schedule("*/15 * * * *", runSync);
 cron.schedule("*/15 * * * *", runReturnsSync);
 cron.schedule("0 */3 * * *", runAsePoll);
-cron.schedule("*/5 * * * *", runInvoiceConfirmationSync);
-cron.schedule("*/5 * * * *", runAseAutoSend);
+cron.schedule("1,6,11,16,21,26,31,36,41,46,51,56 * * * *", runInvoiceConfirmationSync);
+cron.schedule("3,8,13,18,23,28,33,38,43,48,53,58 * * * *", runAseAutoSend);
+cron.schedule("*/5 * * * *", runLabelBackfill);
 console.log(
-  "[sync-orders-cron] başlatıldı — sipariş/finans/iade senkronu 15 dakikada bir, ASE durum kontrolü 3 saatte bir, bekleyen fatura onayı ve ASE gönderimi 5 dakikada bir çalışacak",
+  "[sync-orders-cron] başlatıldı — sipariş/finans/iade senkronu 15 dakikada bir, ASE durum kontrolü 3 saatte bir, bekleyen fatura onayı/ASE gönderimi/etiket önbellekleme 5 dakikada bir çalışacak",
 );
 runSync();
 runReturnsSync();
 runAsePoll();
 runInvoiceConfirmationSync();
 runAseAutoSend();
+runLabelBackfill();

@@ -6,6 +6,11 @@ export interface BulkShipEntry {
   postingNumber: string;
   totalQuantity: number;
   weightWarning: boolean;
+  // Checkbox artık HER durumdaki siparişte çıktığı için (2026-09-23, kullanıcı talebi) — hangi
+  // toplu işlemin (paketle/etiket/fatura+ase) bu siparişle uyumlu olduğunu belirlemek için gerekli,
+  // bkz. BulkShipBar.tsx.
+  status: string;
+  locked: boolean;
 }
 
 interface BulkShipContextValue {
@@ -13,6 +18,10 @@ interface BulkShipContextValue {
   toggle: (entry: BulkShipEntry, checked: boolean) => void;
   clear: () => void;
   isSelected: (postingNumber: string) => boolean;
+  // "Tümünü Seç" checkbox'ı için — 2026-09-23, kullanıcı talebi: "seç'e tümü butonu ekle". Sadece
+  // GÖRÜNÜR sayfadaki siparişleri seçer (server-side pagination, bkz. page.tsx PageLinkPagination)
+  // — diğer sayfalardaki siparişlere dokunmaz.
+  selectAll: (entries: BulkShipEntry[]) => void;
 }
 
 const BulkShipContext = createContext<BulkShipContextValue | null>(null);
@@ -37,6 +46,7 @@ export function BulkShipProvider({ children }: { children: ReactNode }) {
       },
       clear: () => setSelected(new Map()),
       isSelected: (postingNumber) => selected.has(postingNumber),
+      selectAll: (entries) => setSelected(new Map(entries.map((e) => [e.postingNumber, e]))),
     }),
     [selected],
   );

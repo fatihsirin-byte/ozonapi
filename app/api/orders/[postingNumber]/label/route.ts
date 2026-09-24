@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
-import { getFbsPackageLabel } from "@/ozon/orders";
 import { OzonApiError } from "@/ozon/client";
+import { fetchAndCacheLabel } from "@/ozon/labelCache";
 
-// Ozon'un kargo etiketi (barkodlu PDF) endpoint'i — doğrudan Ozon'dan çekip aynen döndürüyoruz,
-// biz DB'de saklamıyoruz (her zaman canlıdan çekiliyor).
+// Ozon'un kargo etiketi (barkodlu PDF) endpoint'i — ÖNCE diskteki önbelleğe bakıyor (bkz.
+// src/ozon/labelCache.ts), yoksa Ozon'dan çekip kaydediyor. Eskiden HER tıklamada canlı Ozon
+// isteği atılıyordu, bu da 4-5 saniye sürüyordu (2026-09-23, kullanıcı bulgusu) — arka plan
+// backfill cron'u (sync-orders-cron.ts) sayesinde çoğu sipariş sayfaya gelindiğinde zaten
+// önbelleğe alınmış oluyor.
 export async function GET(_request: Request, { params }: { params: Promise<{ postingNumber: string }> }) {
   const { postingNumber } = await params;
   const decoded = decodeURIComponent(postingNumber);
 
   try {
-    const pdf = await getFbsPackageLabel(decoded);
+    const pdf = await fetchAndCacheLabel(decoded);
     return new NextResponse(new Uint8Array(pdf), {
       headers: {
         "Content-Type": "application/pdf",

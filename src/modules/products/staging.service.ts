@@ -79,9 +79,10 @@ export interface HandlePageFilters {
   status?: "draft" | "submitted";
   // Hangi pazaryerine GERÇEKTEN bağlı (Ozon: en az bir varyantın ozonProductId'si dolu — sadece
   // "gönderildi" değil, gerçekten oluşmuş; toptantr: ToptantrListing.status === "success").
-  // "both" ikisine de bağlı olanları, diğerleri sadece o pazaryerine bağlı olanları gösterir
-  // (2026-09-27, kullanıcı talebi).
-  marketplace?: "ozon" | "toptantr" | "both";
+  // "both" ikisine de bağlı olanları, "none" HİÇBİRİNE bağlı olmayanları (draft Ozon durumu ile
+  // KARIŞTIRILMAMALI — toptantr'a bağlı ama Ozon'a hâlâ hiç gönderilmemiş/draft ürünler var),
+  // diğerleri sadece o pazaryerine bağlı olanları gösterir (2026-09-27, kullanıcı talebi).
+  marketplace?: "ozon" | "toptantr" | "both" | "none";
 }
 
 async function getAllHandles(): Promise<Set<string>> {
@@ -144,11 +145,18 @@ async function buildHandleWhere(filters: HandlePageFilters, omit?: keyof HandleP
   }
 
   if (omit !== "marketplace" && filters.marketplace) {
-    if (filters.marketplace === "ozon" || filters.marketplace === "both") {
-      allowedHandles = intersectSets(allowedHandles, await getOzonConnectedHandles());
-    }
-    if (filters.marketplace === "toptantr" || filters.marketplace === "both") {
-      allowedHandles = intersectSets(allowedHandles, await getToptantrConnectedHandles());
+    if (filters.marketplace === "none") {
+      const [all, ozon, toptantr] = await Promise.all([getAllHandles(), getOzonConnectedHandles(), getToptantrConnectedHandles()]);
+      const connected = new Set([...ozon, ...toptantr]);
+      const none = new Set([...all].filter((h) => !connected.has(h)));
+      allowedHandles = intersectSets(allowedHandles, none);
+    } else {
+      if (filters.marketplace === "ozon" || filters.marketplace === "both") {
+        allowedHandles = intersectSets(allowedHandles, await getOzonConnectedHandles());
+      }
+      if (filters.marketplace === "toptantr" || filters.marketplace === "both") {
+        allowedHandles = intersectSets(allowedHandles, await getToptantrConnectedHandles());
+      }
     }
   }
 

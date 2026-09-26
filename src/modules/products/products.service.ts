@@ -424,7 +424,9 @@ export async function listAllProducts(params?: {
   // sadece Ozon'un `status` alanına (draft dışı) bakmak, toptantr'a bağlı ama Ozon'a hiç
   // gönderilmemiş (status hâlâ draft) ürünleri listeden tamamen gizliyordu (2026-09-27,
   // kullanıcı bulgusu: "ozona bağlı ürünler ürünlere düşüyor, toptantr bağlı olanlar da düşsün").
-  marketplace?: "ozon" | "toptantr" | "both";
+  // "none" HİÇBİRİNE bağlı olmayanları gösterir — draft (Ozon'a hiç gönderilmemiş) ile
+  // KARIŞTIRILMAMALI, toptantr'a bağlı ama Ozon'a hâlâ draft olan ürünler var.
+  marketplace?: "ozon" | "toptantr" | "both" | "none";
 }) {
   const search = params?.search?.trim();
   const ozonCondition = { status: { not: "draft" } };
@@ -436,6 +438,8 @@ export async function listAllProducts(params?: {
     marketplaceClause = { shopifyHandle: { in: [...(await getToptantrConnectedHandleSet())] } };
   } else if (params?.marketplace === "both") {
     marketplaceClause = { AND: [ozonCondition, { shopifyHandle: { in: [...(await getToptantrConnectedHandleSet())] } }] };
+  } else if (params?.marketplace === "none") {
+    marketplaceClause = { AND: [{ status: "draft" }, { shopifyHandle: { notIn: [...(await getToptantrConnectedHandleSet())] } }] };
   } else {
     // Filtre seçilmemişse: Ozon'a bağlı OLAN veya toptantr'a bağlı OLAN — ikisi de listede.
     marketplaceClause = { OR: [ozonCondition, { shopifyHandle: { in: [...(await getToptantrConnectedHandleSet())] } }] };

@@ -57,8 +57,8 @@ export function StagingList() {
   );
   // Ozon'a / toptantr'a / ikisine birden GERÇEKTEN bağlı (sadece "gönderildi" değil) ürünleri
   // filtrelemek için (2026-09-27, kullanıcı talebi).
-  const [marketplace, setMarketplace] = useState<"" | "ozon" | "toptantr" | "both">(
-    () => (searchParams.get("marketplace") as "" | "ozon" | "toptantr" | "both") ?? "",
+  const [marketplace, setMarketplace] = useState<"" | "ozon" | "toptantr" | "both" | "none">(
+    () => (searchParams.get("marketplace") as "" | "ozon" | "toptantr" | "both" | "none") ?? "",
   );
   const [vendors, setVendors] = useState<FacetOption[]>([]);
   const [types, setTypes] = useState<FacetOption[]>([]);
@@ -223,12 +223,13 @@ export function StagingList() {
           </select>
           <select
             value={marketplace}
-            onChange={(e) => setMarketplace(e.target.value as "" | "ozon" | "toptantr" | "both")}
+            onChange={(e) => setMarketplace(e.target.value as "" | "ozon" | "toptantr" | "both" | "none")}
           >
             <option value="">Tüm bağlantılar</option>
             <option value="ozon">Sadece Ozon&apos;a bağlı</option>
             <option value="toptantr">Sadece toptantr&apos;a bağlı</option>
             <option value="both">İkisine de bağlı</option>
+            <option value="none">Hiçbirine bağlı değil</option>
           </select>
         </div>
 

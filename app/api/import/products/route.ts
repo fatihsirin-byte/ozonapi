@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   const status = statusParam === "draft" || statusParam === "submitted" ? statusParam : undefined;
   const marketplaceParam = request.nextUrl.searchParams.get("marketplace");
   const marketplace =
-    marketplaceParam === "ozon" || marketplaceParam === "toptantr" || marketplaceParam === "both"
+    marketplaceParam === "ozon" || marketplaceParam === "toptantr" || marketplaceParam === "both" || marketplaceParam === "none"
       ? marketplaceParam
       : undefined;
 

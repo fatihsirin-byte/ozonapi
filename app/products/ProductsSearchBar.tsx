@@ -49,6 +49,7 @@ export function ProductsSearchBar() {
         <option value="ozon">Sadece Ozon&apos;a bağlı</option>
         <option value="toptantr">Sadece toptantr&apos;a bağlı</option>
         <option value="both">İkisine de bağlı</option>
+        <option value="none">Hiçbirine bağlı değil</option>
       </select>
       {searchParams.get("q") && (
         <button

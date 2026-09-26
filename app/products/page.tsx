@@ -18,7 +18,7 @@ export default async function ProductsPage({
   const params = await searchParams;
   const page = parsePageParam(params.page);
   const marketplace =
-    params.marketplace === "ozon" || params.marketplace === "toptantr" || params.marketplace === "both"
+    params.marketplace === "ozon" || params.marketplace === "toptantr" || params.marketplace === "both" || params.marketplace === "none"
       ? params.marketplace
       : undefined;
   const [{ products, total }, toptantrHandles] = await Promise.all([

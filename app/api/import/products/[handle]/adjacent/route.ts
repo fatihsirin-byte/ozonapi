@@ -11,7 +11,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     type: searchParams.get("type") ?? undefined,
     search: searchParams.get("q") ?? undefined,
     status: status === "draft" || status === "submitted" ? status : undefined,
-    marketplace: marketplace === "ozon" || marketplace === "toptantr" || marketplace === "both" ? marketplace : undefined,
+    marketplace: marketplace === "ozon" || marketplace === "toptantr" || marketplace === "both" || marketplace === "none" ? marketplace : undefined,
   });
   return NextResponse.json(result);
 }

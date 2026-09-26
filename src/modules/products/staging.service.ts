@@ -77,28 +77,83 @@ export interface HandlePageFilters {
   search?: string;
   // draft: hiçbir varyantı gönderilmemiş handle'lar. submitted: en az bir varyantı Ozon'a gönderilmiş (pending/imported/failed) handle'lar.
   status?: "draft" | "submitted";
+  // Hangi pazaryerine GERÇEKTEN bağlı (Ozon: en az bir varyantın ozonProductId'si dolu — sadece
+  // "gönderildi" değil, gerçekten oluşmuş; toptantr: ToptantrListing.status === "success").
+  // "both" ikisine de bağlı olanları, diğerleri sadece o pazaryerine bağlı olanları gösterir
+  // (2026-09-27, kullanıcı talebi).
+  marketplace?: "ozon" | "toptantr" | "both";
 }
 
-async function buildStatusHandleFilter(
-  status: "draft" | "submitted" | undefined,
-): Promise<{ in?: string[]; notIn?: string[] } | undefined> {
-  if (!status) return undefined;
-  const submitted = await prisma.product.findMany({
+async function getAllHandles(): Promise<Set<string>> {
+  const rows = await prisma.product.findMany({
+    where: { shopifyHandle: { not: null } },
+    select: { shopifyHandle: true },
+    distinct: ["shopifyHandle"],
+  });
+  return new Set(rows.map((r) => r.shopifyHandle as string));
+}
+
+async function getSubmittedHandles(): Promise<Set<string>> {
+  const rows = await prisma.product.findMany({
     where: { shopifyHandle: { not: null }, status: { not: "draft" } },
     select: { shopifyHandle: true },
     distinct: ["shopifyHandle"],
   });
-  const submittedHandles = submitted.map((p) => p.shopifyHandle as string);
-  return status === "submitted" ? { in: submittedHandles } : { notIn: submittedHandles };
+  return new Set(rows.map((r) => r.shopifyHandle as string));
+}
+
+async function getOzonConnectedHandles(): Promise<Set<string>> {
+  const rows = await prisma.product.findMany({
+    where: { shopifyHandle: { not: null }, ozonProductId: { not: null } },
+    select: { shopifyHandle: true },
+    distinct: ["shopifyHandle"],
+  });
+  return new Set(rows.map((r) => r.shopifyHandle as string));
+}
+
+async function getToptantrConnectedHandles(): Promise<Set<string>> {
+  const rows = await prisma.toptantrListing.findMany({
+    where: { status: "success" },
+    select: { shopifyHandle: true },
+  });
+  return new Set(rows.map((r) => r.shopifyHandle));
+}
+
+function intersectSets(a: Set<string> | null, b: Set<string>): Set<string> {
+  return a ? new Set([...a].filter((h) => b.has(h))) : b;
 }
 
 // `omit` — hangi filtre boyutunu (kendi facet'ini) dışarıda bırakacağımızı belirtir, ki
 // "cascading" facet listeleri (örn. vendor listesi) kendi seçimiyle kısıtlanmasın.
+//
+// status VE marketplace filtreleri ikisi de sonuçta "izin verilen handle" kümesine indirgeniyor
+// (Prisma'da tek bir alanda hem `in` hem `notIn`'i aynı anda birleştirmenin temiz bir yolu
+// olmadığından) — ikisi birden seçilirse kümeler kesişim (AND) alınarak birleştirilir.
 async function buildHandleWhere(filters: HandlePageFilters, omit?: keyof HandlePageFilters) {
-  const statusHandleFilter = omit === "status" ? undefined : await buildStatusHandleFilter(filters.status);
+  let allowedHandles: Set<string> | null = null;
+
+  if (omit !== "status" && filters.status) {
+    const submitted = await getSubmittedHandles();
+    if (filters.status === "submitted") {
+      allowedHandles = intersectSets(allowedHandles, submitted);
+    } else {
+      const all = await getAllHandles();
+      const draft = new Set([...all].filter((h) => !submitted.has(h)));
+      allowedHandles = intersectSets(allowedHandles, draft);
+    }
+  }
+
+  if (omit !== "marketplace" && filters.marketplace) {
+    if (filters.marketplace === "ozon" || filters.marketplace === "both") {
+      allowedHandles = intersectSets(allowedHandles, await getOzonConnectedHandles());
+    }
+    if (filters.marketplace === "toptantr" || filters.marketplace === "both") {
+      allowedHandles = intersectSets(allowedHandles, await getToptantrConnectedHandles());
+    }
+  }
 
   return {
-    shopifyHandle: { not: null, ...statusHandleFilter },
+    shopifyHandle: { not: null, ...(allowedHandles ? { in: [...allowedHandles] } : {}) },
     ...(omit !== "vendor" && filters.vendor ? { shopifyVendor: filters.vendor } : {}),
     ...(omit !== "type" && filters.type ? { shopifyType: filters.type } : {}),
     ...(omit !== "search" && filters.search

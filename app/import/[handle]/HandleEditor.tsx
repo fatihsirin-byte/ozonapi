@@ -87,6 +87,7 @@ interface NavContext {
   vendor: string;
   type: string;
   status: string;
+  marketplace: string;
   page: number;
 }
 
@@ -96,6 +97,7 @@ function buildHandleHref(targetHandle: string, ctx: NavContext, page: number) {
   if (ctx.vendor) params.set("vendor", ctx.vendor);
   if (ctx.type) params.set("type", ctx.type);
   if (ctx.status) params.set("status", ctx.status);
+  if (ctx.marketplace) params.set("marketplace", ctx.marketplace);
   if (page > 1) params.set("page", String(page));
   const queryString = params.toString();
   return `/import/${encodeURIComponent(targetHandle)}${queryString ? `?${queryString}` : ""}`;
@@ -110,6 +112,7 @@ export function HandleEditor({ handle }: { handle: string }) {
       vendor: searchParams.get("vendor") ?? "",
       type: searchParams.get("type") ?? "",
       status: searchParams.get("status") ?? "",
+      marketplace: searchParams.get("marketplace") ?? "",
       page: Number(searchParams.get("page")) || 1,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -139,6 +142,7 @@ export function HandleEditor({ handle }: { handle: string }) {
     if (navContext.vendor) params.set("vendor", navContext.vendor);
     if (navContext.type) params.set("type", navContext.type);
     if (navContext.status) params.set("status", navContext.status);
+    if (navContext.marketplace) params.set("marketplace", navContext.marketplace);
     fetch(`/api/import/products/${encodeURIComponent(handle)}/adjacent?${params.toString()}`)
       .then((r) => r.json())
       .then((data) => {

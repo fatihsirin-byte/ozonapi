@@ -2,8 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getProduct } from "@/modules/products/products.service";
 import { decodeOfferId } from "@/utils/decodeOfferId";
-import { ProductEditForm } from "./ProductEditForm";
-import { ProductSalesChart } from "./ProductSalesChart";
+import { ProductPageTabs } from "./ProductPageTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -34,8 +33,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           </Link>
         </div>
       </div>
-      <ProductEditForm product={serializedProduct} />
-      <ProductSalesChart offerId={offerId} />
+      <ProductPageTabs product={serializedProduct} offerId={offerId} shopifyHandle={product.shopifyHandle} />
     </div>
   );
 }

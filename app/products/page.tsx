@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listAllProducts } from "@/modules/products/products.service";
+import { listAllProducts, getToptantrConnectedHandleSet } from "@/modules/products/products.service";
 import { productPath } from "@/utils/decodeOfferId";
 import { ImportProductForm } from "./ImportProductForm";
 import { ProductsSearchBar } from "./ProductsSearchBar";
@@ -13,16 +13,24 @@ const PAGE_SIZE = 50;
 export default async function ProductsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; q?: string }>;
+  searchParams: Promise<{ page?: string; q?: string; marketplace?: string }>;
 }) {
   const params = await searchParams;
   const page = parsePageParam(params.page);
-  const { products, total } = await listAllProducts({
-    search: params.q,
-    skip: (page - 1) * PAGE_SIZE,
-    take: PAGE_SIZE,
-  });
-  const pageQuery = params.q ? `q=${encodeURIComponent(params.q)}&` : "";
+  const marketplace =
+    params.marketplace === "ozon" || params.marketplace === "toptantr" || params.marketplace === "both"
+      ? params.marketplace
+      : undefined;
+  const [{ products, total }, toptantrHandles] = await Promise.all([
+    listAllProducts({
+      search: params.q,
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+      marketplace,
+    }),
+    getToptantrConnectedHandleSet(),
+  ]);
+  const pageQuery = `${params.q ? `q=${encodeURIComponent(params.q)}&` : ""}${marketplace ? `marketplace=${marketplace}&` : ""}`;
 
   return (
     <div className="page">
@@ -53,25 +61,35 @@ export default async function ProductsPage({
                 <th>Ad</th>
                 <th>Fiyat</th>
                 <th>Durum</th>
+                <th>Bağlantı</th>
                 <th>Hata</th>
               </tr>
             </thead>
             <tbody>
-              {products.map((p) => (
-                <tr key={p.id}>
-                  <td>
-                    <Link href={productPath(p.offerId)}>{p.offerId}</Link>
-                  </td>
-                  <td>{p.name}</td>
-                  <td>
-                    {p.price} {p.currencyCode}
-                  </td>
-                  <td>
-                    <span className={`badge ${p.status}`}>{p.status}</span>
-                  </td>
-                  <td style={{ color: "var(--danger)", fontSize: 12 }}>{p.lastError ?? ""}</td>
-                </tr>
-              ))}
+              {products.map((p) => {
+                const onToptantr = p.shopifyHandle ? toptantrHandles.has(p.shopifyHandle) : false;
+                const onOzon = Boolean(p.ozonProductId);
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <Link href={productPath(p.offerId)}>{p.offerId}</Link>
+                    </td>
+                    <td>{p.name}</td>
+                    <td>
+                      {p.price} {p.currencyCode}
+                    </td>
+                    <td>
+                      <span className={`badge ${p.status}`}>{p.status}</span>
+                    </td>
+                    <td style={{ display: "flex", gap: 4 }}>
+                      {onOzon && <span className="badge imported">Ozon</span>}
+                      {onToptantr && <span className="badge success">toptantr</span>}
+                      {!onOzon && !onToptantr && <span className="hint">—</span>}
+                    </td>
+                    <td style={{ color: "var(--danger)", fontSize: 12 }}>{p.lastError ?? ""}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

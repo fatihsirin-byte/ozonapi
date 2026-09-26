@@ -55,15 +55,21 @@ export function StagingList() {
   const [status, setStatus] = useState<"" | "draft" | "submitted">(
     () => (searchParams.get("status") as "" | "draft" | "submitted") ?? "draft",
   );
+  // Ozon'a / toptantr'a / ikisine birden GERÇEKTEN bağlı (sadece "gönderildi" değil) ürünleri
+  // filtrelemek için (2026-09-27, kullanıcı talebi).
+  const [marketplace, setMarketplace] = useState<"" | "ozon" | "toptantr" | "both">(
+    () => (searchParams.get("marketplace") as "" | "ozon" | "toptantr" | "both") ?? "",
+  );
   const [vendors, setVendors] = useState<FacetOption[]>([]);
   const [types, setTypes] = useState<FacetOption[]>([]);
 
-  const refreshFacets = useCallback((q: string, v: string, t: string, s: string) => {
+  const refreshFacets = useCallback((q: string, v: string, t: string, s: string, m: string) => {
     const params = new URLSearchParams();
     if (q.trim()) params.set("q", q.trim());
     if (v) params.set("vendor", v);
     if (t) params.set("type", t);
     if (s) params.set("status", s);
+    if (m) params.set("marketplace", m);
     fetch(`/api/import/products/facets?${params.toString()}`)
       .then((r) => r.json())
       .then((data) => {
@@ -72,13 +78,14 @@ export function StagingList() {
       });
   }, []);
 
-  const load = useCallback(async (targetPage: number, q: string, v: string, t: string, s: string) => {
+  const load = useCallback(async (targetPage: number, q: string, v: string, t: string, s: string, m: string) => {
     setLoading(true);
     const params = new URLSearchParams({ page: String(targetPage), pageSize: String(PAGE_SIZE) });
     if (q.trim()) params.set("q", q.trim());
     if (v) params.set("vendor", v);
     if (t) params.set("type", t);
     if (s) params.set("status", s);
+    if (m) params.set("marketplace", m);
     const res = await fetch(`/api/import/products?${params.toString()}`);
     const data = await res.json();
     setItems(data.items ?? []);
@@ -94,19 +101,19 @@ export function StagingList() {
   useEffect(() => {
     if (skipFilterResetRef.current) {
       skipFilterResetRef.current = false;
-      load(page, debouncedSearch, vendor, type, status);
-      refreshFacets(debouncedSearch, vendor, type, status);
+      load(page, debouncedSearch, vendor, type, status, marketplace);
+      refreshFacets(debouncedSearch, vendor, type, status, marketplace);
       return;
     }
     setPage(1);
-    load(1, debouncedSearch, vendor, type, status);
-    refreshFacets(debouncedSearch, vendor, type, status);
+    load(1, debouncedSearch, vendor, type, status, marketplace);
+    refreshFacets(debouncedSearch, vendor, type, status, marketplace);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, vendor, type, status]);
+  }, [debouncedSearch, vendor, type, status, marketplace]);
 
   useEffect(() => {
     if (page === 1) return;
-    load(page, debouncedSearch, vendor, type, status);
+    load(page, debouncedSearch, vendor, type, status, marketplace);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
@@ -120,10 +127,11 @@ export function StagingList() {
     if (vendor) params.set("vendor", vendor);
     if (type) params.set("type", type);
     if (status) params.set("status", status);
+    if (marketplace) params.set("marketplace", marketplace);
     const queryString = params.toString();
     router.replace(queryString ? `${pathname}?${queryString}` : pathname, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, debouncedSearch, vendor, type, status]);
+  }, [page, debouncedSearch, vendor, type, status, marketplace]);
 
   function toggle(handle: string) {
     setSelected((prev) => {
@@ -149,8 +157,8 @@ export function StagingList() {
         body: JSON.stringify({ handles: Array.from(selected) }),
       });
       setSelected(new Set());
-      await load(page, debouncedSearch, vendor, type, status);
-      refreshFacets(debouncedSearch, vendor, type, status);
+      await load(page, debouncedSearch, vendor, type, status, marketplace);
+      refreshFacets(debouncedSearch, vendor, type, status, marketplace);
     } finally {
       setDeleting(false);
     }
@@ -179,8 +187,8 @@ export function StagingList() {
     <div>
       <CsvDropzone
         onImported={() => {
-          load(1, debouncedSearch, vendor, type, status);
-          refreshFacets(debouncedSearch, vendor, type, status);
+          load(1, debouncedSearch, vendor, type, status, marketplace);
+          refreshFacets(debouncedSearch, vendor, type, status, marketplace);
         }}
       />
 
@@ -213,6 +221,15 @@ export function StagingList() {
             <option value="draft">Henüz gönderilmedi (draft)</option>
             <option value="submitted">Ozon'a gönderildi</option>
           </select>
+          <select
+            value={marketplace}
+            onChange={(e) => setMarketplace(e.target.value as "" | "ozon" | "toptantr" | "both")}
+          >
+            <option value="">Tüm bağlantılar</option>
+            <option value="ozon">Sadece Ozon&apos;a bağlı</option>
+            <option value="toptantr">Sadece toptantr&apos;a bağlı</option>
+            <option value="both">İkisine de bağlı</option>
+          </select>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -236,7 +253,7 @@ export function StagingList() {
           <div className="hint">Yükleniyor...</div>
         ) : items.length === 0 ? (
           <div className="empty-state">
-            {search || vendor || type || status
+            {search || vendor || type || status || marketplace
               ? "Bu filtreyle eşleşen ürün yok."
               : "İçe aktarılmış ürün yok. Yukarıdan bir Shopify CSV'si yükleyin."}
           </div>
@@ -281,6 +298,7 @@ export function StagingList() {
                         if (vendor) params.set("vendor", vendor);
                         if (type) params.set("type", type);
                         if (status) params.set("status", status);
+                        if (marketplace) params.set("marketplace", marketplace);
                         if (page > 1) params.set("page", String(page));
                         return params.toString();
                       })()}`}

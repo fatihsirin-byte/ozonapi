@@ -7,7 +7,12 @@ export async function GET(request: NextRequest) {
   const search = request.nextUrl.searchParams.get("q") ?? undefined;
   const statusParam = request.nextUrl.searchParams.get("status");
   const status = statusParam === "draft" || statusParam === "submitted" ? statusParam : undefined;
+  const marketplaceParam = request.nextUrl.searchParams.get("marketplace");
+  const marketplace =
+    marketplaceParam === "ozon" || marketplaceParam === "toptantr" || marketplaceParam === "both"
+      ? marketplaceParam
+      : undefined;
 
-  const facets = await getFacets({ vendor, type, search, status });
+  const facets = await getFacets({ vendor, type, search, status, marketplace });
   return NextResponse.json(facets);
 }

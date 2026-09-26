@@ -56,16 +56,32 @@ function GuidPicker({
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GuidOption[]>([]);
+  // API hatası (ör. TOPTANTR_USERNAME/PASSWORD eksikse) önceden sessizce boş sonuç listesine
+  // düşüyordu — "arıyorum ama hiç sonuç çıkmıyor" diye tanısı zor bir belirtiye yol açıyordu
+  // (2026-09-27, kullanıcı bulgusu). Artık hata metni doğrudan gösteriliyor.
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!query.trim()) {
       setResults([]);
+      setError(null);
       return;
     }
     const timer = setTimeout(() => {
       fetch(`${endpoint}?q=${encodeURIComponent(query)}`)
-        .then((r) => r.json())
-        .then((data) => setResults(data.results ?? []));
+        .then(async (r) => {
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error ?? "Arama başarısız");
+          return data;
+        })
+        .then((data) => {
+          setResults(data.results ?? []);
+          setError(null);
+        })
+        .catch((err) => {
+          setResults([]);
+          setError(err.message);
+        });
     }, 300);
     return () => clearTimeout(timer);
   }, [query, endpoint]);
@@ -88,6 +104,7 @@ function GuidPicker({
     <div className="field">
       <label>{label}</label>
       <input type="text" placeholder={placeholder} value={query} onChange={(e) => setQuery(e.target.value)} />
+      {error && <div className="hint" style={{ color: "var(--danger)" }}>{error}</div>}
       {results.length > 0 && (
         <div className="search-results">
           {results.map((r) => (

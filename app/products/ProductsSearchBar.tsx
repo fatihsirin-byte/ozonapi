@@ -21,6 +21,16 @@ export function ProductsSearchBar() {
     router.push(`/products?${params.toString()}`);
   }
 
+  // Hangi pazaryerine bağlı ürünlerin gösterileceği — "Ozon" / "toptantr" / "İkisine de bağlı"
+  // (2026-09-27, kullanıcı talebi). Boş = ikisinden birine bağlı olan her şey (varsayılan).
+  function setMarketplace(value: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set("marketplace", value);
+    else params.delete("marketplace");
+    params.delete("page");
+    router.push(`/products?${params.toString()}`);
+  }
+
   return (
     <div style={{ display: "flex", gap: 8 }}>
       <input
@@ -34,6 +44,12 @@ export function ProductsSearchBar() {
         style={{ minWidth: 320 }}
       />
       <button className="btn-secondary" onClick={submit}>Ara</button>
+      <select value={searchParams.get("marketplace") ?? ""} onChange={(e) => setMarketplace(e.target.value)}>
+        <option value="">Tüm bağlantılar</option>
+        <option value="ozon">Sadece Ozon&apos;a bağlı</option>
+        <option value="toptantr">Sadece toptantr&apos;a bağlı</option>
+        <option value="both">İkisine de bağlı</option>
+      </select>
       {searchParams.get("q") && (
         <button
           className="btn-secondary"

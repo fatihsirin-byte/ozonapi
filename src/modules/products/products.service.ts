@@ -408,19 +408,54 @@ export async function checkImportStatus(offerId: string) {
 // search/skip/take verilmezse eskisi gibi TÜM ürünleri döner (geriye dönük uyumluluk — bkz.
 // app/api/products/route.ts'teki parametresiz GET) — verildiğinde offerId/name/nameRu üzerinde
 // arayıp sayfalar (2026-09-11, kullanıcı talebi: "ürünler sayfasına pagination ve searchbar").
-export async function listAllProducts(params?: { search?: string; skip?: number; take?: number }) {
+// "toptantr'a bağlı" = o handle için ToptantrListing.status === "success" (bkz. staging.service.ts
+// içindeki aynı fikirli getToptantrConnectedHandles — burada da aynısı, döngüsel import'tan
+// kaçınmak için ayrıca tanımlandı).
+export async function getToptantrConnectedHandleSet(): Promise<Set<string>> {
+  const rows = await prisma.toptantrListing.findMany({ where: { status: "success" }, select: { shopifyHandle: true } });
+  return new Set(rows.map((r) => r.shopifyHandle));
+}
+
+export async function listAllProducts(params?: {
+  search?: string;
+  skip?: number;
+  take?: number;
+  // "Ürünler" listesi varsayılan olarak hem Ozon'a hem toptantr'a bağlı ürünleri gösterir —
+  // sadece Ozon'un `status` alanına (draft dışı) bakmak, toptantr'a bağlı ama Ozon'a hiç
+  // gönderilmemiş (status hâlâ draft) ürünleri listeden tamamen gizliyordu (2026-09-27,
+  // kullanıcı bulgusu: "ozona bağlı ürünler ürünlere düşüyor, toptantr bağlı olanlar da düşsün").
+  marketplace?: "ozon" | "toptantr" | "both";
+}) {
   const search = params?.search?.trim();
+  const ozonCondition = { status: { not: "draft" } };
+
+  let marketplaceClause: Record<string, unknown>;
+  if (params?.marketplace === "ozon") {
+    marketplaceClause = ozonCondition;
+  } else if (params?.marketplace === "toptantr") {
+    marketplaceClause = { shopifyHandle: { in: [...(await getToptantrConnectedHandleSet())] } };
+  } else if (params?.marketplace === "both") {
+    marketplaceClause = { AND: [ozonCondition, { shopifyHandle: { in: [...(await getToptantrConnectedHandleSet())] } }] };
+  } else {
+    // Filtre seçilmemişse: Ozon'a bağlı OLAN veya toptantr'a bağlı OLAN — ikisi de listede.
+    marketplaceClause = { OR: [ozonCondition, { shopifyHandle: { in: [...(await getToptantrConnectedHandleSet())] } }] };
+  }
+
   const where = {
-    status: { not: "draft" },
-    ...(search
-      ? {
-          OR: [
-            { offerId: { contains: search, mode: "insensitive" as const } },
-            { name: { contains: search, mode: "insensitive" as const } },
-            { nameRu: { contains: search, mode: "insensitive" as const } },
-          ],
-        }
-      : {}),
+    AND: [
+      marketplaceClause,
+      ...(search
+        ? [
+            {
+              OR: [
+                { offerId: { contains: search, mode: "insensitive" as const } },
+                { name: { contains: search, mode: "insensitive" as const } },
+                { nameRu: { contains: search, mode: "insensitive" as const } },
+              ],
+            },
+          ]
+        : []),
+    ],
   };
 
   // take verilmemişse (ör. app/api/products/route.ts'teki eski parametresiz GET) zaten TÜM
@@ -501,6 +536,158 @@ export async function listProductsPage(page: number, pageSize: number, filters: 
   ]);
 
   return { items, total, page, pageSize };
+}
+
+export interface HsCodeSearchResult {
+  offerId: string;
+  name: string;
+  nameRu: string | null;
+  gtipOverride: string | null;
+  image: string | null;
+  descriptionCategoryId: number | null;
+  typeId: number | null;
+}
+
+// "HS Kod Arama" ekranı için (2026-09-25, kullanıcı talebi: "türkçe adıyla search rusca adıyla
+// search sku ile search destekleyecek sadece ürün bilgisi ve hs kod kategori filtresi de olcak") —
+// listAllProducts'taki AYNI üç alanlı (offerId/name/nameRu) arama deseni, kategori filtresi ve dar
+// bir select (sadece bu ekranda gösterilecek alanlar) ile.
+export async function searchProductsForHsCode(params: {
+  q?: string;
+  descriptionCategoryId?: number;
+  typeId?: number;
+  // true ise SADECE hiç HS kodu (gtipOverride) girilmemiş ürünleri döner — kullanıcı talebi
+  // (2026-09-25): "olmayanları göster hepsini göster vs gibi bi toggle olabilir", eksikleri
+  // teker teker aratmadan toplu tamamlayabilmek için.
+  onlyMissing?: boolean;
+  page: number;
+  pageSize: number;
+}): Promise<{ items: HsCodeSearchResult[]; total: number }> {
+  const q = params.q?.trim();
+  const where = {
+    status: { not: "draft" },
+    ...(q
+      ? {
+          OR: [
+            { offerId: { contains: q, mode: "insensitive" as const } },
+            { name: { contains: q, mode: "insensitive" as const } },
+            { nameRu: { contains: q, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+    ...(params.descriptionCategoryId != null && params.typeId != null
+      ? { descriptionCategoryId: params.descriptionCategoryId, typeId: params.typeId }
+      : {}),
+    ...(params.onlyMissing ? { gtipOverride: null } : {}),
+  };
+
+  const [rows, total] = await Promise.all([
+    prisma.product.findMany({
+      where,
+      orderBy: { name: "asc" },
+      skip: (params.page - 1) * params.pageSize,
+      take: params.pageSize,
+      select: {
+        offerId: true,
+        name: true,
+        nameRu: true,
+        gtipOverride: true,
+        images: true,
+        descriptionCategoryId: true,
+        typeId: true,
+      },
+    }),
+    prisma.product.count({ where }),
+  ]);
+
+  const items: HsCodeSearchResult[] = rows.map((p) => ({
+    offerId: p.offerId,
+    name: p.name,
+    nameRu: p.nameRu,
+    gtipOverride: p.gtipOverride,
+    image: Array.isArray(p.images) ? ((p.images as string[])[0] ?? null) : null,
+    descriptionCategoryId: p.descriptionCategoryId,
+    typeId: p.typeId,
+  }));
+
+  return { items, total };
+}
+
+// Kategori filtresi için dropdown seçenekleri — Ozon'un TÜM kategori ağacını değil (binlerce,
+// çoğu bizim ürünlerimizle alakasız düğüm), sadece ürünlerimizin GERÇEKTEN kullandığı
+// (descriptionCategoryId, typeId) çiftlerini döner — sayfa 1 (page.tsx), isimlerini
+// getFlatCategories/findCategory ile eşleştirir.
+export async function listUsedProductCategoryIds(): Promise<Array<{ descriptionCategoryId: number; typeId: number }>> {
+  const rows = await prisma.product.findMany({
+    where: { descriptionCategoryId: { not: null }, typeId: { not: null } },
+    select: { descriptionCategoryId: true, typeId: true },
+    distinct: ["descriptionCategoryId", "typeId"],
+  });
+  return rows.map((r) => ({ descriptionCategoryId: r.descriptionCategoryId!, typeId: r.typeId! }));
+}
+
+export interface MissingRealWeightResult {
+  offerId: string;
+  name: string;
+  nameRu: string | null;
+  image: string | null;
+  price: string;
+  weightGrams: number | null;
+  soldCount: number;
+  // Kullanıcı talebi (2026-09-25): "örnek 2 tane sipariş numarası ekle üstüne tıklarsam kopyalasın"
+  // — hangi siparişte satıldığını hızlıca bulup gerçek ağırlığı o kargodan teyit edebilmek için,
+  // EN SON iki siparişin posting no'su (en yeni önce).
+  samplePostingNumbers: string[];
+}
+
+// "Gerçek Ağırlık Bekleyenler" ekranı için (2026-09-25, kullanıcı talebi: "gerçek ağırlığı
+// girilmeyenler sekmesi aç SATIŞ olup gerçek ağırlığını girmediğimiz ürünleri göstersin. hiç satış
+// olmayanları göstermesin") — weightConfirmed=false VE en az bir OrderItem'ı olan (yani en az bir
+// kez satılmış) ürünleri döner. Hiç satılmamış ürünler BİLEREK dışarıda bırakılıyor: henüz kargoya
+// çıkmadıkları için gerçek/tartılmış bir ağırlık zaten olamaz, listeye girse sadece gürültü olurdu.
+export async function listProductsMissingRealWeight(params: { page: number; pageSize: number }): Promise<{ items: MissingRealWeightResult[]; total: number }> {
+  const where = {
+    status: { not: "draft" },
+    weightConfirmed: false,
+    orderItems: { some: {} },
+  };
+
+  const [rows, total] = await Promise.all([
+    prisma.product.findMany({
+      where,
+      orderBy: { name: "asc" },
+      skip: (params.page - 1) * params.pageSize,
+      take: params.pageSize,
+      select: {
+        offerId: true,
+        name: true,
+        nameRu: true,
+        images: true,
+        price: true,
+        weightGrams: true,
+        _count: { select: { orderItems: true } },
+        orderItems: {
+          take: 2,
+          orderBy: { order: { orderDate: "desc" } },
+          select: { order: { select: { postingNumber: true } } },
+        },
+      },
+    }),
+    prisma.product.count({ where }),
+  ]);
+
+  const items: MissingRealWeightResult[] = rows.map((p) => ({
+    offerId: p.offerId,
+    name: p.name,
+    nameRu: p.nameRu,
+    image: Array.isArray(p.images) ? ((p.images as string[])[0] ?? null) : null,
+    price: p.price,
+    weightGrams: p.weightGrams,
+    soldCount: p._count.orderItems,
+    samplePostingNumbers: p.orderItems.map((oi) => oi.order.postingNumber),
+  }));
+
+  return { items, total };
 }
 
 // Ozon'a bağlı (ozonProductId'si olan) HER ürünün stoğunu tek bir sabit adede ayarlar.

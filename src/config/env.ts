@@ -45,4 +45,27 @@ export const env = {
   // doğrulandı: dönen JWT'nin içine ASE tarafından zaten gömülüyor ("sellerid" claim'i, ClientId'ye
   // bağlı olarak sunucu tarafında belirleniyor) — burada sadece referans/dokümantasyon amaçlı duruyor.
   aseSellerId: process.env.ASE_SELLER_ID,
+
+  // Shopify (B2C mağaza, omg-silk) — stok "source of truth" senkronu için (2026-09-26, kullanıcı
+  // kararı). Paraşüt/ASE gibi required() ile zorunlu tutulmuyor, henüz kullanılmadığı yerlerde
+  // proje patlamasın diye — gerçekten kullanılacağı yerde (src/shopify/client.ts) eksikse orada
+  // anlamlı hata verilir.
+  shopifyStoreDomain: process.env.SHOPIFY_STORE_DOMAIN, // örn. "omg-silk" (myshopify.com öncesi kısım)
+  shopifyAdminApiToken: process.env.SHOPIFY_ADMIN_API_TOKEN,
+  shopifyApiVersion: process.env.SHOPIFY_API_VERSION ?? "2026-04",
+  // Stoğun çekileceği lokasyon — Ozon/toptantr'a gönderilecek gerçek depo (İstanbul), Dallas HQ
+  // stoğu bu senkronun kapsamı DIŞINDA (o ABD deposu, Ozon/toptantr Türkiye'den gönderiyor).
+  shopifyStockLocationId: process.env.SHOPIFY_STOCK_LOCATION_ID, // örn. "gid://shopify/Location/66272723182"
+
+  // toptantr — VPS'teki (72.62.93.209) mevcut "toptantr-shopify-sync" projesinden taşındı
+  // (2026-09-26). Auth: username/password ile /sapi/v1/token'dan Bearer token alınıyor (API key
+  // değil) — bkz. src/toptantr/client.ts. required() ile zorunlu tutulmuyor, ozonapi'nin toptantr'la
+  // hiç alakasız kısımları (Ozon/ASE/Paraşüt) bu değerler eksikken de çalışabilsin diye.
+  toptantrBaseUrl: process.env.TOPTANTR_BASE_URL ?? "https://api.toptantr.com",
+  toptantrUsername: process.env.TOPTANTR_USERNAME,
+  toptantrPassword: process.env.TOPTANTR_PASSWORD,
+  // Fiyatlandırma — VPS'teki orijinal projeyle aynı formül (TL = USD * kur * (1 + marj%)).
+  toptantrUsdToTlRate: parseFloat(process.env.TOPTANTR_USD_TO_TL_RATE ?? "46.85"),
+  toptantrMarginPercent: parseFloat(process.env.TOPTANTR_MARGIN_PERCENT ?? "0"),
+  toptantrDefaultTaxCategory: parseInt(process.env.TOPTANTR_DEFAULT_TAX_CATEGORY ?? "20", 10),
 };

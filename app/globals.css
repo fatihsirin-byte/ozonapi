@@ -548,7 +548,8 @@ th {
   color: var(--accent-hover);
 }
 
-.badge.imported {
+.badge.imported,
+.badge.success {
   background: rgba(61, 214, 140, 0.15);
   color: var(--success);
 }

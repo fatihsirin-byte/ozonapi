@@ -15,6 +15,7 @@ import { computeSalePrice } from "@/pricing/formula";
 import { buildRichContentJson } from "@/ozon/rich-content";
 import { PriceCalculatorModal } from "../../products/[offerId]/PriceCalculatorModal";
 import { productApiPath, variantApiPath } from "@/utils/decodeOfferId";
+import { ToptantrPanel } from "./ToptantrPanel";
 
 const MODEL_NAME_ATTRIBUTE_ID = 9048;
 // "Tür" (8229) — Ozon bunu canlı attribute listesinde DÖNMÜYOR (bilgi ürünün type_id alanında
@@ -114,6 +115,11 @@ export function HandleEditor({ handle }: { handle: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [searchParams.toString()],
   );
+
+  // Ozon (mevcut, aşağıdaki devasa blok) / toptantr (yeni, ToptantrPanel.tsx) sekmeleri — aynı
+  // ürünü iki farklı pazaryerine bağlamak artık tek sayfadan yönetiliyor (2026-09-26, kullanıcı
+  // talebi: "tek ürün içinden ozon ve toptantr tabları olsun").
+  const [activeTab, setActiveTab] = useState<"ozon" | "toptantr">("ozon");
 
   const [prevHandle, setPrevHandle] = useState<string | null>(null);
   const [prevPage, setPrevPage] = useState(1);
@@ -792,6 +798,27 @@ export function HandleEditor({ handle }: { handle: string }) {
         </Link>
       </div>
 
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <button
+          type="button"
+          className={activeTab === "ozon" ? "btn-primary" : "btn-secondary"}
+          onClick={() => setActiveTab("ozon")}
+        >
+          Ozon
+        </button>
+        <button
+          type="button"
+          className={activeTab === "toptantr" ? "btn-primary" : "btn-secondary"}
+          onClick={() => setActiveTab("toptantr")}
+        >
+          toptantr
+        </button>
+      </div>
+
+      {activeTab === "toptantr" && <ToptantrPanel handle={handle} />}
+
+      {activeTab === "ozon" && (
+      <>
       <div className="card" style={{ marginBottom: 16 }}>
         <label>Görseller</label>
         {alreadySubmittedAny ? (
@@ -1334,6 +1361,8 @@ export function HandleEditor({ handle }: { handle: string }) {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

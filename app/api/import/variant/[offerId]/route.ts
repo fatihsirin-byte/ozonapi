@@ -5,6 +5,7 @@ import {
   setVariantExcludedFromSubmit,
   recalculateFromBase,
 } from "@/modules/products/staging.service";
+import { prisma } from "@/db/prisma";
 
 // importTaskId BigInt — JSON.stringify edilemiyor (ürün Ozon'a gönderilmişse dolu oluyor).
 // Bu eksik olduğu için ağırlık/fiyat/pasifleştir işlemleri gönderilmiş ürünlerde 500 atıp
@@ -27,10 +28,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     heavyPackaging?: boolean;
     excludedFromSubmit?: boolean;
     recalculateFromBase?: boolean;
+    toptantrApproved?: boolean;
   };
 
   if (body.excludedFromSubmit !== undefined) {
     const product = await setVariantExcludedFromSubmit(offerId, body.excludedFromSubmit);
+    return NextResponse.json({ product: serialize(product) });
+  }
+
+  if (body.toptantrApproved !== undefined) {
+    const product = await prisma.product.update({ where: { offerId }, data: { toptantrApproved: body.toptantrApproved } });
     return NextResponse.json({ product: serialize(product) });
   }
 

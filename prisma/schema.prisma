@@ -70,12 +70,51 @@ model Product {
   // bu yüzden handle sayfasında "ilk varyant" (görsel/isim/vendor referansı) bunu kullanıyor.
   variantPosition Int @default(0)
 
+  // Shopify barkod (GTIN) — CSV'de vardı ama bugüne kadar hiç saklanmıyordu (2026-09-26'da
+  // toptantr entegrasyonu için eklendi). toptantr ürün/kombinasyon eşleştirmesinde barkodu
+  // tercih ediyor, boşsa offerId'ye (SKU) düşülüyor — bkz. src/toptantr/quantity.ts barcodeOf().
+  barcode String?
+  // Bu varyantın toptantr'a GÖNDERİLMEK üzere onaylandığı — Ozon'daki gönderim onboarding'i gibi,
+  // her varyant tek tek onaylanmadan (checkbox, ToptantrPanel.tsx) toptantr'a gitmiyor; kategori/
+  // marka seçimi ve genel "Bağla" ise handle (ToptantrListing) seviyesinde.
+  toptantrApproved Boolean @default(false)
+
   orderItems OrderItem[]
 
   @@index([shopifyHandle])
   @@index([modelGroupId])
   @@index([shopifyVendor])
   @@index([shopifyType])
+}
+
+// Bir Shopify handle'ının (bkz. Product.shopifyHandle) toptantr'daki KARŞILIĞI — Ozon'un aksine
+// (orada her varyant kendi offerId'siyle ayrı bir "ürün"), toptantr TEK bir üründe en fazla 4
+// "kombinasyon" (Adet/Paket/Koli/Palet) kabul ediyor, bu yüzden bağlantı varyant değil HANDLE
+// seviyesinde tutuluyor (bkz. src/modules/toptantr/toptantr.service.ts).
+model ToptantrListing {
+  id               String    @id @default(cuid())
+  shopifyHandle    String    @unique
+  toptantrProductId String?  // toptantr'ın kendi ürün id'si — POST /sapi/v1/products/new yanıtından
+  categoryGuid     String?
+  brandGuid        String?
+  translatedTitle  String?   // Gemini Türkçe çevirisi — bir daha çevrilmesin diye önbelleğe alınıyor
+  shortDescription String?
+  fullDescription  String?
+  status           String    @default("draft") // draft | pending | success | failed
+  lastError        String?
+  lastSyncedAt     DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+// (vendor, productType) çiftinin toptantr kategori/marka guid'ine Gemini eşlemesi — aynı
+// kombinasyon için tekrar tekrar Gemini'ye sorulmasın diye (bkz. VPS'teki orijinal
+// mappingCache.js ile aynı fikir, burada dosya yerine tabloya taşındı).
+model ToptantrMappingCache {
+  key         String   @id // `${vendor}::${productType}` (lowercase, trim)
+  categoryGuid String?
+  brandGuid    String?
+  createdAt   DateTime @default(now())
 }
 
 // Kullanıcının /import'tan bilerek sildiği offerId'ler — CSV tekrar import edilirse

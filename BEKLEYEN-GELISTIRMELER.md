@@ -199,3 +199,181 @@ istedi ("uzun sürecek", "ben ilerde yaparım").
 İlk gerçek test, kullanıcının kendi seçtiği, önemsiz, tek bir `awaiting_packaging` siparişinde,
 arayüzden (Siparişler → o sipariş → "Topla" butonu) elle yapılmalı. Bölme (multi-box) özelliği ancak
 temel (tek kutulu) akış gerçek bir siparişte doğrulandıktan sonra denenmeli.
+
+## 4. Shopify stok → Ozon + toptantr senkronu (TEMEL ALTYAPI YAZILDI — DB MIGRATION + CREDENTIAL BEKLIYOR, 2026-09-26)
+
+**GÜNCELLEME (2026-09-26, aynı gün devamı):** Kullanıcı kararı: "ozonapi çok daha büyük bir proje,
+toptantr'ı buraya taşıyalım — tek ürün içinden ozon ve toptantr tabları olsun, ürünü ozona bağla/
+toptantr'a bağla seçeneği olsun." VPS'te (72.62.93.209) `/var/www/toptantr-shopify-sync` adında
+TAM ÇALIŞAN ayrı bir Node.js projesi bulundu (Shopify→toptantr, Gemini çeviri + kategori/marka
+eşleştirme, USD→TL fiyatlama) — ama 13 Temmuz'dan beri hiç çalışmamış (crontab'da yok). Bu projenin
+MANTIĞI ozonapi'ye taşındı (dosyaların kendisi değil, JS→TS yeniden yazıldı):
+
+- `prisma/schema.prisma`: `Product.barcode` (yeni alan, CSV'de vardı ama hiç saklanmıyordu),
+  `Product.toptantrApproved` (varyant bazlı gönderim onayı), yeni `ToptantrListing` modeli (handle
+  bazlı — toptantr TEK üründe en fazla 4 kombinasyon/Adet-Paket-Koli-Palet kabul ediyor, Ozon'un
+  aksine varyant bazlı değil), yeni `ToptantrMappingCache` (vendor+type → kategori/marka guid,
+  Gemini'ye tekrar tekrar sormamak için).
+  **MIGRATION HENÜZ ÇALIŞTIRILMADI** — `prisma migrate dev` bu makineden "Production Deploy" olarak
+  engellendi (bu checkout doğrudan canlı DB'ye bağlanıyor). Kullanıcı ya kendisi
+  `npx prisma migrate dev --name add_toptantr_integration` çalıştırmalı ya da bu komuta izin
+  vermeli. Migration çalışmadan yeni alanları kullanan hiçbir kod (toptantr modülleri, yeni API
+  route'ları, ToptantrPanel.tsx) DB'ye karşı çalışmaz (Prisma client zaten `generate` ile tip
+  üretildi, sadece gerçek migration eksik).
+- `src/toptantr/client.ts` — toptantr API client'ı (token auth, createProduct/updateProduct/
+  findProductByBarcode/updateCombinations) — VPS'teki `toptantrClient.js`'in TS'e taşınmış hali,
+  **gerçek API doğrulamasıyla** (VPS'teki çalışan `pipeline.js`'in tam akışı okunarak: `/combinations`
+  ucu barkodla DEĞİL, `findProductByBarcode`'un döndürdüğü kombinasyon `id`'siyle çalışıyor — bu
+  ayrım koda yorum olarak da işlendi, karıştırılması kolay bir nokta).
+- `src/toptantr/quantity.ts` — VPS'teki regex tabanlı paket-adedi çıkarımı YERİNE ozonapi'de zaten
+  var olan `Product.unitsInPack` alanı kullanılıyor (Ozon için zaten tutuluyordu, aynı veri
+  toptantr'ın Adet/Paket/Koli/Palet sıralamasına da direkt uyuyor) — daha az kod, tek doğruluk kaynağı.
+- `src/toptantr/pricing.ts`, `src/toptantr/translate.ts` (Türkçe çeviri, Gemini), `src/toptantr/categoryMatch.ts`
+  (kategori/marka Gemini eşleştirme, anahtar-kelime ön-filtreli), `src/toptantr/mapping.ts` (kategori/
+  marka TTL cache + DB'deki vendor/type eşleştirme önbelleği).
+- `src/modules/toptantr/toptantr.service.ts` — `getToptantrPreview(handle)`, `connectHandleToToptantr()`,
+  `refreshToptantrHandle()` — Ozon'daki `submitHandleToOzon`'un toptantr karşılığı, aynı "self-heal"
+  (barkod çakışırsa PUT'a düş) ve "indekslenme gecikmesi" (retry ile bekleme) mantığı dahil.
+  **NOT YAPILMADI:** VPS'teki orijinal projedeki `state.js` (processed.json, ürün başına
+  translatedTitle/approved geçmişi) burada `ToptantrListing` tablosuna taşındı ama "ürün DAHA ÖNCE
+  approve edilmiş miydi, tekrar sorma" gibi ince noktaların hepsi bire bir doğrulanmadı — ilk gerçek
+  testte dikkatli bakılmalı.
+- API route'ları: `app/api/import/products/[handle]/toptantr/route.ts` (GET önizleme, POST bağla),
+  `.../toptantr/refresh/route.ts` (POST stok/fiyat yenile), `app/api/toptantr/categories|brands/route.ts`
+  (arama). `app/api/import/variant/[offerId]/route.ts`'e `toptantrApproved` PATCH alanı eklendi.
+- UI: `app/import/[handle]/HandleEditor.tsx`'e "Ozon" / "toptantr" sekme geçişi eklendi (mevcut
+  koca Ozon bloğu `{activeTab==="ozon" && (...)}` içine alındı, davranışı DEĞİŞMEDİ), yeni
+  `app/import/[handle]/ToptantrPanel.tsx` (kademe onay checkbox'ları, kategori/marka arama, Bağla/
+  Yenile butonları, fiyat anomalisi uyarısı).
+
+**Kalan gerçek blokerler:**
+1. **DB migration çalıştırılmadı** (yukarıda açıklandı) — bu olmadan hiçbir toptantr özelliği
+   gerçekte çalışmaz, sadece typecheck geçer.
+2. **`.env`'e gerçek toptantr credential'ları eklenmedi** — `TOPTANTR_BASE_URL`/`TOPTANTR_USERNAME`/
+   `TOPTANTR_PASSWORD` VPS'teki `/var/www/toptantr-shopify-sync/.env`'de duruyor, buraya otomatik
+   taşıma (SSH ile çekip yerel `.env`'e ekleme) "dangerous" olarak engellendi — kullanıcı ya
+   VPS'teki değerleri kendisi kopyalayıp buraya eklemeli, ya da bana açıkça yapıştırmalı.
+3. **`GEMINI_API_KEY` zaten `.env`'de var (Rusça çeviri için) ama toptantr Türkçe çevirisi/kategori
+   eşleştirmesi için de AYNI key kullanılıyor** — ayrı bir key gerekmiyor, ama kullanım hacmi
+   artacağı unutulmamalı (rate limit/quota).
+4. **Barkod verisi eksik olabilir** — `Product.barcode` yeni bir alan, mevcut 6270 üründe muhtemelen
+   hepsi NULL (CSV'de vardı ama hiç kaydedilmiyordu). `barcodeOf()` boşsa offerId'ye (SKU) düşüyor,
+   bu YETER ama ideal değil — canlı Shopify'dan barkodu geri çekip backfill etmek (bkz. madde 4'ün
+   ilk hâlindeki `src/shopify/inventory.ts` bulk operation deseni, `barcode` alanı eklenerek) ayrı
+   bir iş.
+5. **Hiç gerçek üründe denenmedi.** İlk test kullanıcının seçtiği, önemsiz TEK bir üründe, arayüzden
+   ("toptantr" sekmesi → kategori seç → bir kademe onayla → "toptantr'a Bağla") elle yapılmalı —
+   toplu/otomatik bir şey YOK, hepsi manuel buton.
+
+**GÜNCELLEME (2026-09-26, aynı gün — "hem ozonda hem toptantr'da bağlı ürünler var, bu nasıl
+olacak?" sorusu üzerine):** Gerçek bir risk tespit edildi ve doğrulandı — **DÜZELTİLMEDİ, migration
+bekliyor.**
+
+Risk: eski (Temmuz'a kadar çalışan) VPS'teki toptantr-shopify-sync, bazı ürünleri GERÇEKTEN
+toptantr'a bağlamış (72 ürün, `status: success`). Bizim yeni `ToptantrListing` tablomuz bundan
+HABERSİZ (boş) — bu ürünlerden birinde "Bağla"ya basılırsa `connectHandleToToptantr` bunları "hiç
+bağlanmamış" sanıp `createProduct` çağırır. Kod self-heal (duplicate-barcode hatası yakalayıp
+`findProductByBarcode`'a düşme) içeriyor AMA `Product.barcode` alanı yeni eklendi ve henüz hiçbir
+üründe dolu değil — `barcodeOf()` bu yüzden SKU'ya düşüyor, ki bu toptantr'da o ürün için KAYITLI
+GERÇEK barkodla (Shopify barkod alanı, SKU'dan tamamen farklı bir değer) uyuşmuyor. Sonuç: hata
+YAKALANMAZ, toptantr'da gerçek bir MÜKERRER ürün oluşur.
+
+Çözüm (yazıldı, migration'ı bekliyor): VPS'teki `/var/www/toptantr-shopify-sync/data/processed.json`
+(o eski projenin kendi state dosyası — hangi ürünün hangi toptantr id/kategori/marka/çeviriyle
+bağlandığını tutuyor) `private-uploads/toptantr-legacy/processed.json`'a kopyalandı (gitignore'da,
+gizli değil ama commit'lenmeyecek iş verisi). `src/scripts/reconcile-toptantr-legacy.ts` bunu okuyup
+SKU eşleştirmesiyle (72 üründe **%100 eşleşme** doğrulandı, dry-run'da test edildi)
+`ToptantrListing`'i doğru `status: success` + toptantrProductId/kategori/marka/çeviri ile önceden
+doldurur — bu sayede bu 72 ürün panelde baştan "zaten bağlı" görünür, "Bağla" hiç tıklanamaz/
+tetiklenmez, sadece "Yenile" kullanılabilir.
+
+**Migration çalıştırıldıktan sonra (madde 4'teki ilk blokerle aynı), herhangi bir ürün panelden
+"Bağla"lanmadan ÖNCE mutlaka çalıştırılmalı:**
+```
+npx tsx src/scripts/reconcile-toptantr-legacy.ts            # önce dry-run, çıktıyı kontrol et
+npx tsx src/scripts/reconcile-toptantr-legacy.ts --apply     # sonra gerçekten uygula
+```
+
+**2 üründe elle karar gerekiyor** (script bunları otomatik atlıyor, ToptantrListing'e yazmıyor) —
+aynı 2 ürün, 2026-09-26'daki Shopify↔CSV SKU denetiminde de "handle uyuşmazlığı" olarak tespit
+edilmişti (bkz. o zamanki sohbet): Shopify'da ürün sonradan yeniden adlandırılmış/kopyalanmış,
+şu an aynı eski toptantr kaydının SKU'ları YENİ İKİ FARKLI Shopify handle'ına bölünmüş durumda:
+- `handmade-dubai-chocolate-with-pistachio-kadayif-tahini-42g-low-sugar-gourmet-treat` /
+  `vegan-bitter-dubai-chocolate-70-bitter-chocolate-with-pistachio-kadayif-and-tahini-42g`
+- `pistachio-praline-dubai-chocolate-bar-crispy-nutty-delight-73gr` /
+  `pistachio-praline-dubai-chocolate-bar-crispy-nutty-delight-71gr-copy`
+
+Bu ikisi için hangi GÜNCEL handle'ın gerçek toptantr kaydını temsil ettiğine kullanıcı karar
+vermeli, script'e elle (ya da script'i genişleterek) eklenmeli — otomatik tahmin YAPILMADI çünkü
+yanlış handle'a yazmak, YANLIŞ bir ürünü "zaten bağlı" gösterip asıl bağlanması gereken ürünün hiç
+bağlanamamasına yol açabilir.
+
+**Genel (72'nin dışında kalan, gelecekteki tüm ürünler için) kalıcı çözüm hâlâ eksik:**
+`Product.barcode`'un gerçek Shopify barkoduyla doldurulması — `src/shopify/inventory.ts`'teki bulk
+operation deseni `barcode` alanı da isteyecek şekilde genişletilip SKU eşleşmesiyle backfill
+edilmeli (ayrı bir script, henüz yazılmadı) — bu olmadan yeni bağlanan ama iki kere denenen (ör.
+yarım kalmış bir istekten sonra tekrar "Bağla"ya basılan) ürünlerde de aynı sınıf risk teorik olarak
+var, sadece 72'lik legacy liste için pratik risk giderildi.
+
+**Eski (ilk hâldeki) plan aşağıda hâlâ geçerli** — Shopify stok pull kısmı (`src/shopify/inventory.ts`,
+`src/shopify/exclusions.ts`) DEĞİŞMEDEN duruyor, toptantr'a bağlanan ürünlerin stoğunu güncellerken
+(refreshToptantrHandle şu an sadece DB'deki `stockQuantity`'i kullanıyor) o modülle entegre edilmesi
+gerekecek — henüz edilmedi.
+
+**İstek (kullanıcı, 2026-09-26):** "Shopify stokları source of truth olacak, kolajen ve vitamin vs
+gibi ürünler hariç. Bir de VPS'te toptantr entegrasyonumuz var API'yle. Bu Ozon API'ye Shopify stok
+çekeceğiz, bunları toptantr ve Ozon'a bağlayacağız. Ozon tarafı zaten hazır, amaç stok çekmek ve hem
+toptantr hem Ozon'da satmak."
+
+**Şu ana kadar yazılan (test edildi, canlı Shopify'dan gerçek veri çekiyor):**
+- `src/shopify/client.ts` — Shopify Admin GraphQL client (axios, `SHOPIFY_STORE_DOMAIN`/
+  `SHOPIFY_ADMIN_API_TOKEN`/`SHOPIFY_API_VERSION` env, `.env`'e zaten eklendi: mağaza `omg-silk`,
+  B2C token).
+- `src/shopify/inventory.ts` — `fetchShopifyStockByLocation()`: bulk operation ile (mağazada
+  113.000+ varyant olduğu için sayfalı sorgu yerine) belirli bir lokasyondaki (varsayılan
+  `SHOPIFY_STOCK_LOCATION_ID` — İstanbul deposu, `gid://shopify/Location/66272723182`) tüm SKU +
+  mevcut ("available") stoğu çeker. Negatif stok (canlıda görülen overselling durumları, ör. -1/-2/-9)
+  0'a sabitleniyor.
+- `src/shopify/exclusions.ts` — `isExcludedFromStockSync()`: kolajen/vitamin/takviye ürünlerini
+  SKU/handle/isim üzerinde anahtar kelimeyle (collagen, vitamin, vita1, supplement, glutathione,
+  hyaluronic, ch alpha, vb.) tespit ediyor. **DİKKAT:** bu bir heuristik — `shopifyVendor`/
+  `shopifyType` alanları DB'de TÜM ürünlerde boş olduğundan (CSV'de hiç doldurulmamış) kategoriye
+  göre değil anahtar kelimeye göre çalışıyor, yanlış pozitif/negatif verebilir.
+- `src/scripts/shopify-stock-dry-run.ts` — hiçbir yere yazmayan, sadece rapor basan test script'i.
+  `npx tsx src/scripts/shopify-stock-dry-run.ts` ile çalıştırılır. Son çalıştırmada (2026-09-26):
+  6270 Shopify-origin üründen 6074'ü Shopify'da SKU ile eşleşiyor, 125'i kolajen/vitamin heuristiğiyle
+  dışlandı (örnekler script çıktısında listeleniyor, kullanıcı gözden geçirmeli), 71'i eşleşmiyor
+  (ama bunlar 2026-09-26'daki SKU denetiminde tespit edilen "CSV'de SKU'su boştu, sahte offerId
+  üretildi" durumunun aynısı — gerçek eksik değil).
+
+**Neden push tarafı yazılmadı (gerçek blokerler):**
+1. **toptantr API'si hakkında hiçbir bilgi yok** — `/Users/aladdin/.../server/toptantr` klasörü
+   tamamen boş, `ozonapi` içinde de "toptantr" geçen hiçbir kod yok. Endpoint, auth yöntemi, request/
+   response şeması, ürün eşleştirme alanı (SKU mu, başka bir id mi) — hiçbiri bilinmiyor. VPS'teki
+   gerçek entegrasyonun kod/dokümantasyonuna bakılması ya da kullanıcıdan API spesifikasyonu alınması
+   gerekiyor.
+2. **Kolajen/vitamin dışlama listesi kullanıcı tarafından onaylanmadı** — yukarıdaki heuristik ile
+   125 ürün dışlandı, ama bu KESİN değil (ör. "vitamin enriched jelly chews" gibi asıl şeker/gıda
+   ürünü olup adında "vitamin" geçtiği için yanlışlıkla dışlanmış olabilecek satırlar var, script
+   çıktısındaki "örnek dışlanan ürünler" listesine bakılmalı).
+3. **Ozon'a gerçek stok push'u canlı sipariş akışını etkiler** — mevcut `updateStocks`/
+   `selectWarehouseId` (`src/ozon/products.ts`, `src/ozon/warehouses.ts`) hazır ve reuse edilebilir
+   durumda, ama hangi ürünlerin ne zaman/ne sıklıkla güncelleneceği (cron'a mı eklenecek, `runSync`
+   gibi 15 dakikada bir mi, yoksa daha seyrek mi) kullanıcı kararı gerektiriyor — yanlış/erken
+   otomatikleştirme toplu stok hatasına yol açabilir (bkz. bu dosyadaki diğer maddelerde tekrar eden
+   "otomatikleştirmeden önce kullanıcı onayı" deseni).
+
+**Nasıl devam edilmeli:**
+1. `npx tsx src/scripts/shopify-stock-dry-run.ts` çalıştırılıp "örnek dışlanan ürünler" listesi
+   kullanıcıyla gözden geçirilmeli — heuristik yanlışsa `src/shopify/exclusions.ts` düzeltilmeli
+   (ör. gerçek bir "hariç tutulacak SKU/handle listesi" dosyası ile heuristiği DEĞİL, tam liste ile
+   değiştirmek daha güvenli olabilir).
+2. toptantr API detayları netleşince `src/toptantr/client.ts` + `src/toptantr/stock.ts` (Ozon
+   client'ının aynı deseniyle: axios, retry, tipli hata sınıfı) yazılmalı.
+3. Ozon tarafı için: `fetchShopifyStockByLocation()` sonucunu `Product.offerId`'ye göre eşleyip,
+   dışlanmamış + `ozonProductId` dolu ürünler için mevcut `updateStocks` ile push eden bir fonksiyon
+   (`syncShopifyStockToOzon`, `products.service.ts`'e eklenebilir) yazılmalı — `backfillMissingStock`
+   ile aynı dosyada, aynı desende.
+4. İlk gerçek push MUTLAKA küçük bir örneklemle (ör. 5-10 ürün) elle test edilmeli, sonra
+   `src/scripts/sync-orders-cron.ts`'e (mevcut cron process'i) yeni bir zamanlanmış fonksiyon olarak
+   eklenmeli — kullanıcı onayı olmadan otomatik/periyodik çalışmaya BAŞLAMAMALI.

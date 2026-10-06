@@ -68,4 +68,13 @@ export const env = {
   toptantrUsdToTlRate: parseFloat(process.env.TOPTANTR_USD_TO_TL_RATE ?? "46.85"),
   toptantrMarginPercent: parseFloat(process.env.TOPTANTR_MARGIN_PERCENT ?? "0"),
   toptantrDefaultTaxCategory: parseInt(process.env.TOPTANTR_DEFAULT_TAX_CATEGORY ?? "20", 10),
+
+  // Shopify stok senkronu → Ozon/toptantr'a GERÇEK miktarı gönderme anahtarı (2026-09-29,
+  // kullanıcı kararı: mimari hazır olsun ama aktif gönderim şimdilik kapalı). Varsayılan false —
+  // açıkça "true" verilmeden hiçbir gerçek stok miktarı marketplace'lere PUSH edilmez.
+  // NOT: bu anahtar sadece "gerçek miktarı gönder"i kapatır — Shopify'da tükenen (0) bir ürünün
+  // Ozon/toptantr'da da kapatılması (stok 0 yapılması) bu anahtardan BAĞIMSIZ, her zaman çalışır
+  // (bkz. src/shopify/stockSync.ts) — kullanıcı talebi: "biterse kapansın" istisnası kalıcı, opsiyonel değil.
+  ozonStockSyncEnabled: process.env.OZON_STOCK_SYNC_ENABLED === "true",
+  toptantrStockSyncEnabled: process.env.TOPTANTR_STOCK_SYNC_ENABLED === "true",
 };

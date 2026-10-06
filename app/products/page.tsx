@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listAllProducts, getToptantrConnectedHandleSet } from "@/modules/products/products.service";
 import { productPath } from "@/utils/decodeOfferId";
 import { ImportProductForm } from "./ImportProductForm";
+import { ShopifyImportButton } from "./ShopifyImportButton";
 import { ProductsSearchBar } from "./ProductsSearchBar";
 import { PageLinkPagination } from "../orders/PageLinkPagination";
 import { parsePageParam } from "@/utils/pagination";
@@ -38,6 +39,7 @@ export default async function ProductsPage({
         <h1>Ürünler</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
           <ImportProductForm />
+          <ShopifyImportButton />
           <Link href="/products/new">
             <button className="btn-primary">+ Yeni Ürün</button>
           </Link>

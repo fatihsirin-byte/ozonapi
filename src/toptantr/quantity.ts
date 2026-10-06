@@ -72,6 +72,25 @@ export interface VariantTierView {
   approved: boolean;
 }
 
+// Sadece Adet kademesinin stockQuantity'si gerçek sayımı yansıtıyor (Ozon'a hep tekli
+// gönderildiği için) — Paket/Koli/Palet kendi stockQuantity'sini hiç saymıyor, paylaşımlı
+// fiziksel havuzdan floor(Adet stok / unitsInPack) ile türetiliyor. Güvenlik payı yok, tam
+// floor değeri kullanılıyor (kullanıcı kararı, bkz. handoff notu).
+export function computeTierStock(ranked: RankedVariant[]): Map<string, number> {
+  const adet = ranked.find((r) => r.attributeName === "Adet");
+  const adetStock = adet?.product.stockQuantity ?? 0;
+  const stockBySku = new Map<string, number>();
+  for (const r of ranked) {
+    if (r.attributeName === "Adet") {
+      stockBySku.set(r.product.offerId, adetStock);
+    } else {
+      const qty = r.quantity || 1;
+      stockBySku.set(r.product.offerId, Math.floor(adetStock / qty));
+    }
+  }
+  return stockBySku;
+}
+
 export function describeVariants(ranked: RankedVariant[], stockBySku: Map<string, number>): VariantTierView[] {
   return ranked.map(({ product, quantity, attributeName }) => ({
     tier: attributeName,

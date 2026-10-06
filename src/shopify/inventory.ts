@@ -8,7 +8,7 @@ interface BulkOperationNode {
   url: string | null;
 }
 
-async function startBulkQuery(query: string): Promise<string> {
+export async function startBulkQuery(query: string): Promise<string> {
   const escaped = query.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const result = await shopifyGraphQl<{
     bulkOperationRunQuery: { bulkOperation: { id: string; status: string } | null; userErrors: { message: string }[] };
@@ -30,7 +30,7 @@ async function startBulkQuery(query: string): Promise<string> {
 const POLL_INTERVAL_MS = 5000;
 const MAX_POLL_ATTEMPTS = 60;
 
-async function waitForBulkOperation(): Promise<BulkOperationNode> {
+export async function waitForBulkOperation(): Promise<BulkOperationNode> {
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     const result = await shopifyGraphQl<{ currentBulkOperation: BulkOperationNode | null }>(
@@ -46,7 +46,7 @@ async function waitForBulkOperation(): Promise<BulkOperationNode> {
   throw new Error("Shopify bulk operation zaman aşımına uğradı (5 dakika)");
 }
 
-async function downloadJsonl(url: string): Promise<unknown[]> {
+export async function downloadJsonl(url: string): Promise<unknown[]> {
   const axios = (await import("axios")).default;
   const response = await axios.get<string>(url, { responseType: "text" });
   const lines = response.data.split("\n").filter((line) => line.trim().length > 0);
@@ -58,6 +58,8 @@ export interface ShopifyStockRow {
   available: number;
   productHandle: string;
   productTitle: string;
+  variantTitle: string;
+  productStatus: string; // ACTIVE | DRAFT | ARCHIVED
 }
 
 // Belirli bir lokasyondaki (varsayılan: env.shopifyStockLocationId, örn. İstanbul deposu) tüm
@@ -75,7 +77,8 @@ export async function fetchShopifyStockByLocation(locationId?: string): Promise<
       edges {
         node {
           sku
-          product { handle title }
+          title
+          product { handle title status }
           inventoryItem {
             inventoryLevel(locationId: "${location}") {
               quantities(names: ["available"]) { quantity }
@@ -95,7 +98,8 @@ export async function fetchShopifyStockByLocation(locationId?: string): Promise<
   for (const raw of rows) {
     const row = raw as {
       sku?: string;
-      product?: { handle?: string; title?: string };
+      title?: string;
+      product?: { handle?: string; title?: string; status?: string };
       inventoryItem?: { inventoryLevel?: { quantities?: { quantity?: number }[] } | null };
     };
     if (!row.sku) continue; // SKU'suz varyantlar (bkz. src/import/shopify-csv.ts sahte offerId notu) — eşleştirilemez, atlanır
@@ -108,7 +112,42 @@ export async function fetchShopifyStockByLocation(locationId?: string): Promise<
       available: Math.max(0, quantity),
       productHandle: row.product?.handle ?? "",
       productTitle: row.product?.title ?? "",
+      variantTitle: row.title ?? "",
+      productStatus: row.product?.status ?? "",
     });
   }
   return stock;
+}
+
+export interface ShopifyVariantBarcodeRow {
+  sku: string;
+  barcode: string;
+  productHandle: string;
+}
+
+// Tüm varyantların SKU + Shopify barkod (GTIN) alanını çeker — Product.barcode backfill'i için
+// (bkz. src/scripts/backfill-barcodes-from-shopify.ts). toptantr eşleştirmesi bu barkodu kullanıyor.
+export async function fetchShopifyVariantBarcodes(): Promise<ShopifyVariantBarcodeRow[]> {
+  const query = `{
+    productVariants {
+      edges {
+        node {
+          sku
+          barcode
+          product { handle }
+        }
+      }
+    }
+  }`;
+  await startBulkQuery(query);
+  const op = await waitForBulkOperation();
+  if (!op.url) return [];
+  const rows = await downloadJsonl(op.url);
+  const result: ShopifyVariantBarcodeRow[] = [];
+  for (const raw of rows) {
+    const row = raw as { sku?: string; barcode?: string | null; product?: { handle?: string } };
+    if (!row.sku) continue;
+    result.push({ sku: row.sku.trim(), barcode: (row.barcode ?? "").trim(), productHandle: row.product?.handle ?? "" });
+  }
+  return result;
 }

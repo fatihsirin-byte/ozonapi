@@ -8,7 +8,7 @@ import {
   updateCombinations,
   type ToptantrProductPayload,
 } from "../../toptantr/client";
-import { rankVariants, describeVariants, hasPriceAnomaly, isSingleUnitOnlyHandle, isTierSendable, barcodeOf, type VariantTierView } from "../../toptantr/quantity";
+import { rankVariants, describeVariants, computeTierStock, hasPriceAnomaly, isSingleUnitOnlyHandle, isTierSendable, barcodeOf, type VariantTierView } from "../../toptantr/quantity";
 import { usdToTl } from "../../toptantr/pricing";
 import { translateForToptantr } from "../../toptantr/translate";
 import { getCachedMapping, setCachedMapping } from "../../toptantr/mapping";
@@ -43,7 +43,7 @@ export async function getToptantrPreview(handle: string): Promise<ToptantrPrevie
 
   const listing = await prisma.toptantrListing.findUnique({ where: { shopifyHandle: handle } });
   const ranked = rankVariants(products);
-  const stockBySku = new Map(products.map((p) => [p.offerId, p.stockQuantity ?? 0]));
+  const stockBySku = computeTierStock(ranked);
   const variants = describeVariants(ranked, stockBySku);
   const suggestedMapping = await getCachedMapping(products[0].shopifyVendor, products[0].shopifyType);
 
@@ -97,7 +97,11 @@ function buildPayload(params: {
 // KENDİ döndürdüğü kombinasyon id'leriyle eşleştirip PUT /combinations ile günceller — bkz.
 // src/toptantr/client.ts'teki ToptantrCombinationStockUpdate yorumu (createProduct'takinden
 // FARKLI bir şekil).
-async function pushStockAndPrice(barcode: string, sendableRanked: ReturnType<typeof rankVariants>) {
+async function pushStockAndPrice(
+  barcode: string,
+  sendableRanked: ReturnType<typeof rankVariants>,
+  stockBySku: Map<string, number>,
+) {
   const found = await findProductByBarcodeWithRetry(barcode);
   if (!found) {
     return { toptantrProductId: null as string | null, combinationsUpdated: 0, combinationsPending: true };
@@ -110,7 +114,7 @@ async function pushStockAndPrice(barcode: string, sendableRanked: ReturnType<typ
     if (!match) continue;
     updates.push({
       id: match.id,
-      quantity: ranked.product.stockQuantity ?? 0,
+      quantity: stockBySku.get(ranked.product.offerId) ?? 0,
       taxCategory: env.toptantrDefaultTaxCategory,
       sellingPrice: usdToTl(ranked.product.costPrice),
     });
@@ -192,7 +196,7 @@ export async function connectHandleToToptantr(input: ConnectHandleInput): Promis
       toptantrProductId = existingProduct.id;
     }
 
-    const stockResult = await pushStockAndPrice(barcode, sendableRanked);
+    const stockResult = await pushStockAndPrice(barcode, sendableRanked, computeTierStock(ranked));
 
     const updated = await prisma.toptantrListing.update({
       where: { shopifyHandle: input.handle },
@@ -232,7 +236,7 @@ export async function refreshToptantrHandle(handle: string): Promise<ToptantrLis
 
   const barcode = barcodeOf(sendableRanked[0].product);
   try {
-    const result = await pushStockAndPrice(barcode, sendableRanked);
+    const result = await pushStockAndPrice(barcode, sendableRanked, computeTierStock(ranked));
     return prisma.toptantrListing.update({
       where: { shopifyHandle: handle },
       data: {

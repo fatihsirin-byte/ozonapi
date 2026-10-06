@@ -185,6 +185,8 @@ export async function updateProduct(id: string, payload: Partial<ToptantrProduct
 export interface ToptantrFoundCombination {
   id: string;
   attributes?: { id: number; name: string }[];
+  sellingPrice?: number;
+  taxCategory?: number;
 }
 
 export interface ToptantrFoundProduct {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { isHsCodeError } from "@/ase/constants";
 
@@ -38,6 +38,15 @@ interface AseShipmentResponse {
 
 type PdfStatus = "idle" | "checking" | "ready" | "processing" | "error";
 
+// "Etiket Yazdır" (app/orders/OrderRowActions.tsx) bu ref üzerinden, sipariş henüz faturalanmamışsa
+// fatura+ASE zincirini KENDİLİĞİNDEN başlatır — kullanıcı talebi (2026-09-25): "etiket yazdırınca
+// fatura ve aseyi tetiklesin". Zaten faturalanmışsa (ya da tam o an bir istek sürüyorsa) no-op'tur,
+// bu yüzden etiket art arda birkaç kez basılsa/tekrar basılsa bile GERÇEK ikinci bir fatura
+// isteği ATILMAZ.
+export interface InvoiceAndAseButtonHandle {
+  triggerAutoInvoiceIfNeeded: () => void;
+}
+
 // GÜNCELLEME (2026-09-24'te canlıda, kullanıcı bulgusu: "bende hala tekrar dene duruyor, sayfa
 // yenile dedim gidiyor ama yeniden aynısı oluyor" + "neden statü güncellemesi için sayfayı
 // yeniletiyoruz"): eskiden 2 dakika sonra TAMAMEN vazgeçip kırmızı "✗ Tekrar Dene"ye düşülüyordu —
@@ -67,7 +76,7 @@ const SLOW_CHECK_INTERVAL_MS = 60_000; // sonrasında dakikada bir, sınırsız
 // düzelt-ve-tekrar-dene popup'ı, gerçek fatura onay diyaloğu, router.refresh() zamanlaması, ASE
 // yanıtını STATE değil DOĞRUDAN fetch sonucunu okuyarak işleme — React state batching'in eski
 // değeri okumasını önlemek için) BİREBİR korunuyor.
-export function InvoiceAndAseButton({
+export const InvoiceAndAseButton = forwardRef<InvoiceAndAseButtonHandle, Props>(function InvoiceAndAseButton({
   postingNumber,
   orderStatus,
   initialInvoiceNo,
@@ -77,7 +86,7 @@ export function InvoiceAndAseButton({
   initialAseSentAt,
   initialAseSuccess,
   initialAseMessage,
-}: Props) {
+}: Props, ref) {
   const router = useRouter();
 
   const [invoiceLoading, setInvoiceLoading] = useState(false);
@@ -253,18 +262,11 @@ export function InvoiceAndAseButton({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleCreate() {
-    // ACİL DÜZELTME (2026-09-24'te canlıda, kullanıcı bulgusu): "Paketleme Bekliyor" listesinde
-    // sipariş sipariş "Fatura Kes"e basılınca, henüz kargoya verilmemiş (Ozon tarafından ASE'ye
-    // hiç iletilmemiş) siparişler faturalanmıştı — Ozon paketi ASE'ye iletmeden ASE bunu asla
-    // kabul etmiyor (bkz. src/ase/orderShipment.ts SHIPMENT_NOT_YET_SYNCED_ERROR_CODE yorumu).
-    // Akış hâlâ engellenmiyor (bazen bilerek erken faturalamak gerekebilir) ama ekstra bir uyarı
-    // ile yanlışlıkla/farkında olmadan yapılması zorlaştırılıyor.
-    const earlyWarning =
-      orderStatus === "awaiting_packaging"
-        ? "\n\nUYARI: Bu sipariş henüz kargoya verilmedi (Paketleme Bekliyor) — Ozon paketi ASE'ye iletene kadar ASE gönderimi otomatik olarak bekleyecek."
-        : "";
-    if (!confirm(`Paraşüt'te bu sipariş için GERÇEK bir satış faturası kesilecek. Onaylıyor musunuz?${earlyWarning}`)) return;
+  // Gerçek POST isteğini atan ortak mantık — hem elle "Fatura + ASE" tıklamasından (handleCreate,
+  // onay penceresinden SONRA) hem "Etiket Yazdır"ın otomatik tetiklemesinden (triggerAutoInvoiceIfNeeded,
+  // onay penceresi OLMADAN — bkz. aşağıdaki yorum) çağrılıyor; tek yerden, iki kopya halinde
+  // BİREBİR aynı akışın (loading/hata/state güncelleme) kopyalanıp birinin unutulma riskine karşı.
+  async function runInvoiceCreation() {
     setInvoiceLoading(true);
     setInvoiceError(null);
     try {
@@ -284,6 +286,36 @@ export function InvoiceAndAseButton({
       setInvoiceLoading(false);
     }
   }
+
+  async function handleCreate() {
+    // ACİL DÜZELTME (2026-09-24'te canlıda, kullanıcı bulgusu): "Paketleme Bekliyor" listesinde
+    // sipariş sipariş "Fatura Kes"e basılınca, henüz kargoya verilmemiş (Ozon tarafından ASE'ye
+    // hiç iletilmemiş) siparişler faturalanmıştı — Ozon paketi ASE'ye iletmeden ASE bunu asla
+    // kabul etmiyor (bkz. src/ase/orderShipment.ts SHIPMENT_NOT_YET_SYNCED_ERROR_CODE yorumu).
+    // Akış hâlâ engellenmiyor (bazen bilerek erken faturalamak gerekebilir) ama ekstra bir uyarı
+    // ile yanlışlıkla/farkında olmadan yapılması zorlaştırılıyor.
+    const earlyWarning =
+      orderStatus === "awaiting_packaging"
+        ? "\n\nUYARI: Bu sipariş henüz kargoya verilmedi (Paketleme Bekliyor) — Ozon paketi ASE'ye iletene kadar ASE gönderimi otomatik olarak bekleyecek."
+        : "";
+    if (!confirm(`Paraşüt'te bu sipariş için GERÇEK bir satış faturası kesilecek. Onaylıyor musunuz?${earlyWarning}`)) return;
+    await runInvoiceCreation();
+  }
+
+  // "Etiket Yazdır" tıklamasından (bkz. OrderRowActions.tsx) çağrılır — kullanıcı talebi (2026-09-25):
+  // "etiket yazdırınca fatura ve aseyi tetiklesin ... aşağıda fatura ase butonu kaybolur yani job
+  // başlar". Etiket basmak zaten "bu sipariş kargoya hazır/gönderiliyor" niyetini gösterdiği için,
+  // handleCreate'teki onay penceresi BİLEREK atlanıyor. hasInvoice/invoiceLoading kontrolü BURADA,
+  // İSTEK ATILMADAN ÖNCE yapılıyor — sipariş zaten faturalanmışsa (ya da tam o an başka bir istek
+  // sürüyorsa) hiçbir şey yapmaz, bu sayede etiket birden fazla kez basılsa bile GERÇEK ikinci bir
+  // fatura isteği hiç ATILMAZ (sunucudaki claim koruması zaten var, ama gereksiz bir istek bile
+  // atmamak daha temiz).
+  useImperativeHandle(ref, () => ({
+    triggerAutoInvoiceIfNeeded() {
+      if (hasInvoice || invoiceLoading) return;
+      void runInvoiceCreation();
+    },
+  }));
 
   async function handleHsRetry() {
     setHsSaving(true);
@@ -465,4 +497,4 @@ export function InvoiceAndAseButton({
       {hsPopup}
     </div>
   );
-}
+});

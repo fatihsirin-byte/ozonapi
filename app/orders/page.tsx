@@ -19,7 +19,7 @@ import { parsePageParam } from "@/utils/pagination";
 import { OrdersToolbar } from "./OrdersToolbar";
 import { OrdersSearchBar } from "./OrdersSearchBar";
 import { PageLinkPagination } from "./PageLinkPagination";
-import { InvoiceAndAseButton } from "./InvoiceAndAseButton";
+import { OrderRowActions } from "./OrderRowActions";
 import { ShipOrderButton } from "./ShipOrderButton";
 import { InvoicedTodayZipButton } from "./InvoicedTodayZipButton";
 import { translateOrderStatus } from "@/utils/orderStatus";
@@ -472,40 +472,16 @@ export default async function OrdersPage({
                           />
                         </div>
                       )}
-                      {/* Ozon'un etiket API'si SADECE "awaiting_deliver" (Kargoya Hazır) durumunda
-                          çalışıyor (bkz. app/api/orders/[postingNumber]/label/route.ts) — daha
-                          erken/geç denenirse Ozon reddediyor, o yüzden buton sadece bu durumda
-                          gösteriliyor. PDF her zaman Ozon'dan canlı çekiliyor, biz saklamıyoruz. */}
                       {/* .btn-primary/.btn-secondary SADECE renk veriyor (bkz. globals.css) — asıl
                           buton görünümü (padding/border-radius/font) `button` elementine bağlı,
                           bu yüzden <a>'ya class vermek TEK BAŞINA ince bir çizgi gibi görünüyordu
-                          (2026-09-23'te canlıda kullanıcı bulgusu). Burada aynı temel stiller elle
-                          uygulanıyor, rengi ise (--success, yeşil) Fatura+ASE (--accent, mavi)
-                          butonundan BİLEREK farklı — kullanıcı talebi: "iki buton farklı renkte olsun". */}
-                      {o.status === "awaiting_deliver" && (
-                        <div style={{ marginBottom: 6 }}>
-                          <a
-                            href={`/api/orders/${encodeURIComponent(o.postingNumber)}/label`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                              display: "inline-block",
-                              textAlign: "center",
-                              textDecoration: "none",
-                              fontSize: 14,
-                              fontWeight: 500,
-                              borderRadius: 8,
-                              padding: "10px 18px",
-                              border: "1px solid transparent",
-                              background: "var(--success)",
-                              color: "white",
-                            }}
-                          >
-                            Etiket Yazdır
-                          </a>
-                        </div>
-                      )}
-                      <InvoiceAndAseButton
+                          (2026-09-23'te canlıda kullanıcı bulgusu). OrderRowActions içinde aynı
+                          temel stiller elle uygulanıyor, rengi ise (--success, yeşil) Fatura+ASE
+                          (--accent, mavi) butonundan BİLEREK farklı — kullanıcı talebi: "iki buton
+                          farklı renkte olsun". Etiket Yazdır'a tıklamak artık (2026-09-25, kullanıcı
+                          talebi) sipariş henüz faturalanmamışsa fatura+ASE zincirini de tetikliyor —
+                          bkz. OrderRowActions.tsx. */}
+                      <OrderRowActions
                         key={o.postingNumber}
                         postingNumber={o.postingNumber}
                         orderStatus={o.status}

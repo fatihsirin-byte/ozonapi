@@ -30,6 +30,28 @@ export class OrderInvoiceError extends Error {}
 // değere çekiyoruz; DB bunu tek bir isteğe garanti eder, ikinci istek claim.count === 0 görüp geri çekilir.
 export const INVOICE_CLAIM_SENTINEL = "PENDING";
 
+// Bir claim bu süreden eskiyse artık GEÇERSİZ sayılır — süreç bu claim'i temizlemeden çökerse/
+// yeniden başlarsa (ör. pm2 restart, deploy), sipariş sonsuza dek PENDING sentinel'inde takılı
+// kalıp bir daha asla faturalanamazdı (2026-09-25'te canlıda tespit edildi, kullanıcı bulgusu:
+// 0188123153-0155-1 siparişi kalıcı olarak "az önce başka bir istekle başlatıldı" hatası veriyordu
+// — Paraşüt'te hiç fatura da yoktu, yani ilk deneme tamamlanmadan süreç kesilmişti). aladdinInvoice.ts
+// içindeki AYNI sınıf sorun için zaten CLAIM_STALE_MS ile çözülmüştü, burada da uygulanıyor. Ayrı bir
+// "claimedAt" alanına gerek yok — Order.updatedAt zaten her claim yazımında (@updatedAt) otomatik
+// güncelleniyor, staleness kontrolü için onu kullanıyoruz.
+//
+// DÜZELTME (2026-09-25'te code review'da tespit edildi, ilk deploy'dan dakikalar sonra): ilk sürüm
+// 5 dakika kullanıyordu — ama doCreateInvoiceForOzonOrder artık İLK İŞ olarak findExistingParasutInvoice
+// çağırıyor (bkz. aşağıda), bu da findSalesInvoiceByPostingNumber üzerinden o GÜNÜN faturalarını
+// (500'e kadar, MAX_PAGES=20 x 25/sayfa) sayfalayarak tarıyor — her sayfa isteği Paraşüt 429 verirse
+// client.ts'teki MAX_RETRIES=4 x MAX_BACKOFF_MS=10sn'ye kadar bekliyor. Yoğun bir günde (üretimde
+// zaten gözlemlenen "Try again in 9/10 seconds" rate-limit'leri, bkz. pm2 error log) bu TEK ön-kontrol
+// bile 5 dakikayı AŞABİLİR — süreç hâlâ canlı ve ilerliyorken bir başka istek claim'i "bayat" sanıp
+// GERÇEK, eşzamanlı ikinci bir fatura kesmeye başlayabilirdi (bu düzeltmenin önlemeye çalıştığı TAM
+// olay). 20 dakika, gerçekçi en kötü senaryoyu (yukarıdaki hesapla ~10-12 dakika) rahat karşılıyor;
+// gerçek faturalar SİLİNEMEDİĞİ için (bkz. proje kuralı) burada "sipariş biraz daha uzun kilitli
+// kalsın" riski, "mükerrer gerçek fatura kesilsin" riskinden HER ZAMAN daha tercih edilir.
+const CLAIM_STALE_MS = 20 * 60 * 1000;
+
 // Paraşüt her fatura satırında bir "Ürün/Hizmet" kaydı istiyor (boş bırakılırsa "Ürün/hizmet
 // doldurulmalı" hatası — 2026-09-09'da canlıda tespit edildi). Aynı Ozon ürünü (offerId=code)
 // için mükerrer kayıt açmamak adına önce aranıyor, yoksa oluşturuluyor.
@@ -84,13 +106,20 @@ async function findOrCreateParasutProduct(offerId: string, name: string, unitPri
 // satır fiyatları. Sipariş zaten daha önce faturalandıysa (Order.parasutInvoiceId dolu) yeniden
 // fatura KESMEZ, var olanı döner — buton yanlışlıkla iki kere tıklanırsa mükerrer fatura oluşmasın diye.
 export async function createInvoiceForOzonOrder(postingNumber: string) {
+  const staleBefore = new Date(Date.now() - CLAIM_STALE_MS);
   const claim = await prisma.order.updateMany({
-    where: { postingNumber, parasutInvoiceId: null },
+    where: {
+      postingNumber,
+      OR: [{ parasutInvoiceId: null }, { parasutInvoiceId: INVOICE_CLAIM_SENTINEL, updatedAt: { lt: staleBefore } }],
+    },
     data: { parasutInvoiceId: INVOICE_CLAIM_SENTINEL },
   });
 
   if (claim.count === 0) {
-    const current = await prisma.order.findUnique({ where: { postingNumber } });
+    const current = await prisma.order.findUnique({
+      where: { postingNumber },
+      select: { parasutInvoiceId: true, parasutInvoiceNo: true, parasutPrintUrl: true, parasutEArchiveFailed: true },
+    });
     if (!current) throw new OrderInvoiceError("Sipariş bulunamadı");
     if (current.parasutInvoiceId === INVOICE_CLAIM_SENTINEL) {
       throw new OrderInvoiceError(
@@ -150,7 +179,17 @@ async function doCreateInvoiceForOzonOrder(postingNumber: string) {
   const todayIssueDate = new Date().toISOString().slice(0, 10);
   // Paraşüt'ün kendi kaydını, bizim DB'mize güvenmeden sorguluyoruz (bkz. yukarıdaki fonksiyon
   // yorumu) — order detayını/ürünlerini çekmeden ÖNCE, gereksiz iş yapmayalım diye en başta.
-  const existingInvoice = await findExistingParasutInvoice(postingNumber, todayIssueDate);
+  //
+  // DÜZELTME (2026-09-25'te code review'da tespit edildi): bir claim CLAIM_STALE_MS kadar bayat
+  // sayılıp yeniden ele geçirildiğinde, orijinal deneme faturayı GERÇEKTEN kesmiş ama gece yarısını
+  // GEÇEREK (ör. 23:58'de başlayıp süreç çökmüş, yeniden deneme 00:05'te) tıkanmış olabilir — bu
+  // durumda "bugün" artık YENİ gün, ama gerçek faturanın issue_date'i DÜN'dü; sadece bugüne bakmak
+  // bu faturayı hiç bulamaz ve GERÇEK, mükerrer bir ikinci fatura kesilirdi. Bu yüzden bugün
+  // bulunamazsa dünü de (ucuz bir ek kontrol, sadece bu iki günden biri gerçekten eşleşecek) arıyoruz.
+  const yesterdayIssueDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const existingInvoice =
+    (await findExistingParasutInvoice(postingNumber, todayIssueDate)) ??
+    (await findExistingParasutInvoice(postingNumber, yesterdayIssueDate));
   if (existingInvoice) {
     console.error(
       `[parasut] Mükerrer fatura önlendi: postingNumber ${postingNumber} için Paraşüt'te zaten fatura ${existingInvoice.invoiceId} bulundu, yeni fatura KESİLMEDİ.`,

@@ -18,7 +18,17 @@ function fmtPct(n: number | null) {
   return `${n.toLocaleString("tr-TR", { maximumFractionDigits: 1 })}%`;
 }
 
-type SortKey = "orderDate" | "status" | "productName" | "quantity" | "totalSale" | "totalCost" | "profit" | "marginPct";
+type SortKey =
+  | "orderDate"
+  | "status"
+  | "productName"
+  | "quantity"
+  | "totalSale"
+  | "totalCost"
+  | "profit"
+  | "marginPct"
+  | "shippingDiff"
+  | "shippingDiffPct";
 
 interface Enriched {
   row: PnlRow;
@@ -29,6 +39,10 @@ interface Enriched {
   warning: string | null;
   estimatedShippingUsd: number | null;
   shippingDiff: number | null;
+  // Kargo farkının tahmine ORANI (%) — kullanıcı talebi (2026-09-25): "kargo farka % ver". Mutlak
+  // fark ($) tek başına küçük/büyük kargolar arasında yanıltıcı olabiliyor (ör. $1 fark ucuz bir
+  // kargoda ciddi bir sapma, pahalı bir kargoda önemsiz) — tahmine oranlanınca ikisi karşılaştırılabilir.
+  shippingDiffPct: number | null;
 }
 
 const COLUMNS: Array<{ key: SortKey; label: string }> = [
@@ -60,6 +74,10 @@ function sortValue(e: Enriched, key: SortKey): string | number {
       return e.profit ?? -Infinity;
     case "marginPct":
       return e.marginPct ?? -Infinity;
+    case "shippingDiff":
+      return e.shippingDiff ?? -Infinity;
+    case "shippingDiffPct":
+      return e.shippingDiffPct ?? -Infinity;
   }
 }
 
@@ -80,6 +98,10 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
           row.cargoWeightGrams != null ? estimateShippingForWeight(row.cargoWeightGrams * row.quantity) : null;
         const shippingDiff =
           row.realShippingUsd != null && estimatedShippingUsd != null ? row.realShippingUsd - estimatedShippingUsd : null;
+        const shippingDiffPct =
+          shippingDiff != null && estimatedShippingUsd != null && estimatedShippingUsd !== 0
+            ? (shippingDiff / estimatedShippingUsd) * 100
+            : null;
         return {
           row,
           totalSale: m.totalSale,
@@ -89,6 +111,7 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
           warning: m.warning,
           estimatedShippingUsd,
           shippingDiff,
+          shippingDiffPct,
         };
       }),
     [rows],
@@ -201,7 +224,22 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
                   Ağırlık / Kargo
                 </th>
                 <th style={{ whiteSpace: "nowrap" }}>Tahmini Kargo (Ağırlıktan)</th>
-                <th style={{ whiteSpace: "nowrap" }}>Fark (Gerçek − Tahmini)</th>
+                <th
+                  style={{ whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}
+                  onClick={() => handleSort("shippingDiff")}
+                  title="Sıralamak için tıkla"
+                >
+                  Fark (Gerçek − Tahmini)
+                  {sortKey === "shippingDiff" && (sortDir === "asc" ? " ▲" : " ▼")}
+                </th>
+                <th
+                  style={{ whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}
+                  onClick={() => handleSort("shippingDiffPct")}
+                  title="Sıralamak için tıkla — kargo farkının tahmine oranı, ucuz/pahalı kargolar arasında karşılaştırma yapmayı kolaylaştırır"
+                >
+                  Fark %
+                  {sortKey === "shippingDiffPct" && (sortDir === "asc" ? " ▲" : " ▼")}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -299,6 +337,16 @@ export function PnlMainTable({ rows }: { rows: PnlRow[] }) {
                       }}
                     >
                       {e.shippingDiff != null ? `${e.shippingDiff >= 0 ? "+" : ""}${fmtMoney(e.shippingDiff)}` : "-"}
+                    </td>
+                    <td
+                      style={{
+                        whiteSpace: "nowrap",
+                        fontSize: 16,
+                        fontWeight: 600,
+                        color: e.shippingDiffPct == null ? undefined : e.shippingDiffPct > 0 ? "var(--danger)" : "var(--success)",
+                      }}
+                    >
+                      {e.shippingDiffPct != null ? `${e.shippingDiffPct >= 0 ? "+" : ""}${fmtPct(e.shippingDiffPct)}` : "-"}
                     </td>
                   </tr>
                 );

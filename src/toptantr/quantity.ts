@@ -66,6 +66,7 @@ export interface VariantTierView {
   sku: string;
   barcode: string;
   stockAvailable: number;
+  stockOverride: number | null;
   costUsd: number;
   sellingPriceTl: number;
   sendable: boolean;
@@ -76,13 +77,20 @@ export interface VariantTierView {
 // gönderildiği için) — Paket/Koli/Palet kendi stockQuantity'sini hiç saymıyor, paylaşımlı
 // fiziksel havuzdan floor(Adet stok / unitsInPack) ile türetiliyor. Güvenlik payı yok, tam
 // floor değeri kullanılıyor (kullanıcı kararı, bkz. handoff notu).
+//
+// İSTİSNA: Product.toptantrStockOverride doluysa (elle kademe stoğu — Shopify'da sadece tekli
+// stokluyken Display/Box'ı kullanıcı elle belirliyor) o değer kullanılır; ama tekli (Adet) stoğu
+// 0 ise override'lı kademeler de 0'a düşer (kullanıcı kararı, 2026-10-06).
 export function computeTierStock(ranked: RankedVariant[]): Map<string, number> {
   const adet = ranked.find((r) => r.attributeName === "Adet");
   const adetStock = adet?.product.stockQuantity ?? 0;
   const stockBySku = new Map<string, number>();
   for (const r of ranked) {
+    const override = r.product.toptantrStockOverride;
     if (r.attributeName === "Adet") {
       stockBySku.set(r.product.offerId, adetStock);
+    } else if (override !== null && override !== undefined) {
+      stockBySku.set(r.product.offerId, adetStock > 0 ? override : 0);
     } else {
       const qty = r.quantity || 1;
       stockBySku.set(r.product.offerId, Math.floor(adetStock / qty));
@@ -98,6 +106,7 @@ export function describeVariants(ranked: RankedVariant[], stockBySku: Map<string
     sku: product.offerId,
     barcode: barcodeOf(product),
     stockAvailable: stockBySku.get(product.offerId) ?? 0,
+    stockOverride: product.toptantrStockOverride ?? null,
     costUsd: Number(product.costPrice ?? 0),
     sellingPriceTl: usdToTl(product.costPrice, TIER_EXTRA_MARGIN_PERCENT[attributeName] ?? 0),
     sendable: isTierSendable(attributeName, product),

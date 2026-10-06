@@ -78,6 +78,10 @@ model Product {
   // her varyant tek tek onaylanmadan (checkbox, ToptantrPanel.tsx) toptantr'a gitmiyor; kategori/
   // marka seçimi ve genel "Bağla" ise handle (ToptantrListing) seviyesinde.
   toptantrApproved Boolean @default(false)
+  // toptantr'a bu varyant için ELLE girilen kademe stoğu (2026-10-06, kullanıcı kararı) — doluysa
+  // computeTierStock floor(Adet stok / unitsInPack) türetmesi yerine bunu kullanır. Tekli (Adet)
+  // varyant stoğu 0'sa override'lı kademeler de 0 gönderilir (kapanır). null = türetme.
+  toptantrStockOverride Int?
 
   orderItems OrderItem[]
 
@@ -95,6 +99,11 @@ model ToptantrListing {
   id                String    @id @default(cuid())
   shopifyHandle     String    @unique
   toptantrProductId String? // toptantr'ın kendi ürün id'si — POST /sapi/v1/products/new yanıtından
+  // toptantr'da bu ürünün GERÇEKTEN kayıtlı ana barkodu (eski projeden aktarılan ya da ilk
+  // bağlamada kullanılan) — doluysa lookup/refresh/kapatmada Product.barcode/SKU yerine bu
+  // kullanılır; böylece Shopify barkodu sonradan değişse/boşalsa bile eşleşme kalıcı kalır ve
+  // mükerrer ürün oluşmaz (2026-10-06).
+  toptantrBarcode   String?
   categoryGuid      String?
   brandGuid         String?
   translatedTitle   String? // Gemini Türkçe çevirisi — bir daha çevrilmesin diye önbelleğe alınıyor

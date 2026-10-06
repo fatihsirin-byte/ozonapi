@@ -8,6 +8,7 @@ interface VariantTierView {
   sku: string;
   barcode: string;
   stockAvailable: number;
+  stockOverride: number | null;
   costUsd: number;
   sellingPriceTl: number;
   sendable: boolean;
@@ -167,6 +168,29 @@ export function ToptantrPanel({ handle }: { handle: string }) {
     });
   }
 
+  // Elle kademe stoğu: boş bırakılırsa null (otomatik: floor(tekli stok / adet)). Adet kademesi
+  // her zaman gerçek tekli stoğu yansıttığı için input sadece Paket/Koli/Palet'te gösteriliyor.
+  async function saveOverride(sku: string, raw: string) {
+    const trimmed = raw.trim();
+    const value = trimmed === "" ? null : Number(trimmed);
+    if (value !== null && (!Number.isInteger(value) || value < 0)) {
+      setError("Stok 0 veya pozitif tam sayı olmalı");
+      return;
+    }
+    setError(null);
+    const res = await fetch(`/api/import/variant/${encodeURIComponent(sku)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toptantrStockOverride: value }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setError(data.error ?? "Stok kaydedilemedi");
+      return;
+    }
+    load();
+  }
+
   async function connect() {
     if (!categoryGuid) return;
     setConnecting(true);
@@ -240,6 +264,7 @@ export function ToptantrPanel({ handle }: { handle: string }) {
             <th>SKU</th>
             <th>Adet/Paket</th>
             <th>Stok</th>
+            <th>Elle stok</th>
             <th>Satış (TL)</th>
           </tr>
         </thead>
@@ -258,6 +283,22 @@ export function ToptantrPanel({ handle }: { handle: string }) {
               <td>{v.sku}</td>
               <td>{v.itemPerPackage}</td>
               <td>{v.stockAvailable}</td>
+              <td>
+                {v.tier !== "Adet" && (
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    placeholder="otomatik"
+                    style={{ width: 90 }}
+                    defaultValue={v.stockOverride ?? ""}
+                    key={`${v.sku}:${v.stockOverride ?? ""}`}
+                    onBlur={(e) => {
+                      if (e.target.value.trim() !== String(v.stockOverride ?? "")) saveOverride(v.sku, e.target.value);
+                    }}
+                  />
+                )}
+              </td>
               <td>{v.sellingPriceTl.toFixed(2)}</td>
             </tr>
           ))}

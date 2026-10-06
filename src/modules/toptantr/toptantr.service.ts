@@ -62,6 +62,7 @@ function buildPayload(params: {
   categoryGuid: string;
   brandGuid: string | null;
   sendableRanked: ReturnType<typeof rankVariants>;
+  barcode: string;
 }): ToptantrProductPayload {
   const primary = params.sendableRanked[0].product;
   const images = (primary.images as string[] | null) ?? [];
@@ -69,7 +70,7 @@ function buildPayload(params: {
     title: params.translated.title,
     shortDescription: params.translated.shortDescription,
     fullDescription: params.translated.fullDescription,
-    barcode: barcodeOf(primary),
+    barcode: params.barcode,
     categories: [{ guid: params.categoryGuid }],
     brands: params.brandGuid ? [{ guid: params.brandGuid }] : [],
     taxCategory: env.toptantrDefaultTaxCategory,
@@ -174,8 +175,13 @@ export async function connectHandleToToptantr(input: ConnectHandleInput): Promis
 
   await setCachedMapping(primary.shopifyVendor, primary.shopifyType, { categoryGuid: input.categoryGuid, brandGuid: input.brandGuid });
 
-  const barcode = barcodeOf(sendableRanked[0].product);
-  const payload = buildPayload({ products, translated, categoryGuid: input.categoryGuid, brandGuid: input.brandGuid, sendableRanked });
+  // Kalıcı eşleşme: listing'de toptantr'ın kayıtlı barkodu varsa o, yoksa Shopify/SKU barkodu —
+  // ve ilk kez kullanılan barkod listing'e yazılır ki sonradan değişse de eşleşme bozulmasın.
+  const barcode = existingListing.toptantrBarcode ?? barcodeOf(sendableRanked[0].product);
+  if (!existingListing.toptantrBarcode) {
+    await prisma.toptantrListing.update({ where: { shopifyHandle: input.handle }, data: { toptantrBarcode: barcode } });
+  }
+  const payload = buildPayload({ products, translated, categoryGuid: input.categoryGuid, brandGuid: input.brandGuid, sendableRanked, barcode });
 
   try {
     let toptantrProductId: string | null = null;
@@ -234,7 +240,7 @@ export async function refreshToptantrHandle(handle: string): Promise<ToptantrLis
     throw new Error("Gönderilecek onaylı varyant yok");
   }
 
-  const barcode = barcodeOf(sendableRanked[0].product);
+  const barcode = listing.toptantrBarcode ?? barcodeOf(sendableRanked[0].product);
   try {
     const result = await pushStockAndPrice(barcode, sendableRanked, computeTierStock(ranked));
     return prisma.toptantrListing.update({

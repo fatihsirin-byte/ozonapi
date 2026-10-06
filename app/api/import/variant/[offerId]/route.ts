@@ -29,6 +29,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     excludedFromSubmit?: boolean;
     recalculateFromBase?: boolean;
     toptantrApproved?: boolean;
+    toptantrStockOverride?: number | null;
   };
 
   if (body.excludedFromSubmit !== undefined) {
@@ -38,6 +39,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   if (body.toptantrApproved !== undefined) {
     const product = await prisma.product.update({ where: { offerId }, data: { toptantrApproved: body.toptantrApproved } });
+    return NextResponse.json({ product: serialize(product) });
+  }
+
+  if (body.toptantrStockOverride !== undefined) {
+    const value = body.toptantrStockOverride;
+    if (value !== null && (!Number.isInteger(value) || value < 0)) {
+      return NextResponse.json({ error: "Stok 0 veya pozitif tam sayı olmalı (boş = otomatik)" }, { status: 400 });
+    }
+    const product = await prisma.product.update({ where: { offerId }, data: { toptantrStockOverride: value } });
     return NextResponse.json({ product: serialize(product) });
   }
 

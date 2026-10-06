@@ -17,6 +17,22 @@
 import { readFileSync } from "fs";
 import path from "path";
 import { prisma } from "../db/prisma";
+import { shopifyGraphQl } from "../shopify/client";
+
+// DB'de hiç Product satırı olmayan (henüz import edilmemiş) eski ürünlerin handle'ı, legacy
+// shopifyId'sinden Shopify'dan çözülür — ToptantrListing yine de açılır ki ürün sonradan import
+// edilince "Bağla" görünüp mükerrer ürün oluşturmasın (2026-10-06).
+async function fetchHandleFromShopify(shopifyId: string): Promise<string | null> {
+  try {
+    const data = await shopifyGraphQl<{ product: { handle: string } | null }>(
+      `query($id: ID!) { product(id: $id) { handle } }`,
+      { id: `gid://shopify/Product/${shopifyId}` },
+    );
+    return data.product?.handle ?? null;
+  } catch {
+    return null;
+  }
+}
 
 // ESM'de __dirname yok — bu script her zaman proje kökünden (`npx tsx src/scripts/...`)
 // çalıştırıldığı için process.cwd() güvenli.
@@ -37,6 +53,7 @@ interface LegacyEntry {
   categoryGuid?: string;
   brandGuid?: string | null;
   status: string;
+  barcode?: string;
   toptantrId?: string | number;
   timestamp?: string;
 }
@@ -61,13 +78,16 @@ async function main() {
       select: { offerId: true, shopifyHandle: true },
     });
 
-    if (products.length === 0) {
-      skippedNoMatch += 1;
-      console.log(`  ATLANDI (SKU eşleşmedi): ${shopifyId} — ${entry.title}`);
-      continue;
-    }
-
     const handles = new Set(products.map((p) => p.shopifyHandle).filter(Boolean));
+    if (products.length === 0) {
+      const fromShopify = entry.shopifyId ? await fetchHandleFromShopify(entry.shopifyId) : null;
+      if (!fromShopify) {
+        skippedNoMatch += 1;
+        console.log(`  ATLANDI (SKU DB'de yok, Shopify'dan handle da çözülemedi): ${shopifyId} — ${entry.title}`);
+        continue;
+      }
+      handles.add(fromShopify);
+    }
     if (handles.size !== 1) {
       skippedInconsistentHandle += 1;
       inconsistentSamples.push({ shopifyId, title: entry.title, handles: [...handles] as string[] });
@@ -85,6 +105,7 @@ async function main() {
         create: {
           shopifyHandle: handle,
           toptantrProductId: entry.toptantrId != null ? String(entry.toptantrId) : null,
+          toptantrBarcode: entry.barcode ?? null,
           categoryGuid: entry.categoryGuid ?? null,
           brandGuid: entry.brandGuid ?? null,
           translatedTitle: entry.translatedTitle ?? null,
@@ -98,6 +119,13 @@ async function main() {
         // yapılmış bir bağlantıyı asla ezmemeli.
         update: {},
       });
+      // Zaten kayıtlı listing'lerde de toptantr barkodu BOŞSA doldur (dolu olanı ezmez).
+      if (entry.barcode) {
+        await prisma.toptantrListing.updateMany({
+          where: { shopifyHandle: handle, toptantrBarcode: null },
+          data: { toptantrBarcode: entry.barcode },
+        });
+      }
       // Bu üründe daha önce onaylanmış (approved: true) kademeleri, yeni toptantrApproved alanına
       // da işaretle — aksi halde panel açıldığında hiçbir kademe onaylı görünmez.
       const approvedSkus = entry.variants.filter((v) => v.approved).map((v) => v.sku);
@@ -110,7 +138,7 @@ async function main() {
 
   console.log("\n=== ÖZET ===");
   console.log(`Aktarılan (ya da apply olmadan aktarılacak): ${created}`);
-  console.log(`SKU eşleşmedi: ${skippedNoMatch}`);
+  console.log(`SKU/handle çözülemedi: ${skippedNoMatch}`);
   console.log(`Birden fazla handle'a bölünmüş (elle bakılmalı): ${skippedInconsistentHandle}`);
   if (inconsistentSamples.length > 0) {
     console.log(JSON.stringify(inconsistentSamples, null, 1));

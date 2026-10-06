@@ -106,7 +106,7 @@ export async function runStockSync(dryRun = true): Promise<StockSyncReport> {
   // --- toptantr: per-HANDLE (bkz. dosya başı notu) ---
   const toptantrListings = await prisma.toptantrListing.findMany({
     where: { status: "success" },
-    select: { shopifyHandle: true },
+    select: { shopifyHandle: true, toptantrBarcode: true },
   });
 
   for (const listing of toptantrListings) {
@@ -127,7 +127,7 @@ export async function runStockSync(dryRun = true): Promise<StockSyncReport> {
       continue;
     }
 
-    const barcode = barcodeOf(variants[0]);
+    const barcode = listing.toptantrBarcode ?? barcodeOf(variants[0]);
     if (!barcode) {
       report.toptantr.skippedNoBarcode++;
       continue;

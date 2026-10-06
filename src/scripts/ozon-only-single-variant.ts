@@ -5,8 +5,10 @@
 //   npx tsx src/scripts/ozon-only-single-variant.ts tek-varyant-....csv           # dry-run
 //   npx tsx src/scripts/ozon-only-single-variant.ts tek-varyant-....csv --apply   # yazar + Ozon'a stok 0
 //
-// Güvenlik: stoklu_sku (CSV) o handle'ın en düşük unitsInPack'li varyantı DEĞİLSE (ör. stoklu olan
-// Display, tekli boş) handle atlanıp raporlanır — yanlışlıkla stoklu varyantı pasiflememek için.
+// Güvenlik: "tekli" kararı DB'deki unitsInPack'e DEĞİL, CSV'deki stoklu_adet ile bos_varyantlar'daki
+// "[N adet]" değerlerine göre verilir (DB'de çoğu zaman iki varyantın unitsInPack'i eşit/boş, sıralama
+// belirsiz oluyordu). Stoklu varyantın adedi, boş varyantların HEPSİNDEN kesin küçük değilse (eşit ya
+// da bilinmiyorsa) handle atlanıp raporlanır. Sadece CSV'de boş listelenen SKU'lar pasiflenir.
 // Handle DB'de yoksa atlanır. Zaten pasif olanlara dokunulmaz ama Ozon'da satıştaysa stok 0'lanır.
 import fs from "node:fs";
 import { prisma } from "../db/prisma";
@@ -84,14 +86,23 @@ async function main() {
       skipped.push(`${r.handle}: DB'de yok`);
       continue;
     }
-    const sorted = [...variants].sort((a, b) => (a.unitsInPack ?? 1) - (b.unitsInPack ?? 1));
-    const keep = sorted[0];
     const stocked = variants.find((v) => v.offerId === r.stoklu_sku || v.shopifyVariantId === r.stoklu_sku);
-    if (!stocked || stocked.offerId !== keep.offerId) {
-      skipped.push(`${r.handle}: stoklu varyant (${r.stoklu_sku}) en düşük adetli değil (kalan: ${keep.offerId})`);
+    if (!stocked) {
+      skipped.push(`${r.handle}: stoklu varyant (${r.stoklu_sku}) DB'de yok`);
       continue;
     }
-    for (const v of sorted.slice(1)) {
+    const stockedUnits = Number(r.stoklu_adet);
+    const empties = [...r.bos_varyantlar.matchAll(/\[(\d+|\?)\s*adet\]\s*\(([^()]*)\)\s*(?:\||$)/g)].map((m) => ({
+      units: m[1] === "?" ? NaN : Number(m[1]),
+      sku: m[2],
+    }));
+    if (!stockedUnits || empties.length === 0 || !empties.every((e) => stockedUnits < e.units)) {
+      skipped.push(`${r.handle}: stoklu varyant (${r.stoklu_sku}, ${r.stoklu_adet} adet) boş varyantlardan kesin küçük değil`);
+      continue;
+    }
+    const emptySkus = new Set(empties.map((e) => e.sku));
+    for (const v of variants) {
+      if (v.offerId === stocked.offerId || !(emptySkus.has(v.offerId) || (v.shopifyVariantId && emptySkus.has(v.shopifyVariantId)))) continue;
       if (!v.excludedFromSubmit) toExclude.push(v.offerId);
       if (v.status !== "draft") zeroStock.push(v);
     }

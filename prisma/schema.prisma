@@ -23,7 +23,7 @@ model Product {
   // daha sorulmaz. Girildiğinde weightGrams/cargoWeightGrams gerçek değere eşitlenir (paketleme
   // payı tekrar eklenmez, zaten ölçülen değer kargoya çıkan gerçek ağırlıktır) ve fiyat yeniden hesaplanır.
   weightConfirmed       Boolean   @default(false)
-  unitsInPack           Int?      // Kutu/paket içindeki adet — varyanttan varyanta farklı olabiliyor (örn. "1 adet" / "6 adet"), weightGrams gibi ürüne özel; Ozon'un "Birimler tek bir üründe" (id 8962) attribute'una otomatik senkronlanır
+  unitsInPack           Int? // Kutu/paket içindeki adet — varyanttan varyanta farklı olabiliyor (örn. "1 adet" / "6 adet"), weightGrams gibi ürüne özel; Ozon'un "Birimler tek bir üründe" (id 8962) attribute'una otomatik senkronlanır
   heavyPackaging        Boolean   @default(false) // Metal kutu/ağır ambalaj gibi ürünlerde işaretlenir — paketleme payı (normalde %35) %65'e çıkar (bkz. src/pricing/formula.ts HEAVY_PACKAGING_BUFFER)
   // Bu varyantın maliyet/ağırlığının "kaça katlanarak" hesaplandığı taban varyant (örn. 6'lı
   // Display varyantı, tekil "1 Piece" varyantının offerId'sine işaret eder) — costPrice/weightGrams
@@ -43,7 +43,7 @@ model Product {
   draftAttributes       Json? // Ozon'a gönderilmeden önce toplu/elle önceden doldurulmuş attribute cevapları (id/value/dictionaryValueId) — ürün açıldığında forma otomatik yükleniyor
   images                Json?
   status                String    @default("draft") // draft | ready | pending | imported | failed
-  stockQuantity         Int?      // Ozon'a en son gönderilen stok adedi (rFBS depo: Çekmeköy)
+  stockQuantity         Int? // Ozon'a en son gönderilen stok adedi (rFBS depo: Çekmeköy)
   importTaskId          BigInt?
   lastError             String?
   lastSyncedAt          DateTime?
@@ -51,29 +51,29 @@ model Product {
   updatedAt             DateTime  @updatedAt
 
   // Shopify CSV içe aktarımından gelen alanlar
-  shopifyHandle     String?
-  shopifyVariantId  String?
-  shopifyVendor     String?
-  shopifyType       String?
-  originalImages    Json? // Shopify'dan gelen orijinal görsel URL'leri, dokunulmamış — "eski görsel" copy/keep için
-  shopifyMetafields Json? // CSV'deki Flavor/Chocolate type/Color/Country vb. ham metafield değerleri, attribute ön-doldurma için
-  descriptionHtml   String? // Shopify Body (HTML) — Gemini çevirisi için kaynak
-  modelGroupId      String?
-  modelGroup        ModelGroup? @relation(fields: [modelGroupId], references: [id])
-  nameRu            String? // Gemini çevirisi cache
-  descriptionRu     String?
+  shopifyHandle      String?
+  shopifyVariantId   String?
+  shopifyVendor      String?
+  shopifyType        String?
+  originalImages     Json? // Shopify'dan gelen orijinal görsel URL'leri, dokunulmamış — "eski görsel" copy/keep için
+  shopifyMetafields  Json? // CSV'deki Flavor/Chocolate type/Color/Country vb. ham metafield değerleri, attribute ön-doldurma için
+  descriptionHtml    String? // Shopify Body (HTML) — Gemini çevirisi için kaynak
+  modelGroupId       String?
+  modelGroup         ModelGroup? @relation(fields: [modelGroupId], references: [id])
+  nameRu             String? // Gemini çevirisi cache
+  descriptionRu      String?
   // true ise bu varyant "pasif" — handle Ozon'a gönderilirken atlanır, silinmiyor (geri
   // aktifleştirilebilir). Kalıcı silme için deleteHandles/ExcludedOfferId kullanılıyor.
-  excludedFromSubmit Boolean @default(false)
+  excludedFromSubmit Boolean     @default(false)
   // Shopify CSV'sindeki orijinal varyant sırası (0-based) — offerId alfabetik sıralaması
   // Shopify'ın gerçek varyant sırasıyla uyuşmuyor (örn. "SKU-BOX" "SKU"'dan önce gelebiliyor),
   // bu yüzden handle sayfasında "ilk varyant" (görsel/isim/vendor referansı) bunu kullanıyor.
-  variantPosition Int @default(0)
+  variantPosition    Int         @default(0)
 
   // Shopify barkod (GTIN) — CSV'de vardı ama bugüne kadar hiç saklanmıyordu (2026-09-26'da
   // toptantr entegrasyonu için eklendi). toptantr ürün/kombinasyon eşleştirmesinde barkodu
   // tercih ediyor, boşsa offerId'ye (SKU) düşülüyor — bkz. src/toptantr/quantity.ts barcodeOf().
-  barcode String?
+  barcode          String?
   // Bu varyantın toptantr'a GÖNDERİLMEK üzere onaylandığı — Ozon'daki gönderim onboarding'i gibi,
   // her varyant tek tek onaylanmadan (checkbox, ToptantrPanel.tsx) toptantr'a gitmiyor; kategori/
   // marka seçimi ve genel "Bağla" ise handle (ToptantrListing) seviyesinde.
@@ -92,29 +92,29 @@ model Product {
 // "kombinasyon" (Adet/Paket/Koli/Palet) kabul ediyor, bu yüzden bağlantı varyant değil HANDLE
 // seviyesinde tutuluyor (bkz. src/modules/toptantr/toptantr.service.ts).
 model ToptantrListing {
-  id               String    @id @default(cuid())
-  shopifyHandle    String    @unique
-  toptantrProductId String?  // toptantr'ın kendi ürün id'si — POST /sapi/v1/products/new yanıtından
-  categoryGuid     String?
-  brandGuid        String?
-  translatedTitle  String?   // Gemini Türkçe çevirisi — bir daha çevrilmesin diye önbelleğe alınıyor
-  shortDescription String?
-  fullDescription  String?
-  status           String    @default("draft") // draft | pending | success | failed
-  lastError        String?
-  lastSyncedAt     DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  shopifyHandle     String    @unique
+  toptantrProductId String? // toptantr'ın kendi ürün id'si — POST /sapi/v1/products/new yanıtından
+  categoryGuid      String?
+  brandGuid         String?
+  translatedTitle   String? // Gemini Türkçe çevirisi — bir daha çevrilmesin diye önbelleğe alınıyor
+  shortDescription  String?
+  fullDescription   String?
+  status            String    @default("draft") // draft | pending | success | failed
+  lastError         String?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 }
 
 // (vendor, productType) çiftinin toptantr kategori/marka guid'ine Gemini eşlemesi — aynı
 // kombinasyon için tekrar tekrar Gemini'ye sorulmasın diye (bkz. VPS'teki orijinal
 // mappingCache.js ile aynı fikir, burada dosya yerine tabloya taşındı).
 model ToptantrMappingCache {
-  key         String   @id // `${vendor}::${productType}` (lowercase, trim)
+  key          String   @id // `${vendor}::${productType}` (lowercase, trim)
   categoryGuid String?
   brandGuid    String?
-  createdAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
 }
 
 // Kullanıcının /import'tan bilerek sildiği offerId'ler — CSV tekrar import edilirse
@@ -136,13 +136,13 @@ model ModelGroup {
 
 // FBS/FBO siparişi, postingNumber Ozon tarafındaki benzersiz sipariş numarası.
 model Order {
-  id            String   @id @default(cuid())
-  postingNumber String   @unique
-  status        String
-  scheme        String // fbs | fbo
-  orderDate     DateTime?
-  rawPayload    Json?
-  purchaseInvoiceNumber String? // Bizim kendi takibimiz için — tedarikçiden aldığımız alış faturasının numarası (Ozon'a gönderilmez)
+  id                               String    @id @default(cuid())
+  postingNumber                    String    @unique
+  status                           String
+  scheme                           String // fbs | fbo
+  orderDate                        DateTime?
+  rawPayload                       Json?
+  purchaseInvoiceNumber            String? // Bizim kendi takibimiz için — tedarikçiden aldığımız alış faturasının numarası (Ozon'a gönderilmez)
   // Aladdin→Fatih Gezgin günlük iç fatura sürecinin (bkz. src/parasut/aladdinInvoice.ts) kendi
   // kilidi — BİLEREK purchaseInvoiceNumber'ın KENDİSİ kullanılmıyor: o alan kullanıcının elle
   // düzenleyebildiği, bu süreçten habersiz AYRI bir alan (bkz. PurchaseInvoiceField.tsx) — aynı
@@ -150,13 +150,13 @@ model Order {
   // eşzamanlı istek varsa GERÇEK bir çift fatura kesilmesine yol açabilirdi (2026-09-16 code
   // review'da tespit edildi). Her çağrı kendi RASTGELE değerini yazar, sadece KENDİ değerini
   // görürse siler/tamamlar — başka bir çağrının claim'ini asla etkilemez.
-  aladdinInvoiceClaimId String?
+  aladdinInvoiceClaimId            String?
   // Claim NE ZAMAN alındı — süreç bu claim'i temizlemeden çökerse/yeniden başlarsa (ör. pm2
   // restart), sipariş sonsuza dek "claim'li" takılı kalıp bir daha asla faturalanamazdı (2026-09-16
   // code review round 3'te tespit edildi). Belirli bir süreden (bkz. aladdinInvoice.ts
   // CLAIM_STALE_MS) eski bir claim, hâlâ "aladdinInvoiceClaimId" dolu olsa bile artık geçersiz
   // sayılıp yeniden claim edilebiliyor.
-  aladdinInvoiceClaimedAt DateTime?
+  aladdinInvoiceClaimedAt          DateTime?
   // Aladdin→Fatih Gezgin faturasının e-Fatura'ya dönüştürme adımının SONUCU (2026-09-17'de tespit
   // edilen, Fatih Gezgin'in artık e-Fatura mükellefi olmasından kaynaklanan sorunun düzeltmesi) —
   // BİLEREK burada, kalıcı olarak kaydediliyor: dönüştürme başarısız/askıda kalırsa (ör. sunucu
@@ -164,32 +164,32 @@ model Order {
   // sorgulanabilsin/elle takip edilebilsin diye (2026-09-17 code review'da "sonuç hiçbir yerde
   // saklanmıyor, tek kanıt bir console.error satırı" bulgusuna karşılık). "approved"/"pending"/
   // "failed"/"not_required" değerlerinden biri (bkz. aladdinInvoice.ts AladdinInvoiceResult).
-  aladdinEInvoiceStatus String?
-  aladdinEInvoiceError String?
+  aladdinEInvoiceStatus            String?
+  aladdinEInvoiceError             String?
   // Kullanıcı talebi (2026-09-17): "kesilen faturayı göster" — önceden bu link SADECE fatura kesme
   // isteğinin tek seferlik HTTP yanıtında vardı, sayfa yenilenince/kapanınca kalıcı olarak
   // KAYBOLUYORDU; kullanıcı o günün faturasını görmek için bana (ya da Paraşüt'ün kendi arama
   // ekranına) başvurmak zorunda kalıyordu. Artık purchaseInvoiceNumber ile AYNI anda kalıcı olarak
   // yazılıyor, panel "işlenecek bir şey kalmadı" derken bu linki de gösterebiliyor.
-  aladdinInvoicePrintUrl String?
+  aladdinInvoicePrintUrl           String?
   // Kullanıcı bulgusu (2026-09-17): "faturayı görüntüle" linki, tarayıcıda Paraşüt'e Aladdin
   // ŞİRKETİ değil başka bir şirket (ör. Fatih Gezgin) seçiliyken açılırsa "ActiveRecord::
   // RecordNotFound" veriyor — kullanıcının tarayıcı oturumuna/aktif şirket seçimine bağımlı bu
   // zayıf nokta yerine, Paraşüt'ün GERÇEK (raw, sayısal) satış faturası kimliğini burada kalıcı
   // olarak saklıyoruz ki sunucumuz kendi API kimlik bilgileriyle (kullanıcının tarayıcı oturumundan
   // TAMAMEN BAĞIMSIZ) PDF'i doğrudan çekip gösterebilsin (bkz. app/api/aladdin-invoice/pdf).
-  aladdinInvoiceId String?
+  aladdinInvoiceId                 String?
   // Paraşüt'te bu sipariş için kesilmiş satış faturası — dolu ise buton tekrar fatura kesmez,
   // var olanı gösterir (2026-09-09, kullanıcı talebi: sipariş başına manuel, tek tek fatura).
-  parasutInvoiceId String?
-  parasutInvoiceNo String?
-  parasutPrintUrl  String?
+  parasutInvoiceId                 String?
+  parasutInvoiceNo                 String?
+  parasutPrintUrl                  String?
   // true ise fatura kesilirken e-Arşiv adımı (GİB'e gönderme) başarısız oldu — bu durumda PDF
   // arayan uçlar (bkz. src/parasut/eArchives.ts resolveInvoicePdf) tekrar deneyebilir. false ise
   // e-Arşiv gönderimi zaten kabul edilmiş demektir — o zaman TEKRAR createEArchive çağırmak GERÇEK,
   // ikinci bir e-Arşiv başvurusuna yol açabilir (2026-09-09'da code review'da tespit edildi), bu
   // yüzden false iken sadece "hazır olana kadar bekle" denir, yeniden gönderim denenmez.
-  parasutEArchiveFailed Boolean @default(false)
+  parasutEArchiveFailed            Boolean   @default(false)
   // false ise parasutInvoiceNo hâlâ GEÇİCİ olabilir — e-Arşiv oluşunca Paraşüt faturayı GİB'e
   // kayıtlı KENDİ resmi seriyle yeniden numaralandırıyor (bkz. src/parasut/orderInvoice.ts) ama bu
   // ANINDA olmuyor. true olana kadar PDF durumu her kontrol edildiğinde gerçek numara TEKRAR
@@ -197,29 +197,29 @@ model Order {
   // pencere (ör. "ilk 30 dakika") KULLANILMIYOR, çünkü GİB o gün yavaşsa numara kalıcı olarak yanlış
   // kalabilirdi (2026-09-10'da code review'da tespit edildi). true olduktan sonra bir daha
   // denenmez — zaten kesin numara elde edilmiş, gereksiz Paraşüt isteği atılmaz.
-  parasutInvoiceNoConfirmed Boolean @default(false)
+  parasutInvoiceNoConfirmed        Boolean   @default(false)
   // "Bugün faturası kesilenler" filtresi (TSİ bazında) için — createdAt/updatedAt başka
   // sebeplerle de değişebildiğinden fatura anını ayrı tutuyoruz (2026-09-09, kullanıcı talebi).
-  parasutInvoicedAt DateTime?
+  parasutInvoicedAt                DateTime?
   // Fatura kesilirken kullanılan o günkü USD/TL kuru (bkz. src/parasut/orderInvoice.ts) — TL satış
   // tutarını GERÇEK faturayla birebir eşleşecek şekilde kalıcı göstermek için (2026-09-10, kullanıcı
   // talebi). Fatura kesilmemiş ya da bu alan eklenmeden önce kesilmiş siparişlerde null kalır —
   // o durumda liste ekranı günün CANLI kuruyla tahmini bir TL değeri gösterir (bkz. app/orders/page.tsx).
-  parasutInvoiceFxRate Float?
+  parasutInvoiceFxRate             Float?
   // true ise PDF diskimize (private-uploads/parasut-invoices/{postingNumber}.pdf) bir kere
   // indirilip kaydedildi — bir daha ASLA Paraşüt'ten canlı çekilmesine gerek yok (2026-09-10,
   // kullanıcı talebi: "her fatura oluşunca PDF olarak içeri alsak" — hem tek tek "Faturayı Aç"
   // butonları hem toplu ZIP indirme artık önce buraya bakıyor, bkz. src/parasut/pdfCache.ts).
   // PDF gerçek müşteri adı/adres/tutar içerdiği için public/uploads (auth'suz) DEĞİL, sadece
   // giriş yapmış kullanıcıya açık bir API route üzerinden servis ediliyor.
-  parasutInvoicePdfCached Boolean @default(false)
+  parasutInvoicePdfCached          Boolean   @default(false)
   // true ise Ozon'un kargo etiketi (barkodlu PDF) diskimize (private-uploads/ozon-labels/
   // {postingNumber}.pdf) bir kere indirilip kaydedildi — parasutInvoicePdfCached ile BİREBİR AYNI
   // gerekçe (2026-09-23, kullanıcı bulgusu: "etiket yazdır diyince 4-5 saniye bekliyor, ozona
   // gidip soruyor demek ki") — bkz. src/ozon/labelCache.ts. Ozon'un etiket API'si SADECE
   // "awaiting_deliver" durumundayken çalıştığı için (bkz. label/route.ts), sync-orders-cron'daki
   // bir arka plan işi bu durumdaki siparişleri periyodik olarak tarayıp önbelleğe alıyor.
-  shippingLabelCached Boolean @default(false)
+  shippingLabelCached              Boolean   @default(false)
   // "Topla" (shipOrder) çift tıklama/iki sekme korumasının kilidi — BİLEREK "status" alanının
   // dışında ayrı bir alan: 15 dakikada bir çalışan sync cron'u (syncFbsOrders) "status"ü Ozon'dan
   // gelen gerçek değerle EZİYOR, o yüzden kilidi status'e yazarsak cron kilidi silip çift gerçek
@@ -227,21 +227,21 @@ model Order {
   // Paraşüt fatura kilidi de ayrı bir alanla, parasutInvoiceId, çözüyor). Başarılı bir sevkiyattan
   // sonra BİLEREK null'a geri döndürülmüyor (denetim izi + "bu sipariş bizim butonumuzla
   // paketlendi" kaydı olarak kalıyor).
-  shipClaimedAt DateTime?
+  shipClaimedAt                    DateTime?
   // ASE (xlive.ase.com.tr) gümrük/ETGB entegrasyonu — fatura numarası KESİNLEŞTİĞİ an (bkz.
   // parasutInvoiceNoConfirmed, app/api/orders/[postingNumber]/parasut-invoice/pdf/route.ts) bir
   // kez gönderilir (bkz. src/ase/orderShipment.ts sendOrderToAse). Hata durumunda da bu alanlar
   // dolar (aseShipmentSuccess=false + aseShipmentMessage) — fatura akışını ENGELLEMEZ, sadece
   // sonucu kaydeder (2026-09-12, kullanıcı talebi).
-  aseShipmentSentAt     DateTime?
-  aseShipmentSuccess    Boolean?
-  aseShipmentMessage    String?
+  aseShipmentSentAt                DateTime?
+  aseShipmentSuccess               Boolean?
+  aseShipmentMessage               String?
   // ASE'nin döndüğü ham hata kodu (ör. "34" = geçersiz Gtip/HS kodu) — sadece aseShipmentMessage'a
   // bakıp "bu HS kod hatası mı?" diye metin eşlemesi yapmak yerine, güvenilir şekilde ayırt etmek
   // için (2026-09-13, kullanıcı talebi: HS kod hatasında kullanıcıya düzelt-ve-tekrar-dene popup'ı
   // gösterme). Yerel doğrulama hataları (ör. hiç HS kodu bulunamadıysa ASE'ye hiç istek atılmadan)
   // için de aynı "34" kodu kullanılıyor — kullanıcı için ikisi de aynı eylemi gerektiriyor.
-  aseShipmentErrorCode  String?
+  aseShipmentErrorCode             String?
   // ASE'nin gümrük beyanı/iptal/ölçüm durumu — periyodik olarak (bkz. src/ase/statusPolling.ts,
   // sync-orders-cron içinde çağrılıyor) SADECE aseShipmentSuccess=true olan ve henüz "kesin"
   // (iptal ya da beyanname çıkmış) bir sonuca ulaşmamış siparişler için sorgulanır. Kullanıcı
@@ -249,25 +249,40 @@ model Order {
   // beyanname çıkarsa bi daha sorgulamaya gerek yok" — bu yüzden aseCancelledAt veya
   // aseCustomDeclarationCode doluysa artık bir daha sorgulanmıyor (statusPolling.ts'teki sorgu bu
   // ikisini de null olan siparişlerle sınırlı).
-  aseCustomDeclarationCode String?
-  aseCustomDeclarationDate DateTime?
+  aseCustomDeclarationCode         String?
+  aseCustomDeclarationDate         DateTime?
   // ASE'nin GetCancelledShipmentsByDateRange'den döndürdüğü "aseCancelRecordedAt" (iptal bilgisinin
   // ASE'ye ulaştığı zaman) — Ozon'da GERÇEKTEN ne zaman iptal edildiği değil, ASE'nin bunu ne zaman
   // öğrendiği.
-  aseCancelledAt           DateTime?
-  aseCancelReason          String?
+  aseCancelledAt                   DateTime?
+  aseCancelReason                  String?
   // ASE'nin GetMeasurementsByCodeList'ten döndürdüğü gerçek tartılmış ağırlık (kg) — kullanıcı
   // talebi: "bizim ölçü kg bilgisi ... bunları da ekleyelim".
-  aseMeasuredWeightKg      Float?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  aseMeasuredWeightKg              Float?
+  // Finans Mütabakatı (bkz. app/finans-mutabakat, src/modules/finance/shipping-dispute.service.ts,
+  // 2026-09-28 kullanıcı talebi) — Ozon'un gerçek kargo kesintisi beklenen tarifenin (extrasmall
+  // için $3.3) üzerinde geldiğinde kullanıcı bunu Ozon'a manuel olarak bildiriyor/itiraz ediyor.
+  // shippingDisputedAmountUsd o ANKİ tutarı (baseline) saklar — periyodik kontrol (bkz.
+  // sync-orders-cron.ts runShippingDisputeRecheck) güncel gerçek kargo tutarını bu baseline'la
+  // karşılaştırıp Ozon düzelttiyse "resolved"a geçiriyor. "disputed" durumuna SADECE kullanıcı
+  // panelden elle geçiriyor (otomatik değil) — yeni tespit edilen aşırı ücretli siparişler bu
+  // yüzden status=null kalıp ayrı bir "itiraz edilmedi" filtresinde görünüyor.
+  shippingDisputeStatus            String? // null | "disputed" | "resolved"
+  shippingDisputedAt               DateTime?
+  shippingDisputedAmountUsd        Float?
+  shippingDisputeResolvedAt        DateTime?
+  shippingDisputeResolvedAmountUsd Float?
+  createdAt                        DateTime  @default(now())
+  updatedAt                        DateTime  @updatedAt
 
-  items        OrderItem[]
+  items OrderItem[]
 
   // Siparişler sayfasındaki filtre butonları (durum bazlı groupBy + "Bugün Faturası Kesilenler"
   // sayacı) her sayfa yüklemesinde bu iki alanı sorguluyor — index olmadan tüm tablo taranıyordu
   // (2026-09-10'da code review'da tespit edildi).
   @@index([status])
+  // Finans Mütabakatı sayfası "itiraz edildi/düzeltildi" sekmelerini bu alana göre filtreliyor.
+  @@index([shippingDisputeStatus])
   @@index([parasutInvoicedAt])
   // Analitik sayfasındaki "En Çok Satan Ürünler" ve ürün detayındaki "Satış Geçmişi" grafiği artık
   // local veriden hesaplanıyor (bkz. orders.service.ts getTopSellingProducts/getProductSalesHistory)
@@ -280,16 +295,16 @@ model Order {
 }
 
 model OrderItem {
-  id        String  @id @default(cuid())
-  order     Order   @relation(fields: [orderId], references: [id])
+  id        String   @id @default(cuid())
+  order     Order    @relation(fields: [orderId], references: [id])
   orderId   String
   product   Product? @relation(fields: [productId], references: [id])
   productId String?
   offerId   String
   ozonSku   BigInt? // Ozon'un posting içindeki NUMERİK sku'su (offer_id'den farklı — bizim kendi kodumuz
-                     // yerine Ozon'un ürün eşleştirmesi için kullandığı kimlik). Fatura (hs_codes) gibi
-                     // Ozon'a geri gönderilen isteklerde offerId DEĞİL bu kullanılmalı (2026-08-13'te
-                     // "posting doesn't contain product_id" hatasıyla tespit edildi).
+  // yerine Ozon'un ürün eşleştirmesi için kullandığı kimlik). Fatura (hs_codes) gibi
+  // Ozon'a geri gönderilen isteklerde offerId DEĞİL bu kullanılmalı (2026-08-13'te
+  // "posting doesn't contain product_id" hatasıyla tespit edildi).
   quantity  Int
   price     String
 
@@ -329,28 +344,28 @@ model OrderItem {
 // FinanceTransaction'daki aynı gerekçeyle (iade, Order senkronizasyon penceremizin dışındaki bir
 // posting'e referans verebilir).
 model OzonReturn {
-  id             String    @id // Ozon'un kendi return id'si
-  postingNumber  String
-  offerId        String?
-  productName    String?
-  quantity       Int?
-  reasonName     String?
-  type           String? // ör. "FullReturn"
-  schema         String? // "Fbs" | "Fbo"
-  statusName     String? // visual.status.display_name — panelde görünen durum adı
+  id              String    @id // Ozon'un kendi return id'si
+  postingNumber   String
+  offerId         String?
+  productName     String?
+  quantity        Int?
+  reasonName      String?
+  type            String? // ör. "FullReturn"
+  schema          String? // "Fbs" | "Fbo"
+  statusName      String? // visual.status.display_name — panelde görünen durum adı
   statusChangedAt DateTime?
   // Depoda bekleme süresince işleyen saklama ücreti — ürün imha edilmese bile bize kesilebilir.
-  storageFee     Float?
+  storageFee      Float?
   // Ürün belirli sürede geri istenmezse Ozon imha ediyor ve bu bedeli bize kesiyor — "maliyeti
   // silinenler" dediğiniz muhtemelen bunlar (storage.utilization_sum).
-  utilizationFee Float?
-  currency       String?
+  utilizationFee  Float?
+  currency        String?
   // logistic.cancelled_with_compensation_moment doluysa Ozon bu iade için bize tazminat ödemiş
   // demektir — bu durumda bize gerçek bir maliyet çıkmaz (kullanıcının "bize bedel ödetilmeyenler"
   // dediği kategori).
-  compensatedAt  DateTime?
-  rawPayload     Json?
-  syncedAt       DateTime  @default(now())
+  compensatedAt   DateTime?
+  rawPayload      Json?
+  syncedAt        DateTime  @default(now())
 
   @@index([postingNumber])
   @@index([statusChangedAt])
@@ -364,38 +379,38 @@ model OzonReturn {
 // ürün imha edilmiş (gerçek kayıp: ürün + varsa saklama), "approved" + money_return_state_name
 // doluysa müşteriye para iade edilmiş/tazminat ödenmiş (gerçek kayıp: satış bedeli).
 model OzonRfbsReturn {
-  id                  String   @id // Ozon'un return_id'si (string'e çevrilmiş)
-  postingNumber       String
-  orderNumber         String?
-  offerId             String?
-  productName         String?
-  price               Float? // USD — satış bedeli (maliyet fiyatı DEĞİL)
-  currency            String?
-  stateCode           String? // ör. "Utilizing"
-  stateName           String? // Ozon'un panelde gösterdiği durum adı
+  id                   String    @id // Ozon'un return_id'si (string'e çevrilmiş)
+  postingNumber        String
+  orderNumber          String?
+  offerId              String?
+  productName          String?
+  price                Float? // USD — satış bedeli (maliyet fiyatı DEĞİL)
+  currency             String?
+  stateCode            String? // ör. "Utilizing"
+  stateName            String? // Ozon'un panelde gösterdiği durum adı
   groupState           String? // "utilization" | "approved" | ...
   moneyReturnStateName String?
-  createdAt           DateTime?
-  rawPayload          Json?
-  syncedAt            DateTime @default(now())
+  createdAt            DateTime?
+  rawPayload           Json?
+  syncedAt             DateTime  @default(now())
 
   @@index([postingNumber])
   @@index([groupState])
 }
 
 model FinanceTransaction {
-  id             String   @id @default(cuid())
-  postingNumber  String
-  operationId    BigInt?  // yeni accrual uç noktası artık vermiyor — eski (Ağustos öncesi) satırlarda var
-  operationType  String
-  operationDate  DateTime
-  amount         Float
+  id               String   @id @default(cuid())
+  postingNumber    String
+  operationId      BigInt? // yeni accrual uç noktası artık vermiyor — eski (Ağustos öncesi) satırlarda var
+  operationType    String
+  operationDate    DateTime
+  amount           Float
   commissionAmount Float?
-  deliveryCharge Float?
-  otherCharges   Float?
-  currency       String?  // Ozon artık bunu açıkça veriyor (RUB) — eski uç nokta hiç vermiyordu
-  rawPayload     Json?
-  createdAt      DateTime @default(now())
+  deliveryCharge   Float?
+  otherCharges     Float?
+  currency         String? // Ozon artık bunu açıkça veriyor (RUB) — eski uç nokta hiç vermiyordu
+  rawPayload       Json?
+  createdAt        DateTime @default(now())
 
   @@index([postingNumber])
 }

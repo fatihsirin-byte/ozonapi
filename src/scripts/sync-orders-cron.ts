@@ -10,6 +10,7 @@ import { cacheInvoicePdfIfMissing } from "../parasut/pdfCache";
 import { INVOICE_CLAIM_SENTINEL } from "../parasut/orderInvoice";
 import { sendOrderToAse } from "../ase/orderShipment";
 import { fetchAndCacheLabel } from "../ozon/labelCache";
+import { recheckDisputedShipping } from "../modules/finance/shipping-dispute.service";
 
 const DEFAULT_STOCK = 100;
 
@@ -218,6 +219,23 @@ async function runAseAutoSend() {
 const LABEL_BACKFILL_BATCH_SIZE = 25;
 const LABEL_BACKFILL_DELAY_MS = 1000;
 
+// Finans Mütabakatı (2026-09-28, kullanıcı talebi): "disputed" işaretlenmiş siparişlerin
+// GÜNCEL gerçek kargo tutarını itiraz anındaki tutarla (baseline) karşılaştırır — Ozon
+// düzelttiyse otomatik "resolved"a geçirir (bkz. shipping-dispute.service.ts
+// recheckDisputedShipping). ASE gümrük durumu gibi bu da sadece OKUMA yapar, Ozon'a hiçbir
+// bildirim/itiraz göndermez — o kullanıcının kendi elle yaptığı ayrı bir süreç. Kargo kesintisi
+// ASE beyanı kadar sık değişmediği için AYNI 3 saatlik zamanlamada (runAsePoll) çalışıyor.
+async function runShippingDisputeRecheck() {
+  try {
+    const { checked, resolved } = await recheckDisputedShipping();
+    if (resolved > 0) {
+      console.log(`[sync-orders-cron] ${new Date().toISOString()} — finans mütabakatı: ${checked} itiraz kontrol edildi, ${resolved} tanesi Ozon tarafından düzeltilmiş görünüyor`);
+    }
+  } catch (error) {
+    console.error(`[sync-orders-cron] ${new Date().toISOString()} — finans mütabakatı kontrol hatası:`, error);
+  }
+}
+
 async function runLabelBackfill() {
   const pending = await prisma.order.findMany({
     where: { status: "awaiting_deliver", shippingLabelCached: false },
@@ -250,6 +268,7 @@ async function runLabelBackfill() {
 cron.schedule("*/15 * * * *", runSync);
 cron.schedule("*/15 * * * *", runReturnsSync);
 cron.schedule("0 */3 * * *", runAsePoll);
+cron.schedule("30 */3 * * *", runShippingDisputeRecheck);
 cron.schedule("1,6,11,16,21,26,31,36,41,46,51,56 * * * *", runInvoiceConfirmationSync);
 cron.schedule("3,8,13,18,23,28,33,38,43,48,53,58 * * * *", runAseAutoSend);
 cron.schedule("*/5 * * * *", runLabelBackfill);
@@ -262,3 +281,4 @@ runAsePoll();
 runInvoiceConfirmationSync();
 runAseAutoSend();
 runLabelBackfill();
+runShippingDisputeRecheck();

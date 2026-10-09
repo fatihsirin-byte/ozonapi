@@ -24,6 +24,15 @@ interface ToptantrListing {
   status: string;
   lastError: string | null;
   lastSyncedAt: string | null;
+  translatedTitle: string | null;
+  shortDescription: string | null;
+  fullDescription: string | null;
+}
+
+interface ManualTier {
+  tier: "Paket" | "Koli";
+  itemPerPackage: number;
+  stock: number;
 }
 
 interface Preview {
@@ -32,6 +41,7 @@ interface Preview {
   priceAnomaly: boolean;
   isSingleUnitOnly: boolean;
   suggestedMapping: { categoryGuid: string | null; brandGuid: string | null } | null;
+  manualTiers: ManualTier[];
 }
 
 interface GuidOption {
@@ -136,6 +146,12 @@ export function ToptantrPanel({ handle }: { handle: string }) {
   const [brandLabel, setBrandLabel] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Elle kademe formu (Paket = kutu/display, Koli) ve Türkçe metin düzenleyici
+  const [tierForm, setTierForm] = useState({ paketIpp: "", paketStock: "", koliIpp: "", koliStock: "" });
+  const [savingTiers, setSavingTiers] = useState(false);
+  const [text, setText] = useState({ title: "", shortDescription: "", fullDescription: "" });
+  const [textBusy, setTextBusy] = useState<null | "generate" | "save" | "push">(null);
+  const [textMsg, setTextMsg] = useState<string | null>(null);
 
   const load = () => {
     setError(null);
@@ -149,6 +165,19 @@ export function ToptantrPanel({ handle }: { handle: string }) {
         setPreview(data);
         if (data.listing?.categoryGuid) setCategoryGuid(data.listing.categoryGuid);
         else if (data.suggestedMapping?.categoryGuid) setCategoryGuid(data.suggestedMapping.categoryGuid);
+        const paket = data.manualTiers.find((t) => t.tier === "Paket");
+        const koli = data.manualTiers.find((t) => t.tier === "Koli");
+        setTierForm({
+          paketIpp: paket ? String(paket.itemPerPackage) : "",
+          paketStock: paket ? String(paket.stock) : "",
+          koliIpp: koli ? String(koli.itemPerPackage) : "",
+          koliStock: koli ? String(koli.stock) : "",
+        });
+        setText({
+          title: data.listing?.translatedTitle ?? "",
+          shortDescription: data.listing?.shortDescription ?? "",
+          fullDescription: data.listing?.fullDescription ?? "",
+        });
         if (data.listing?.brandGuid) setBrandGuid(data.listing.brandGuid);
         else if (data.suggestedMapping?.brandGuid) setBrandGuid(data.suggestedMapping.brandGuid);
       })
@@ -189,6 +218,63 @@ export function ToptantrPanel({ handle }: { handle: string }) {
       return;
     }
     load();
+  }
+
+  async function saveTiers(clear = false) {
+    const tiers: ManualTier[] = [];
+    if (!clear) {
+      if (tierForm.paketIpp.trim() !== "" || tierForm.paketStock.trim() !== "")
+        tiers.push({ tier: "Paket", itemPerPackage: Number(tierForm.paketIpp), stock: Number(tierForm.paketStock) });
+      if (tierForm.koliIpp.trim() !== "" || tierForm.koliStock.trim() !== "")
+        tiers.push({ tier: "Koli", itemPerPackage: Number(tierForm.koliIpp), stock: Number(tierForm.koliStock) });
+    }
+    setSavingTiers(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/import/products/${encodeURIComponent(handle)}/toptantr/tiers`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tiers }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Kademeler kaydedilemedi");
+        return;
+      }
+      load();
+    } finally {
+      setSavingTiers(false);
+    }
+  }
+
+  async function textRequest(kind: "generate" | "save" | "push") {
+    setTextBusy(kind);
+    setTextMsg(null);
+    setError(null);
+    try {
+      const url = `/api/import/products/${encodeURIComponent(handle)}/toptantr/text`;
+      const res =
+        kind === "generate"
+          ? await fetch(url, { method: "POST" })
+          : await fetch(url, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...text, push: kind === "push" }),
+            });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "İşlem başarısız");
+        return;
+      }
+      if (kind === "generate") {
+        setText({ title: data.title, shortDescription: data.shortDescription, fullDescription: data.fullDescription });
+        setTextMsg("Türkçe metin üretildi ve kaydedildi — kontrol edip düzenleyebilirsiniz.");
+      } else {
+        setTextMsg(kind === "push" ? "Kaydedildi ve toptantr'a gönderildi." : "Kaydedildi.");
+      }
+    } finally {
+      setTextBusy(null);
+    }
   }
 
   async function connect() {
@@ -235,14 +321,17 @@ export function ToptantrPanel({ handle }: { handle: string }) {
   const listing = preview.listing;
   const isConnected = listing?.status === "success";
   const approvedCount = preview.variants.filter((v) => v.approved).length;
+  const hasManualTiers = preview.manualTiers.length > 0;
+  const sendableCount = hasManualTiers ? preview.manualTiers.length : approvedCount;
 
   return (
     <div className="card">
       <label>toptantr Bağlantısı</label>
 
-      {preview.isSingleUnitOnly && (
+      {preview.isSingleUnitOnly && !hasManualTiers && (
         <div className="hint" style={{ color: "var(--danger)" }}>
-          Bu ürün tek parçalık (tekli) bir perakende ürünü — toptantr toptan pazaryeri olduğundan gönderilemez.
+          Bu ürün tek parçalık (tekli) bir perakende ürünü — toptantr toptan pazaryeri olduğundan, aşağıdan elle kademe
+          (Paket/Koli) girmeden gönderilemez.
         </div>
       )}
 
@@ -314,6 +403,86 @@ export function ToptantrPanel({ handle }: { handle: string }) {
         </div>
       )}
 
+      <div style={{ marginBottom: 16 }}>
+        <label>Elle kademe (kutu/display + koli)</label>
+        <div className="hint" style={{ marginBottom: 8 }}>
+          Sadece toptantr&apos;ın sabit kademeleri: <strong>Paket</strong> (kutu/display) ve <strong>Koli</strong>. Doluysa bu ürün için
+          Shopify stoğu yerine bu adet ve stok toptantr&apos;a gider, otomatik stok senkronu bu ürüne dokunmaz. Fiyat = birim maliyet × paket içi adet.
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Kademe</th>
+              <th>Paket içi adet</th>
+              <th>Stok</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(
+              [
+                ["Paket (kutu/display)", "paketIpp", "paketStock"],
+                ["Koli", "koliIpp", "koliStock"],
+              ] as const
+            ).map(([label, ippKey, stockKey]) => (
+              <tr key={ippKey}>
+                <td>{label}</td>
+                <td>
+                  <input type="number" min={2} step={1} style={{ width: 100 }} value={tierForm[ippKey]} onChange={(e) => setTierForm({ ...tierForm, [ippKey]: e.target.value })} />
+                </td>
+                <td>
+                  <input type="number" min={0} step={1} style={{ width: 100 }} value={tierForm[stockKey]} onChange={(e) => setTierForm({ ...tierForm, [stockKey]: e.target.value })} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button type="button" className="btn-secondary" disabled={savingTiers} onClick={() => saveTiers(false)}>
+            {savingTiers ? "Kaydediliyor..." : "Kademeleri Kaydet"}
+          </button>
+          {hasManualTiers && (
+            <button type="button" className="btn-secondary" disabled={savingTiers} onClick={() => saveTiers(true)}>
+              Elle kademeyi kaldır
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <label>Türkçe başlık ve açıklama</label>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <button type="button" className="btn-secondary" disabled={textBusy !== null} onClick={() => textRequest("generate")}>
+            {textBusy === "generate" ? "Yazılıyor..." : "Türkçeleştir (Gemini)"}
+          </button>
+        </div>
+        <input type="text" placeholder="Başlık" value={text.title} onChange={(e) => setText({ ...text, title: e.target.value })} />
+        <textarea
+          rows={3}
+          placeholder="Kısa açıklama (en fazla 500 karakter)"
+          style={{ width: "100%", marginTop: 8 }}
+          value={text.shortDescription}
+          onChange={(e) => setText({ ...text, shortDescription: e.target.value })}
+        />
+        <textarea
+          rows={8}
+          placeholder="Uzun açıklama (HTML, en fazla 4000 karakter)"
+          style={{ width: "100%", marginTop: 8 }}
+          value={text.fullDescription}
+          onChange={(e) => setText({ ...text, fullDescription: e.target.value })}
+        />
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button type="button" className="btn-secondary" disabled={textBusy !== null || !text.title.trim()} onClick={() => textRequest("save")}>
+            {textBusy === "save" ? "Kaydediliyor..." : "Metni Kaydet"}
+          </button>
+          {isConnected && (
+            <button type="button" className="btn-secondary" disabled={textBusy !== null || !text.title.trim()} onClick={() => textRequest("push")}>
+              {textBusy === "push" ? "Gönderiliyor..." : "Kaydet ve toptantr'a gönder"}
+            </button>
+          )}
+        </div>
+        {textMsg && <div className="hint" style={{ marginTop: 6 }}>{textMsg}</div>}
+      </div>
+
       <GuidPicker
         label="Kategori"
         placeholder="Kategori ara..."
@@ -341,7 +510,7 @@ export function ToptantrPanel({ handle }: { handle: string }) {
 
       <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
         {!isConnected ? (
-          <button className="btn-primary" disabled={!categoryGuid || approvedCount === 0 || connecting} onClick={connect}>
+          <button className="btn-primary" disabled={!categoryGuid || sendableCount === 0 || connecting} onClick={connect}>
             {connecting ? "Bağlanıyor..." : "toptantr'a Bağla"}
           </button>
         ) : (
@@ -351,7 +520,7 @@ export function ToptantrPanel({ handle }: { handle: string }) {
         )}
       </div>
       {!categoryGuid && <div className="hint" style={{ marginTop: 8 }}>Bağlamak için önce bir kategori seçin.</div>}
-      {approvedCount === 0 && <div className="hint">Göndermek istediğiniz en az bir kademeyi (Adet/Paket/Koli/Palet) onaylayın.</div>}
+      {sendableCount === 0 && <div className="hint">Göndermek istediğiniz en az bir kademeyi (Adet/Paket/Koli/Palet) onaylayın ya da elle kademe girin.</div>}
     </div>
   );
 }

@@ -45,8 +45,6 @@ export function StagingList() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
-  const [settingStock, setSettingStock] = useState(false);
-  const [stockResult, setStockResult] = useState<string | null>(null);
 
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -164,23 +162,6 @@ export function StagingList() {
     }
   }
 
-  async function setAllStock() {
-    if (!confirm("Ozon'a bağlı TÜM ürünlerin stoğu 100 olarak gönderilecek. Devam edilsin mi?")) return;
-    setSettingStock(true);
-    setStockResult(null);
-    try {
-      const res = await fetch("/api/products/set-all-stock", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stock: 100 }),
-      });
-      const data = await res.json();
-      setStockResult(`${data.updated}/${data.total} ürünün stoğu güncellendi.`);
-    } finally {
-      setSettingStock(false);
-    }
-  }
-
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
@@ -238,10 +219,6 @@ export function StagingList() {
             <strong>{total}</strong> ürün bekliyor (henüz Ozon'a gönderilmedi)
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {stockResult && <span className="hint">{stockResult}</span>}
-            <button type="button" className="btn-secondary" disabled={settingStock} onClick={setAllStock}>
-              {settingStock ? "Gönderiliyor..." : "Ozon'a Bağlı Tüm Ürünlerin Stoğunu 100 Yap"}
-            </button>
             {selected.size > 0 && (
               <button type="button" className="btn-secondary" disabled={deleting} onClick={bulkDelete}>
                 {deleting ? "Siliniyor..." : `Seçilenleri Sil (${selected.size})`}

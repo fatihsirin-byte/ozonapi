@@ -4,7 +4,8 @@
 // uyacak şekilde (SDK yerine düz REST çağrısı) taşındı.
 import { extractFirstJsonObject } from "../ai/json-extract";
 
-const GEMINI_MODEL = "gemini-2.5-flash";
+// 2.5 yerine 3.5 (kullanıcı kararı, 2026-10-09) — canlı anahtarda erişim doğrulandı; GEMINI_MODEL ile değiştirilebilir.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 function stripHtml(html: string): string {
@@ -33,17 +34,27 @@ export async function translateForToptantr(title: string, bodyHtml: string): Pro
   if (!apiKey) throw new Error("GEMINI_API_KEY tanımlı değil");
 
   const description = stripHtml(bodyHtml).slice(0, 3000);
-  const prompt = `Sen bir e-ticaret ürün metni çevirmenisin. Aşağıdaki İngilizce ürün bilgisini
-Türkçeye çevir ve SADECE şu JSON formatında cevap ver, başka hiçbir açıklama ekleme:
+  const prompt = `Sen Türkiye'de toptan gıda/kozmetik satan bir B2B pazaryerinde (toptantr) çalışan deneyimli bir ürün metin yazarısın.
+Aşağıdaki İngilizce ürün bilgisinden, Türk esnafına/alıcısına yönelik ÖZGÜN bir Türkçe ürün sayfası metni YAZ.
+Bu bir çeviri işi değil, yeniden yazım: İngilizce cümle yapısını, kalıplarını ve pazarlama klişelerini ("premium quality",
+"experience the...", "perfect for...") Türkçeye kelime kelime taşıma. Türkçede bir ürün sayfası nasıl yazılırsa öyle yaz.
+
+SADECE şu JSON formatında cevap ver, başka hiçbir şey ekleme:
 {"title": "...", "shortDescription": "...", "fullDescription": "..."}
 
-Kurallar:
-- title: doğal, akıcı bir Türkçe ürün başlığı (ürün ismini birebir değil, anlaşılır şekilde çevir)
-- shortDescription: KESİNLİKLE en fazla 480 karakter (boşluklar dahil), düz metin, ürünün kısa özeti.
-  Bu sınırı asla aşma — sınıra yaklaşıyorsan cümleyi kısalt, tam bir cümleyle bitir, yarım bırakma.
-- fullDescription: KESİNLİKLE en fazla 3900 karakter (boşluklar dahil), HTML olabilir (<p>, <ul>,
-  <li>, <strong> etiketleri), ürünün detaylı açıklaması. Bu sınırı asla aşma, HTML etiketlerini
-  yarım bırakma (her açılan etiket kapatılmalı).
+Üslup kuralları:
+- Doğal, sıcak ama ölçülü, bilgilendirici bir dil. Robotik/çeviri kokan cümleler, abartılı sıfat yığınları ve
+  "eşsiz, mükemmel, benzersiz deneyim" gibi boş klişeler YOK. Her cümle bir bilgi taşısın.
+- title: Türkçe e-ticaret başlık düzeninde: Marka + ürün adı + çeşit/aroma + gramaj/adet. İngilizce sıfat sırasını
+  taklit etme. Marka adlarını ve gramaj/ölçüyü (g, kg, ml) aynen koru. Anahtar kelime doldurma yapma.
+  Örn. "Professional Sweet Smoked Paprika Powder - 1 kg" -> "Profesyonel Tatlı Füme Toz Biber (Paprika) 1 kg".
+- shortDescription: KESİNLİKLE en fazla 480 karakter, düz metin, 2-3 doğal cümle: ürün ne, kime/neye uygun, öne çıkan 1-2 özellik.
+  Tam bir cümleyle bitir, yarım bırakma.
+- fullDescription: KESİNLİKLE en fazla 3900 karakter, HTML (<p>, <ul>, <li>, <strong>). Kısa paragraflar + gerekiyorsa
+  madde işaretli özellik listesi. Kullanım önerisi, içerik/menşe/ambalaj bilgisi kaynak metinde VARSA ekle.
+  Kaynakta olmayan hiçbir bilgiyi (sertifika, içerik, sağlık iddiası, menşe, raf ömrü, adet) UYDURMA.
+  Her açılan HTML etiketi kapatılmalı.
+- Türkçe karakterleri ve imlayı doğru kullan, büyük harfle yazılmış başlık yapma.
 
 İngilizce ürün başlığı: ${title}
 İngilizce ürün açıklaması (HTML olabilir): ${description || "(açıklama yok)"}`;
@@ -53,7 +64,7 @@ Kurallar:
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
+      generationConfig: { responseMimeType: "application/json", temperature: 0.6 },
     }),
   });
   if (!res.ok) {
@@ -61,7 +72,8 @@ Kurallar:
     throw new Error(`Gemini API hatası (${res.status}): ${body.slice(0, 300)}`);
   }
   const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  const parts = (data.candidates?.[0]?.content?.parts ?? []) as { text?: string; thought?: boolean }[];
+  const text = parts.filter((p) => p.text && !p.thought).map((p) => p.text).join("");
   if (!text) throw new Error("Gemini boş cevap döndü");
 
   const parsed = JSON.parse(extractFirstJsonObject(text)) as Partial<ToptantrTranslation>;

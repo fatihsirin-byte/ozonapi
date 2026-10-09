@@ -427,6 +427,12 @@ export async function listAllProducts(params?: {
   // "none" HİÇBİRİNE bağlı olmayanları gösterir — draft (Ozon'a hiç gönderilmemiş) ile
   // KARIŞTIRILMAMALI, toptantr'a bağlı ama Ozon'a hâlâ draft olan ürünler var.
   marketplace?: "ozon" | "toptantr" | "both" | "none";
+  // Shopify stok filtresi (Product.shopifyStock): "in" = stokta var (>0), "out" = stokta yok
+  // (0 veya Shopify'da kaydı olmayan/null).
+  stock?: "in" | "out";
+  // Varyant adedi filtresi: aynı shopifyHandle'ı paylaşan Product satırı sayısı. 5 = "5 ve üzeri".
+  // shopifyHandle'ı olmayan (Ozon-orijinli) ürünler tek varyant sayılır.
+  variants?: number;
 }) {
   const search = params?.search?.trim();
   const ozonCondition = { status: { not: "draft" } };
@@ -445,9 +451,23 @@ export async function listAllProducts(params?: {
     marketplaceClause = { OR: [ozonCondition, { shopifyHandle: { in: [...(await getToptantrConnectedHandleSet())] } }] };
   }
 
+  let variantClause: Record<string, unknown>[] = [];
+  if (params?.variants) {
+    const wanted = params.variants;
+    const groups = await prisma.product.groupBy({ by: ["shopifyHandle"], where: { shopifyHandle: { not: null } }, _count: { _all: true } });
+    const handles = groups
+      .filter((g) => (wanted >= 5 ? g._count._all >= 5 : g._count._all === wanted))
+      .map((g) => g.shopifyHandle as string);
+    variantClause =
+      wanted === 1 ? [{ OR: [{ shopifyHandle: null }, { shopifyHandle: { in: handles } }] }] : [{ shopifyHandle: { in: handles } }];
+  }
+
   const where = {
     AND: [
       marketplaceClause,
+      ...variantClause,
+      ...(params?.stock === "in" ? [{ shopifyStock: { gt: 0 } }] : []),
+      ...(params?.stock === "out" ? [{ OR: [{ shopifyStock: null }, { shopifyStock: { lte: 0 } }] }] : []),
       ...(search
         ? [
             {
@@ -466,15 +486,22 @@ export async function listAllProducts(params?: {
   // sonuçlar dönüyor — bu durumda ayrı bir COUNT sorgusu atmak yerine findMany'nin uzunluğu
   // yeterli, gereksiz bir tam tablo sayımı önleniyor (2026-09-11'de code review'da tespit edildi).
   if (params?.take == null) {
-    const products = await prisma.product.findMany({ where, orderBy: { createdAt: "desc" } });
+    const products = await prisma.product.findMany({ where, orderBy: [{ shopifyStock: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }] });
     return { products, total: products.length };
   }
 
   const [products, total] = await Promise.all([
-    prisma.product.findMany({ where, orderBy: { createdAt: "desc" }, skip: params.skip, take: params.take }),
+    prisma.product.findMany({ where, orderBy: [{ shopifyStock: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }], skip: params.skip, take: params.take }),
     prisma.product.count({ where }),
   ]);
   return { products, total };
+}
+
+// Verilen handle'ların varyant (Product satırı) sayısı — Ürünler listesindeki "Varyant" kolonu için.
+export async function getVariantCountsByHandle(handles: string[]): Promise<Map<string, number>> {
+  if (handles.length === 0) return new Map();
+  const groups = await prisma.product.groupBy({ by: ["shopifyHandle"], where: { shopifyHandle: { in: handles } }, _count: { _all: true } });
+  return new Map(groups.map((g) => [g.shopifyHandle as string, g._count._all]));
 }
 
 export async function getProduct(offerId: string) {

@@ -1,8 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { setStockForAllConnectedProducts } from "@/modules/products/products.service";
+import { NextResponse } from "next/server";
 
-export async function POST(request: NextRequest) {
-  const { stock } = (await request.json().catch(() => ({}))) as { stock?: number };
-  const result = await setStockForAllConnectedProducts(stock ?? 100);
-  return NextResponse.json(result);
+// Kaldırıldı (2026-10-09, kullanıcı kararı): "tüm ürünlere sabit stok" artık yok — Ozon'a sadece
+// Shopify ile eşleşen ürünler için gerçek stok gidiyor (bkz. src/shopify/stockSync.ts).
+export async function POST() {
+  return NextResponse.json({ error: "Sabit stok gönderimi kaldırıldı" }, { status: 410 });
 }

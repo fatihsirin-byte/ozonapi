@@ -1,5 +1,5 @@
 import { prisma } from "../../db/prisma";
-import type { Product, ToptantrListing } from "@prisma/client";
+import type { Prisma, Product, ToptantrListing } from "@prisma/client";
 import { env } from "../../config/env";
 import {
   createProduct,
@@ -12,6 +12,7 @@ import { rankVariants, describeVariants, computeTierStock, hasPriceAnomaly, isSi
 import { usdToTl } from "../../toptantr/pricing";
 import { translateForToptantr } from "../../toptantr/translate";
 import { getCachedMapping, setCachedMapping } from "../../toptantr/mapping";
+import { parseManualTiers, validateManualTiers, buildManualRanked, type ManualTier } from "../../toptantr/manualTiers";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -35,6 +36,7 @@ export interface ToptantrPreview {
   priceAnomaly: boolean;
   isSingleUnitOnly: boolean;
   suggestedMapping: { categoryGuid: string | null; brandGuid: string | null } | null;
+  manualTiers: ManualTier[];
 }
 
 export async function getToptantrPreview(handle: string): Promise<ToptantrPreview> {
@@ -53,7 +55,54 @@ export async function getToptantrPreview(handle: string): Promise<ToptantrPrevie
     priceAnomaly: hasPriceAnomaly(variants),
     isSingleUnitOnly: isSingleUnitOnlyHandle(products),
     suggestedMapping,
+    manualTiers: parseManualTiers(listing?.manualTiers),
   };
+}
+
+// Elle kademeleri kaydeder (boş liste = elle kademeyi kaldır, otomatik düzene dön). Listing yoksa
+// taslak olarak oluşturulur.
+export async function saveManualTiers(handle: string, input: unknown): Promise<ManualTier[]> {
+  const exists = await prisma.product.count({ where: { shopifyHandle: handle } });
+  if (exists === 0) throw new Error("Handle bulunamadı");
+  const tiers = validateManualTiers(input);
+  await prisma.toptantrListing.upsert({
+    where: { shopifyHandle: handle },
+    create: { shopifyHandle: handle, manualTiers: tiers as unknown as Prisma.InputJsonValue },
+    update: { manualTiers: tiers as unknown as Prisma.InputJsonValue },
+  });
+  return tiers;
+}
+
+// Gemini ile toptantr için özgün Türkçe başlık/açıklama üretir ve listing'e kaydeder (henüz
+// toptantr'a GÖNDERMEZ — kullanıcı önce görüp düzenler, bkz. pushToptantrText).
+export async function generateToptantrText(handle: string) {
+  const primary = await prisma.product.findFirst({ where: { shopifyHandle: handle }, orderBy: { variantPosition: "asc" } });
+  if (!primary) throw new Error("Handle bulunamadı");
+  const translated = await translateForToptantr(primary.name, primary.descriptionHtml ?? "");
+  await prisma.toptantrListing.upsert({
+    where: { shopifyHandle: handle },
+    create: { shopifyHandle: handle, translatedTitle: translated.title, shortDescription: translated.shortDescription, fullDescription: translated.fullDescription },
+    update: { translatedTitle: translated.title, shortDescription: translated.shortDescription, fullDescription: translated.fullDescription },
+  });
+  return translated;
+}
+
+// Kullanıcının düzenlediği metni kaydeder; push=true ve ürün zaten toptantr'da ise güncellenmiş
+// metni toptantr'a da gönderir.
+export async function saveToptantrText(handle: string, text: { title: string; shortDescription: string; fullDescription: string }, push: boolean) {
+  const title = text.title.trim();
+  if (!title) throw new Error("Başlık boş olamaz");
+  if (text.shortDescription.length > 500) throw new Error("Kısa açıklama en fazla 500 karakter olmalı");
+  if (text.fullDescription.length > 4000) throw new Error("Uzun açıklama en fazla 4000 karakter olmalı");
+  const listing = await prisma.toptantrListing.upsert({
+    where: { shopifyHandle: handle },
+    create: { shopifyHandle: handle, translatedTitle: title, shortDescription: text.shortDescription, fullDescription: text.fullDescription },
+    update: { translatedTitle: title, shortDescription: text.shortDescription, fullDescription: text.fullDescription },
+  });
+  if (push) {
+    if (listing.status !== "success" || !listing.toptantrProductId) throw new Error("Ürün henüz toptantr'a bağlı değil — metin kaydedildi, bağlayınca gönderilecek");
+    await updateProduct(listing.toptantrProductId, { title, shortDescription: text.shortDescription, fullDescription: text.fullDescription });
+  }
 }
 
 function buildPayload(params: {
@@ -126,6 +175,19 @@ async function pushStockAndPrice(
   return { toptantrProductId: found.id, combinationsUpdated: updates.length, combinationsPending: false };
 }
 
+// Elle kademe varsa onlar (taban = handle'ın ilk varyantı), yoksa otomatik sıralama + onaylı varyantlar.
+function resolveTiers(products: Product[], manualTiers: ManualTier[]) {
+  if (manualTiers.length > 0) {
+    const { ranked, stockBySku } = buildManualRanked(products[0], manualTiers);
+    return { ranked, sendableRanked: ranked, stockBySku };
+  }
+  const ranked = rankVariants(products);
+  const sendableRanked = ranked.filter(
+    (r) => products.find((p) => p.id === r.product.id)?.toptantrApproved && isTierSendable(r.attributeName, r.product),
+  );
+  return { ranked, sendableRanked, stockBySku: computeTierStock(ranked) };
+}
+
 export interface ConnectHandleInput {
   handle: string;
   categoryGuid: string;
@@ -139,14 +201,13 @@ export interface ConnectHandleInput {
 export async function connectHandleToToptantr(input: ConnectHandleInput): Promise<ToptantrListing> {
   const products = await prisma.product.findMany({ where: { shopifyHandle: input.handle }, orderBy: { variantPosition: "asc" } });
   if (products.length === 0) throw new Error("Handle bulunamadı");
-  if (isSingleUnitOnlyHandle(products)) {
-    throw new Error("Bu ürün tek parçalık (tekli) bir perakende ürünü — toptantr toptan pazaryeri, gönderilemez");
+  const priorListing = await prisma.toptantrListing.findUnique({ where: { shopifyHandle: input.handle } });
+  const manualTiers = parseManualTiers(priorListing?.manualTiers);
+  if (manualTiers.length === 0 && isSingleUnitOnlyHandle(products)) {
+    throw new Error("Bu ürün tek parçalık (tekli) bir perakende ürünü — elle kademe (Paket/Koli) girmeden toptantr'a gönderilemez");
   }
 
-  const ranked = rankVariants(products);
-  const sendableRanked = ranked.filter(
-    (r) => products.find((p) => p.id === r.product.id)?.toptantrApproved && isTierSendable(r.attributeName, r.product),
-  );
+  const { ranked, sendableRanked, stockBySku } = resolveTiers(products, manualTiers);
   if (sendableRanked.length === 0) {
     throw new Error("Gönderilecek onaylı (toptantrApproved) varyant yok — önce en az bir varyantı onaylayın");
   }
@@ -202,7 +263,7 @@ export async function connectHandleToToptantr(input: ConnectHandleInput): Promis
       toptantrProductId = existingProduct.id;
     }
 
-    const stockResult = await pushStockAndPrice(barcode, sendableRanked, computeTierStock(ranked));
+    const stockResult = await pushStockAndPrice(barcode, sendableRanked, stockBySku);
 
     const updated = await prisma.toptantrListing.update({
       where: { shopifyHandle: input.handle },
@@ -232,17 +293,14 @@ export async function refreshToptantrHandle(handle: string): Promise<ToptantrLis
   }
 
   const products = await prisma.product.findMany({ where: { shopifyHandle: handle }, orderBy: { variantPosition: "asc" } });
-  const ranked = rankVariants(products);
-  const sendableRanked = ranked.filter(
-    (r) => products.find((p) => p.id === r.product.id)?.toptantrApproved && isTierSendable(r.attributeName, r.product),
-  );
+  const { sendableRanked, stockBySku } = resolveTiers(products, parseManualTiers(listing.manualTiers));
   if (sendableRanked.length === 0) {
     throw new Error("Gönderilecek onaylı varyant yok");
   }
 
   const barcode = listing.toptantrBarcode ?? barcodeOf(sendableRanked[0].product);
   try {
-    const result = await pushStockAndPrice(barcode, sendableRanked, computeTierStock(ranked));
+    const result = await pushStockAndPrice(barcode, sendableRanked, stockBySku);
     return prisma.toptantrListing.update({
       where: { shopifyHandle: handle },
       data: {

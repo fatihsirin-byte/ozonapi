@@ -5,8 +5,8 @@ import { updatePrices, updateStocks, getImportStatus, archiveProducts } from "..
 import { selectWarehouseId } from "../../ozon/warehouses";
 import { createProduct, updateProductImages, type ProductAttributeInput } from "./products.service";
 
-// Yeni gönderilen her ürüne varsayılan stok — kullanıcı isteğiyle sabitlendi (2026-07-30).
-const DEFAULT_STOCK = 100;
+// Varsayılan 100 stok KALDIRILDI (2026-10-09, kullanıcı kararı): Ozon'a artık sadece Shopify ile
+// eşleşen (Product.shopifyStock dolu) ürünler için GERÇEK stok gidiyor, eşleşmeyenlere stok gönderilmiyor.
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -22,7 +22,6 @@ function sleep(ms: number) {
 async function waitForImportThenPushStock(
   offerId: string,
   taskId: number,
-  stock: number,
   dims: { weightGrams?: number | null; widthCm?: number | null; heightCm?: number | null; depthCm?: number | null },
 ) {
   for (let attempt = 0; attempt < 8; attempt++) {
@@ -35,6 +34,10 @@ async function waitForImportThenPushStock(
       // durum kontrolü başarısız oldu, yine de deneme sayısı bitince stok göndermeyi dene
     }
   }
+
+  const matched = await prisma.product.findUnique({ where: { offerId }, select: { shopifyStock: true } });
+  if (matched?.shopifyStock == null) return; // Shopify'da eşleşmesi yok — stok gönderilmez
+  const stock = matched.shopifyStock;
 
   const warehouseId = selectWarehouseId(dims.weightGrams ?? 100, dims.widthCm, dims.heightCm, dims.depthCm);
   const backoffsMs = [0, 5000, 15000, 30000, 60000, 120000];
@@ -650,7 +653,7 @@ export async function submitHandleToOzon(input: SubmitHandleInput) {
         // Bilerek await edilmiyor — import'un bitmesini beklemek saniyeler sürebiliyor,
         // bu da toplu gönderimi yavaşlatır. Arka planda biter, hata olsa bile ürün
         // oluşturma başarılı sayılır (stok daha sonra "Stokları Gönder" ile tekrar denenebilir).
-        waitForImportThenPushStock(variant.offerId, Number(taskId), DEFAULT_STOCK, {
+        waitForImportThenPushStock(variant.offerId, Number(taskId), {
           weightGrams: variant.weightGrams,
           widthCm: variant.widthCm,
           heightCm: variant.heightCm,

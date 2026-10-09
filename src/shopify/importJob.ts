@@ -4,6 +4,7 @@
 // pm2 fork_mode (tek instance) olduğu için process-içi state güvenli.
 import { fetchShopifyCatalogInStockOnly } from "./products";
 import { upsertParsedProducts } from "../import/import-products";
+import { syncShopifyStockToDb } from "./stockSync";
 
 export type ShopifyImportJobStatus =
   | { state: "idle" }
@@ -34,6 +35,9 @@ async function run(startedAt: string) {
   try {
     const products = await fetchShopifyCatalogInStockOnly();
     const summary = await upsertParsedProducts(products);
+    // Shopify bulk operation'lar hesap başına tek tek çalışabildiğinden (bkz. products.ts) stok
+    // çekimi fetch'ten SONRA, sıralı yapılıyor.
+    await syncShopifyStockToDb();
     job = {
       state: "done",
       startedAt,

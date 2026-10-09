@@ -14,7 +14,7 @@
 // kombinasyon başına barkod döndürmediği için Shopify varyantı ↔ toptantr kombinasyonu birebir
 // eşleşmesi güvenilir kurulamıyor (bkz. ToptantrFoundCombination — sadece id + attributes var).
 import { prisma } from "../db/prisma";
-import { fetchShopifyStockByLocation } from "./inventory";
+import { fetchShopifyStockByLocation, type ShopifyStockRow } from "./inventory";
 import { env } from "../config/env";
 import { updateStocks } from "../ozon/products";
 import { selectWarehouseId } from "../ozon/warehouses";
@@ -28,6 +28,33 @@ export interface StockSyncReport {
   shopifySkuCount: number;
   ozon: { closed: number; updated: number; skippedDisabled: number; errors: { offerId: string; error: string }[] };
   toptantr: { closed: number; updated: number; skippedDisabled: number; skippedNoBarcode: number; errors: { handle: string; error: string }[] };
+}
+
+// Shopify'daki güncel stoğu Product.shopifyStock'a yazar (Ürünler listesindeki stok kolonu/filtresi
+// için). Marketplace'lere HİÇBİR ŞEY göndermez. Aynı stok değerine sahip SKU'lar tek updateMany'de
+// toplanıyor (binlerce tekil UPDATE yerine).
+export async function syncShopifyStockToDb(prefetched?: ShopifyStockRow[]): Promise<{ shopifySkus: number; updated: number }> {
+  const rows = prefetched ?? (await fetchShopifyStockByLocation());
+  const skuByStock = new Map<number, string[]>();
+  for (const r of rows) {
+    const list = skuByStock.get(r.available);
+    if (list) list.push(r.sku);
+    else skuByStock.set(r.available, [r.sku]);
+  }
+
+  const syncedAt = new Date();
+  const CHUNK = 1000;
+  let updated = 0;
+  for (const [stock, skus] of skuByStock) {
+    for (let i = 0; i < skus.length; i += CHUNK) {
+      const result = await prisma.product.updateMany({
+        where: { OR: [{ shopifyVariantId: { in: skus.slice(i, i + CHUNK) } }, { offerId: { in: skus.slice(i, i + CHUNK) } }] },
+        data: { shopifyStock: stock, shopifyStockSyncedAt: syncedAt },
+      });
+      updated += result.count;
+    }
+  }
+  return { shopifySkus: rows.length, updated };
 }
 
 function emptyReport(dryRun: boolean): StockSyncReport {
@@ -44,10 +71,10 @@ function emptyReport(dryRun: boolean): StockSyncReport {
 // dryRun=true (varsayılan): hiçbir API çağrısı yapmaz, sadece "ne yapardım" raporu döner.
 // dryRun=false: gerçek çağrıları yapar — ama yine de sadece yukarıdaki iki kurala göre (env
 // açıksa gerçek miktar, kapalıysa sadece 0'a düşenleri kapatma).
-export async function runStockSync(dryRun = true): Promise<StockSyncReport> {
+export async function runStockSync(dryRun = true, prefetched?: ShopifyStockRow[]): Promise<StockSyncReport> {
   const report = emptyReport(dryRun);
 
-  const shopifyRows = await fetchShopifyStockByLocation();
+  const shopifyRows = prefetched ?? (await fetchShopifyStockByLocation());
   report.shopifySkuCount = shopifyRows.length;
   const shopifyBySku = new Map(shopifyRows.map((r) => [r.sku, r.available]));
 
@@ -106,10 +133,13 @@ export async function runStockSync(dryRun = true): Promise<StockSyncReport> {
   // --- toptantr: per-HANDLE (bkz. dosya başı notu) ---
   const toptantrListings = await prisma.toptantrListing.findMany({
     where: { status: "success" },
-    select: { shopifyHandle: true, toptantrBarcode: true },
+    select: { shopifyHandle: true, toptantrBarcode: true, manualTiers: true },
   });
 
   for (const listing of toptantrListings) {
+    // Elle kademe girilmiş handle'ların stoğu elle yönetiliyor (Shopify'da stok 0 görünse bile) —
+    // otomatik kapatma bunlara dokunmaz.
+    if (Array.isArray(listing.manualTiers) && listing.manualTiers.length > 0) continue;
     const variants = await prisma.product.findMany({
       where: { shopifyHandle: listing.shopifyHandle },
       select: { offerId: true, shopifyVariantId: true, barcode: true },
@@ -162,4 +192,14 @@ export async function runStockSync(dryRun = true): Promise<StockSyncReport> {
   }
 
   return report;
+}
+
+// Zamanlanmış iş (bkz. sync-orders-cron.ts): Shopify stoğunu BİR kez çeker, DB'ye (Ürünler listesi
+// stok kolonu) yazar, ardından stoğu biten ürünleri Ozon/toptantr'da kapatır. Gerçek miktar push'u
+// hâlâ env bayraklarına bağlı (runStockSync içinde).
+export async function runScheduledStockSync(): Promise<{ db: { shopifySkus: number; updated: number }; report: StockSyncReport }> {
+  const rows = await fetchShopifyStockByLocation();
+  const db = await syncShopifyStockToDb(rows);
+  const report = await runStockSync(false, rows);
+  return { db, report };
 }

@@ -83,6 +83,12 @@ model Product {
   // varyant stoğu 0'sa override'lı kademeler de 0 gönderilir (kapanır). null = türetme.
   toptantrStockOverride Int?
 
+  // Shopify İstanbul deposundaki (SHOPIFY_STOCK_LOCATION_ID) "available" stok — SADECE bilgi/filtre
+  // amaçlı (Ürünler listesi). stockQuantity'den farklı: o "Ozon'a en son gönderilen" adet, bu ise
+  // Shopify'daki gerçek sayım. Shopify'da yoksa (Ozon-orijinli ürün) null. Bkz. syncShopifyStockToDb.
+  shopifyStock         Int?
+  shopifyStockSyncedAt DateTime?
+
   orderItems OrderItem[]
 
   @@index([shopifyHandle])
@@ -109,6 +115,11 @@ model ToptantrListing {
   translatedTitle   String? // Gemini Türkçe çevirisi — bir daha çevrilmesin diye önbelleğe alınıyor
   shortDescription  String?
   fullDescription   String?
+  // Elle kademe (2026-10-09, kullanıcı kararı): tekli perakende ürünler için toptantr'a gidecek
+  // kademeler elle girilir — [{ tier: "Paket" | "Koli", itemPerPackage, stock }]. Dolu ve boş
+  // değilse varyant sıralaması/Shopify stoğu YERİNE bunlar kullanılır ve stok senkronu bu handle'a
+  // dokunmaz (stok elle yönetiliyor). Bkz. src/toptantr/manualTiers.ts.
+  manualTiers       Json?
   status            String    @default("draft") // draft | pending | success | failed
   lastError         String?
   lastSyncedAt      DateTime?

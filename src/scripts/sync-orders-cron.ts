@@ -1,7 +1,8 @@
 import cron from "node-cron";
 import { syncFbsOrders } from "../modules/orders/orders.service";
 import { syncTransactionsForDateRange } from "../modules/finance/finance.service";
-import { backfillMissingStock } from "../modules/products/products.service";
+import { startShopifyImportJob, getShopifyImportJobStatus } from "../shopify/importJob";
+import { runScheduledStockSync } from "../shopify/stockSync";
 import { pollAseShipmentStatuses } from "../ase/statusPolling";
 import { syncReturns, syncRfbsReturns } from "../modules/returns/returns.service";
 import { prisma } from "../db/prisma";
@@ -11,8 +12,6 @@ import { INVOICE_CLAIM_SENTINEL } from "../parasut/orderInvoice";
 import { sendOrderToAse } from "../ase/orderShipment";
 import { fetchAndCacheLabel } from "../ozon/labelCache";
 import { recheckDisputedShipping } from "../modules/finance/shipping-dispute.service";
-
-const DEFAULT_STOCK = 100;
 
 // PM2 altında ayrı bir process olarak sürekli çalışır (bkz. ecosystem.config.cjs "ozon-sync-cron"),
 // her 15 dakikada bir son 30 günün sipariş + finans verisini çeker. NOT: since/to, Ozon'un
@@ -30,15 +29,6 @@ async function runSync() {
     console.log(`[sync-orders-cron] ${new Date().toISOString()} — ${orders.length} sipariş, ${txCount} finans işlemi senkronize edildi`);
   } catch (error) {
     console.error(`[sync-orders-cron] ${new Date().toISOString()} — hata:`, error);
-  }
-
-  try {
-    const { total, updated } = await backfillMissingStock(DEFAULT_STOCK);
-    if (total > 0) {
-      console.log(`[sync-orders-cron] ${new Date().toISOString()} — stok eksik ${total} ürün bulundu, ${updated} tanesi düzeltildi`);
-    }
-  } catch (error) {
-    console.error(`[sync-orders-cron] ${new Date().toISOString()} — stok backfill hatası:`, error);
   }
 }
 
@@ -265,6 +255,33 @@ async function runLabelBackfill() {
 // DEĞİL) — bu yüzden dakikaları birbirinden AYIRARAK (eşzamanlı yük yerine art arda, seyrek yük)
 // kendi kendine çarpışmayı azaltıyoruz. Not: GİB'in kendi e-Arşiv onay süresi bizim kontrolümüzde
 // değil — bu değişiklik SADECE bizim kendi isteklerimizin üst üste binmesini önlüyor.
+// Shopify → ürün/stok senkronu (2026-10-09, kullanıcı kararı): mesai içinde (İstanbul saati
+// 09:00-18:00) günde 4 kez — 09, 12, 15, 18. Önce yeni/stoklu ürünler içe aktarılır (hiçbir
+// pazaryerine bağlı olmadan "draft" gelir) ve stok DB'ye yazılır; sonra stoğu biten ürünler
+// Ozon/toptantr'da kapatılır. Mesai dışında çalışmaz.
+async function runShopifySync() {
+  try {
+    const started = startShopifyImportJob();
+    if (started.started) {
+      // importJob kendi içinde 8-10 dk sürebiliyor; bitmesini bekle (Shopify hesap başına tek bulk
+      // operation — stok senkronu onunla aynı anda çalışamaz).
+      for (let i = 0; i < 180; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10_000));
+        if (getShopifyImportJobStatus().state !== "running") break;
+      }
+    }
+    const status = getShopifyImportJobStatus();
+    if (status.state === "error") console.error(`[sync-orders-cron] Shopify içe aktarma hatası: ${status.message}`);
+    const { db, report } = await runScheduledStockSync();
+    console.log(
+      `[sync-orders-cron] ${new Date().toISOString()} — Shopify stok senkronu: ${db.updated} ürün stoğu DB'ye yazıldı; Ozon kapatılan ${report.ozon.closed} (hata ${report.ozon.errors.length}), toptantr kapatılan ${report.toptantr.closed} (hata ${report.toptantr.errors.length})`,
+    );
+  } catch (error) {
+    console.error(`[sync-orders-cron] ${new Date().toISOString()} — Shopify senkronu hatası:`, error);
+  }
+}
+
+cron.schedule("0 9,12,15,18 * * *", runShopifySync, { timezone: "Europe/Istanbul" });
 cron.schedule("*/15 * * * *", runSync);
 cron.schedule("*/15 * * * *", runReturnsSync);
 cron.schedule("0 */3 * * *", runAsePoll);

@@ -65,14 +65,12 @@ export default async function ProductsPage({
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", tableLayout: "fixed", minWidth: 1140 }}>
+          <table style={{ width: "100%", tableLayout: "fixed", minWidth: 940 }}>
             <colgroup>
               <col style={{ width: 64 }} />
               <col style={{ width: 210 }} />
               <col />
               <col style={{ width: 80 }} />
-              <col style={{ width: 110 }} />
-              <col style={{ width: 100 }} />
               <col style={{ width: 70 }} />
               <col style={{ width: 90 }} />
               <col style={{ width: 130 }} />
@@ -84,8 +82,6 @@ export default async function ProductsPage({
                 <th style={{ whiteSpace: "nowrap" }}>SKU</th>
                 <th>Ad</th>
                 <th style={{ whiteSpace: "nowrap", textAlign: "center" }}>Varyant</th>
-                <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Satış</th>
-                <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Maliyet</th>
                 <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Stok</th>
                 <th style={{ whiteSpace: "nowrap" }}>Durum</th>
                 <th style={{ whiteSpace: "nowrap" }}>Bağlantı</th>
@@ -115,10 +111,6 @@ export default async function ProductsPage({
                     <td style={{ textAlign: "center" }}>
                       <span className="badge" title={`${variantCount} varyant`}>{variantCount}</span>
                     </td>
-                    <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
-                      {p.price} {p.currencyCode}
-                    </td>
-                    <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>{p.costPrice ? `${p.costPrice} ${p.currencyCode}` : <span className="hint">—</span>}</td>
                     <td style={{ textAlign: "right" }}>
                       {p.shopifyStock == null ? (
                         <span className="hint">—</span>

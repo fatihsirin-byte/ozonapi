@@ -11,9 +11,7 @@ export const TOPTANTR_COMBINATION_TIERS = [
 
 export type TierName = (typeof TOPTANTR_COMBINATION_TIERS)[number]["name"];
 
-// Display/Paket ekstra %10, Box/Koli (ve Palet, aynı toplu kademe) ekstra %5 marj alıyor —
-// VPS'teki orijinal projeyle aynı (toplu alım perakendeden ucuz kalsın diye).
-const TIER_EXTRA_MARGIN_PERCENT: Record<TierName, number> = { Adet: 0, Paket: 10, Koli: 5, Palet: 5 };
+// Kademe ekstra marjı kaldırıldı: tüm kademeler maliyet × %10 (bkz. pricing.ts).
 
 // "Tekli" (1 adet) Adet-kademesi varyantlar toptantr'a gönderilmez — toptantr toptan pazaryeri,
 // tekil parça satışı için değil — MECAZ hariç: tek başına zaten 1kg+ olan bir çuval/torba (unitsInPack
@@ -108,7 +106,7 @@ export function describeVariants(ranked: RankedVariant[], stockBySku: Map<string
     stockAvailable: stockBySku.get(product.offerId) ?? 0,
     stockOverride: product.toptantrStockOverride ?? null,
     costUsd: Number(product.costPrice ?? 0),
-    sellingPriceTl: usdToTl(product.costPrice, TIER_EXTRA_MARGIN_PERCENT[attributeName] ?? 0),
+    sellingPriceTl: usdToTl(product.costPrice),
     sendable: isTierSendable(attributeName, product),
     approved: product.toptantrApproved,
   }));

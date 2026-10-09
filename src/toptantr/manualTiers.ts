@@ -42,6 +42,8 @@ export function validateManualTiers(input: unknown): ManualTier[] {
   return tiers;
 }
 
+// NOT: Buradaki varyantlar (Paket/Koli) single (tekli) adetten türetilmiştir: fiyat/maliyet/ağırlık taban ürün × paket içi adet.
+// Stoğu da Shopify ezmez (stockSync elle kademeli handle'lara dokunmaz), stok elle girilen değerdir.
 // Elle kademeleri, mevcut gönderim akışının (buildPayload/pushStockAndPrice) beklediği şekle çevirir:
 // taban (tekli) ürünün kopyası üzerinden sentetik varyantlar. Barkod: taban barkod + kademe eki
 // (toptantr kombinasyon barkodları benzersiz olmalı). Maliyet ve ağırlık paket içi adetle çarpılır.

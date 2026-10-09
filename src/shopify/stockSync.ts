@@ -133,7 +133,7 @@ export async function runStockSync(dryRun = true, prefetched?: ShopifyStockRow[]
   // --- toptantr: per-HANDLE (bkz. dosya başı notu) ---
   const toptantrListings = await prisma.toptantrListing.findMany({
     where: { status: "success" },
-    select: { shopifyHandle: true, toptantrBarcode: true, manualTiers: true },
+    select: { shopifyHandle: true, toptantrBarcode: true, toptantrProductId: true, manualTiers: true },
   });
 
   for (const listing of toptantrListings) {
@@ -157,8 +157,9 @@ export async function runStockSync(dryRun = true, prefetched?: ShopifyStockRow[]
       continue;
     }
 
+    // toptantrProductId varsa barkod olmasa da yeterli; yoksa barkod aramasında doğrulama client'ta.
     const barcode = listing.toptantrBarcode ?? barcodeOf(variants[0]);
-    if (!barcode) {
+    if (!barcode && !listing.toptantrProductId) {
       report.toptantr.skippedNoBarcode++;
       continue;
     }
@@ -169,7 +170,7 @@ export async function runStockSync(dryRun = true, prefetched?: ShopifyStockRow[]
     }
 
     try {
-      const found = await findProductByBarcode(barcode);
+      const found = await findProductByBarcode(barcode || null, { productId: listing.toptantrProductId });
       const combinations = found?.productAttributeCombinations ?? [];
       if (combinations.length === 0) {
         report.toptantr.errors.push({ handle: listing.shopifyHandle, error: "toptantr'da barkoda karşılık gelen kombinasyon bulunamadı" });

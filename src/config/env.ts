@@ -61,7 +61,7 @@ export const env = {
   // (2026-09-26). Auth: username/password ile /sapi/v1/token'dan Bearer token alınıyor (API key
   // değil) — bkz. src/toptantr/client.ts. required() ile zorunlu tutulmuyor, ozonapi'nin toptantr'la
   // hiç alakasız kısımları (Ozon/ASE/Paraşüt) bu değerler eksikken de çalışabilsin diye.
-  toptantrBaseUrl: process.env.TOPTANTR_BASE_URL ?? "https://api.toptantr.com",
+  toptantrBaseUrl: process.env.TOPTANTR_BASE_URL ?? "https://sapi.toptantr.com",
   toptantrUsername: process.env.TOPTANTR_USERNAME,
   toptantrPassword: process.env.TOPTANTR_PASSWORD,
   // Fiyatlandırma — VPS'teki orijinal projeyle aynı formül (TL = USD * kur * (1 + marj%)).

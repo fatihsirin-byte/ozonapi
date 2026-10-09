@@ -21,9 +21,14 @@ function sleep(ms: number) {
 // Barkod, ürün toptantr'a POST edildikten hemen sonra ARAMADA çıkmayabiliyor — indekslenmesi
 // birkaç dakika sürebiliyor (VPS'teki orijinal projede ampirik olarak doğrulandı). ~1 dakika
 // boyunca artan aralıklarla tekrar dener, hâlâ bulunamazsa "pending" (hata değil) sayılır.
-async function findProductByBarcodeWithRetry(barcode: string, attempts = 7, delayMs = 8000) {
+async function findProductByBarcodeWithRetry(
+  barcode: string | null,
+  productId: string | null = null,
+  attempts = 7,
+  delayMs = 8000,
+) {
   for (let i = 0; i < attempts; i++) {
-    const found = await findProductByBarcode(barcode);
+    const found = await findProductByBarcode(barcode, { productId });
     if (found) return found;
     if (i < attempts - 1) await sleep(delayMs);
   }
@@ -148,11 +153,12 @@ function buildPayload(params: {
 // src/toptantr/client.ts'teki ToptantrCombinationStockUpdate yorumu (createProduct'takinden
 // FARKLI bir şekil).
 async function pushStockAndPrice(
-  barcode: string,
+  barcode: string | null,
+  productId: string | null,
   sendableRanked: ReturnType<typeof rankVariants>,
   stockBySku: Map<string, number>,
 ) {
-  const found = await findProductByBarcodeWithRetry(barcode);
+  const found = await findProductByBarcodeWithRetry(barcode, productId);
   if (!found) {
     return { toptantrProductId: null as string | null, combinationsUpdated: 0, combinationsPending: true };
   }
@@ -257,13 +263,13 @@ export async function connectHandleToToptantr(input: ConnectHandleInput): Promis
       const isDuplicateBarcode = /barkod|barcode/i.test(message) && /kullanamaz|zaten|tanımlı|başka/i.test(message);
       if (!isDuplicateBarcode) throw createErr;
 
-      const existingProduct = await findProductByBarcodeWithRetry(barcode);
+      const existingProduct = await findProductByBarcodeWithRetry(barcode, null);
       if (!existingProduct) throw createErr;
       await updateProduct(existingProduct.id, payload);
       toptantrProductId = existingProduct.id;
     }
 
-    const stockResult = await pushStockAndPrice(barcode, sendableRanked, stockBySku);
+    const stockResult = await pushStockAndPrice(barcode, toptantrProductId, sendableRanked, stockBySku);
 
     const updated = await prisma.toptantrListing.update({
       where: { shopifyHandle: input.handle },
@@ -298,9 +304,10 @@ export async function refreshToptantrHandle(handle: string): Promise<ToptantrLis
     throw new Error("Gönderilecek onaylı varyant yok");
   }
 
-  const barcode = listing.toptantrBarcode ?? barcodeOf(sendableRanked[0].product);
+  // toptantrProductId varsa tek başına yeterli (toptantrBarcode boş kayıtlar); barkod yedek doğrulama.
+  const barcode = listing.toptantrBarcode ?? (listing.toptantrProductId ? null : barcodeOf(sendableRanked[0].product));
   try {
-    const result = await pushStockAndPrice(barcode, sendableRanked, stockBySku);
+    const result = await pushStockAndPrice(barcode, listing.toptantrProductId,sendableRanked, stockBySku);
     return prisma.toptantrListing.update({
       where: { shopifyHandle: handle },
       data: {

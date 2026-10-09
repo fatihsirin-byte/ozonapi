@@ -184,6 +184,7 @@ export async function updateProduct(id: string, payload: Partial<ToptantrProduct
 
 export interface ToptantrFoundCombination {
   id: string;
+  barcode?: string;
   attributes?: { id: number; name: string }[];
   sellingPrice?: number;
   taxCategory?: number;
@@ -192,14 +193,46 @@ export interface ToptantrFoundCombination {
 export interface ToptantrFoundProduct {
   id: string;
   productCode?: string;
+  barcode?: string;
   productAttributeCombinations?: ToptantrFoundCombination[];
 }
 
-export async function findProductByBarcode(barcode: string): Promise<ToptantrFoundProduct | null> {
+function normBarcode(b: string | undefined | null): string {
+  return (b ?? "").trim().toLowerCase();
+}
+
+// Karar: arama sonucu content[0] körlemesine alınmıyordu -> yanlış ürüne stok/fiyat yazma riski.
+// Artık (1) toptantrProductId biliniyorsa önce ID ile aranır ve dönen id doğrulanır; (2) olmazsa
+// barkod aramasında dönen sonuçlardan ürün/kombinasyon barkodu birebir tutan seçilir. Doğrulanamayan
+// sonuç null döner (çağıran "bulunamadı/pending" sayar), asla tahminle ilk sonuç alınmaz.
+export async function findProductByBarcode(
+  barcode: string | null | undefined,
+  opts: { productId?: string | null } = {},
+): Promise<ToptantrFoundProduct | null> {
+  if (opts.productId) {
+    const byId = await getWithBody<{ content?: ToptantrFoundProduct[] }>("/sapi/v1/products", {
+      productSearch: { id: opts.productId, page: 1, size: 10 },
+    }).catch(() => ({ content: [] as ToptantrFoundProduct[] }));
+    const hit = byId.content?.find((p) => p.id === opts.productId);
+    if (hit) return hit;
+    // ID ile bulunamadıysa (arama ucu id filtresini desteklemiyor olabilir) barkoda düşülür,
+    // ama sonuç yine ID ile doğrulanır.
+    if (!barcode) return null;
+    const byBarcodeData = await getWithBody<{ content?: ToptantrFoundProduct[] }>("/sapi/v1/products", {
+      productSearch: { barcode, page: 1, size: 10 },
+    });
+    return byBarcodeData.content?.find((p) => p.id === opts.productId) ?? null;
+  }
+  if (!barcode) return null;
+  const want = normBarcode(barcode);
   const data = await getWithBody<{ content?: ToptantrFoundProduct[] }>("/sapi/v1/products", {
     productSearch: { barcode, page: 1, size: 10 },
   });
-  return data.content?.[0] ?? null;
+  return (
+    data.content?.find(
+      (p) => normBarcode(p.barcode) === want || (p.productAttributeCombinations ?? []).some((c) => normBarcode(c.barcode) === want),
+    ) ?? null
+  );
 }
 
 // createProduct'taki ToptantrCombinationInput (barcode/itemPerPackage/attributes) ile KARIŞTIRMA:

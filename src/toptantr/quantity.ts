@@ -71,7 +71,7 @@ export interface VariantTierView {
   approved: boolean;
 }
 
-// Sadece Adet kademesinin stockQuantity'si gerçek sayımı yansıtıyor (Ozon'a hep tekli
+// Varyantın kendi shopifyStock'u varsa o kullanılır; yoksa Adet kademesinin stoğu gerçek sayımı yansıtıyor (Ozon'a hep tekli
 // gönderildiği için) — Paket/Koli/Palet kendi stockQuantity'sini hiç saymıyor, paylaşımlı
 // fiziksel havuzdan floor(Adet stok / unitsInPack) ile türetiliyor. Güvenlik payı yok, tam
 // floor değeri kullanılıyor (kullanıcı kararı, bkz. handoff notu).
@@ -81,7 +81,8 @@ export interface VariantTierView {
 // 0 ise override'lı kademeler de 0'a düşer (kullanıcı kararı, 2026-10-06).
 export function computeTierStock(ranked: RankedVariant[]): Map<string, number> {
   const adet = ranked.find((r) => r.attributeName === "Adet");
-  const adetStock = adet?.product.stockQuantity ?? 0;
+  // Adet taban stoğu: Shopify stoğu (shopifyStock) esas; hiç senkronlanmamışsa eski stockQuantity'ye düş.
+  const adetStock = adet?.product.shopifyStock ?? adet?.product.stockQuantity ?? 0;
   const stockBySku = new Map<string, number>();
   for (const r of ranked) {
     const override = r.product.toptantrStockOverride;
@@ -89,6 +90,10 @@ export function computeTierStock(ranked: RankedVariant[]): Map<string, number> {
       stockBySku.set(r.product.offerId, adetStock);
     } else if (override !== null && override !== undefined) {
       stockBySku.set(r.product.offerId, adetStock > 0 ? override : 0);
+    } else if (r.product.shopifyStock !== null && r.product.shopifyStock !== undefined) {
+      // Karar: varyantın KENDİ Shopify stoğu varsa (Koli/Paket Shopify'da ayrı sayılıyorsa) o gerçek
+      // sayımdır, Adet'ten türetilen tahminin önüne geçer.
+      stockBySku.set(r.product.offerId, Math.max(0, r.product.shopifyStock));
     } else {
       const qty = r.quantity || 1;
       stockBySku.set(r.product.offerId, Math.floor(adetStock / qty));

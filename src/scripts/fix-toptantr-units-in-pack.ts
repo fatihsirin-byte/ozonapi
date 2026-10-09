@@ -16,7 +16,7 @@ async function main() {
     // Elle kademeli listing'lerde kademe adetleri DB varyantı değil elle girilen değerdir — atla.
     if (parseManualTiers(l.manualTiers).length > 0) continue;
     try {
-      const { products, found } = await lookupToptantr(l.shopifyHandle, l.toptantrBarcode);
+      const { products, found } = await lookupToptantr(l.shopifyHandle, l.toptantrBarcode, l.toptantrProductId);
       if (!found) { console.log(`[YOK] ${l.shopifyHandle}: toptantr'da bulunamadı`); continue; }
       // Kademe -> DB varyantı: mevcut sıralama mantığıyla (rankVariants), kademe attribute id'sine göre.
       const ranked = rankVariants(products);

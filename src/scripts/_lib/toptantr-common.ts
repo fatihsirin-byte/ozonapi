@@ -14,6 +14,11 @@ export function num(v: unknown): number | null {
 export async function lookupToptantr(handle: string, toptantrBarcode: string | null, toptantrProductId?: string | null) {
   const products = await prisma.product.findMany({ where: { shopifyHandle: handle }, orderBy: { variantPosition: "asc" } });
   // Kayıtlı barkod, yoksa tüm varyant barkodları/SKU'ları sırayla denenir (ilk bulunan döner).
+  // ID biliniyorsa doğrudan ID ile bul (barkod aramaları toptantr'da sonuç vermiyor, bkz. client.ts).
+  if (toptantrProductId) {
+    const byId = await findProductByBarcode(null, { productId: toptantrProductId });
+    if (byId) return { products, barcode: toptantrBarcode, found: byId };
+  }
   const candidates = [...new Set([toptantrBarcode, ...products.map(barcodeOf), ...products.map((p) => p.offerId.trim())].filter((x): x is string => !!x))];
   for (const barcode of candidates) {
     const found = await findProductByBarcode(barcode, { productId: toptantrProductId ?? undefined });

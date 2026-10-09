@@ -27,7 +27,7 @@ async function main() {
     n++;
     const label = [...st].join("/");
     try {
-      const { found } = await lookupToptantr(l.shopifyHandle, l.toptantrBarcode);
+      const { found } = await lookupToptantr(l.shopifyHandle, l.toptantrBarcode, l.toptantrProductId);
       const stocks = combosOf(found).map((c) => comboStock(c));
       console.log(`KAPATILACAK ${l.shopifyHandle} shopify=${label} toptantrId=${l.toptantrProductId} kombinasyon=${combosOf(found).length} stoklar=${JSON.stringify(stocks)}`);
       if (apply) console.log(`  -> ${await closeListing(l.shopifyHandle, found, `Shopify ${label}`)} kombinasyon 0'landı`);

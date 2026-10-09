@@ -11,12 +11,12 @@ export function num(v: unknown): number | null {
 }
 
 // toptantr'daki ürünü bulur: önce kayıtlı toptantrBarcode, yoksa handle'ın ilk varyantının barkodu.
-export async function lookupToptantr(handle: string, toptantrBarcode: string | null) {
+export async function lookupToptantr(handle: string, toptantrBarcode: string | null, toptantrProductId?: string | null) {
   const products = await prisma.product.findMany({ where: { shopifyHandle: handle }, orderBy: { variantPosition: "asc" } });
   // Kayıtlı barkod, yoksa tüm varyant barkodları/SKU'ları sırayla denenir (ilk bulunan döner).
   const candidates = [...new Set([toptantrBarcode, ...products.map(barcodeOf), ...products.map((p) => p.offerId.trim())].filter((x): x is string => !!x))];
   for (const barcode of candidates) {
-    const found = await findProductByBarcode(barcode);
+    const found = await findProductByBarcode(barcode, { productId: toptantrProductId ?? undefined });
     if (found) return { products, barcode, found };
   }
   return { products, barcode: candidates[0] ?? null, found: null };

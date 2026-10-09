@@ -22,7 +22,7 @@ async function main() {
     const l = await prisma.toptantrListing.findUnique({ where: { shopifyHandle: h } });
     if (!l || !l.toptantrProductId) { console.log(`[YOK] ${h}: toptantr listing'i yok`); continue; }
     try {
-      const { found } = await lookupToptantr(h, l.toptantrBarcode);
+      const { found } = await lookupToptantr(h, l.toptantrBarcode, l.toptantrProductId);
       console.log(`KAPATILACAK ${h} status=${l.status} kombinasyon=${combosOf(found).length} stoklar=${JSON.stringify(combosOf(found).map(comboStock))}`);
       if (apply) console.log(`  -> ${await closeListing(h, found, "elle kapatıldı")} kombinasyon 0'landı`);
     } catch (e) {

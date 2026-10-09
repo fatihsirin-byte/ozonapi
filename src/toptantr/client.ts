@@ -210,18 +210,18 @@ export async function findProductByBarcode(
   opts: { productId?: string | null } = {},
 ): Promise<ToptantrFoundProduct | null> {
   if (opts.productId) {
-    const byId = await getWithBody<{ content?: ToptantrFoundProduct[] }>("/sapi/v1/products", {
-      productSearch: { id: opts.productId, page: 1, size: 10 },
-    }).catch(() => ({ content: [] as ToptantrFoundProduct[] }));
-    const hit = byId.content?.find((p) => p.id === opts.productId);
-    if (hit) return hit;
-    // ID ile bulunamadıysa (arama ucu id filtresini desteklemiyor olabilir) barkoda düşülür,
-    // ama sonuç yine ID ile doğrulanır.
-    if (!barcode) return null;
-    const byBarcodeData = await getWithBody<{ content?: ToptantrFoundProduct[] }>("/sapi/v1/products", {
-      productSearch: { barcode, page: 1, size: 10 },
-    });
-    return byBarcodeData.content?.find((p) => p.id === opts.productId) ?? null;
+    // Canlı doğrulama (2026-10-09): arama ucu `id` filtresini YOK SAYIYOR (ilk 5 ürünü döner) ve ürün
+    // barkodu (Shopify barkodu) toptantr'da kayıtlı barkodla eşleşmiyor (0 sonuç). Hesapta ~72 ürün var,
+    // tek sayfada (size 100) geliyor; bu yüzden sayfalayıp id'si birebir tutanı seçiyoruz.
+    for (let page = 1; page <= 20; page++) {
+      const data = await getWithBody<{ content?: ToptantrFoundProduct[]; totalPages?: number }>("/sapi/v1/products", {
+        productSearch: { page, size: 100 },
+      });
+      const hit = data.content?.find((p) => String(p.id) === String(opts.productId));
+      if (hit) return hit;
+      if ((data.content?.length ?? 0) < 100 || page >= (data.totalPages ?? 1)) break;
+    }
+    return null;
   }
   if (!barcode) return null;
   const want = normBarcode(barcode);
